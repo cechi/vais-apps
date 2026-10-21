@@ -17,7 +17,9 @@ actions!(
         NextTab,
         PrevTab,
         ToggleTheme,
+        ChooseTheme,
         ToggleOperationsPanel,
+        ToggleSidebar,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -63,6 +65,10 @@ actions!(
         EditPath,
         ToggleHidden,
         Reload,
+        CopyPath,
+        OpenTerminal,
+        ExpandEntry,
+        CollapseEntry,
     ]
 );
 
@@ -108,7 +114,9 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-pagedown", NextTab, w),
         KeyBinding::new("ctrl-pageup", PrevTab, w),
         KeyBinding::new("secondary-shift-d", ToggleTheme, w),
+        KeyBinding::new("secondary-shift-t", ChooseTheme, w),
         KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
+        KeyBinding::new("secondary-b", ToggleSidebar, w),
         KeyBinding::new("secondary-=", ZoomIn, w),
         KeyBinding::new("secondary-+", ZoomIn, w),
         KeyBinding::new("secondary--", ZoomOut, w),
@@ -158,6 +166,10 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-l", EditPath, p),
         KeyBinding::new(hidden_key, ToggleHidden, p),
         KeyBinding::new("secondary-r", Reload, p),
+        KeyBinding::new("secondary-shift-c", CopyPath, p),
+        KeyBinding::new("f9", OpenTerminal, p),
+        KeyBinding::new("right", ExpandEntry, p),
+        KeyBinding::new("left", CollapseEntry, p),
     ];
     if mac {
         // Finder habits: Cmd+Up goes to the parent, Cmd+Down opens.

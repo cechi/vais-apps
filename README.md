@@ -64,22 +64,40 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+A` / `Ctrl+Shift+A` | Mark all / invert marks |
 | `Esc` | Cancel path edit, dismiss error, or clear marks |
 | `Enter` | Enter directory (`..` goes up) |
+| `→` / `←` | Expand the directory under the cursor inline (tree view) / collapse it, or jump to the parent row |
 | `Backspace` / `Alt+←` | Parent directory / back in history |
 | `Ctrl+L` | Edit the path (`~` expands); `Enter` to go, `Esc` to cancel |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload |
+| `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
+| `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
 | `F5` / `F6` | Copy / move the marked (or cursor) entries to the other panel; the destination is editable |
 | `F2` / `Shift+F6` | Rename the entry under the cursor |
 | `F7` | New folder |
 | `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently |
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
 | `Ctrl+J` | Show / hide the operations panel |
-| `Ctrl+Shift+D` | Toggle light / dark theme |
+| `Ctrl+B` | Show / hide the places sidebar (also the toggle at the left of the status bar) |
+| `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory) |
+| `Ctrl+Shift+D` | Toggle light / dark |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar) |
 | `Ctrl+Q` / `F10` | Quit |
 
-Mouse: click selects a row and focuses its panel, double-click opens, dragging the
-dividers resizes the grid, tabs are clickable with a close button and a `+`.
+Mouse: click selects a row and focuses its panel, double-click opens, `Ctrl+click` toggles a
+mark, `Shift+click` marks the range from the cursor, dragging from an unmarked row or from the
+empty area draws a selection rectangle (plain drag replaces the marks, `Ctrl`/`Shift` drag adds
+to them, the list scrolls when you drag past its edge, a plain click in the empty area clears
+the marks), dragging the dividers resizes the grid,
+tabs are clickable with a close button and a `+`, and can be reordered by dragging. Drag marked entries (or a single row) onto
+a directory row, `..`, or the empty area of any panel to drop them there; `drop_action` in
+the config decides what happens: `ask` (default, a small Move / Copy menu at the drop point), `move` or `copy`. The
+function key bar above the status bar has a button per F-key; hold Shift to see the
+Shift variants (F6 Rename, F8 permanent delete). Directories have a chevron that expands
+them inline as a tree (any depth); marks and the cursor follow paths across reloads, and
+operations work on nested entries. Right-click on an entry opens a context
+menu (open, copy/move, rename, marks, trash/delete, copy path, new folder, terminal);
+right-click on empty panel space offers the panel actions (new folder, terminal, marks,
+path, hidden files, reload, up, back).
 
 File operations act on the marked entries of the active panel (or the entry under the
 cursor), target the previously focused panel and ask before overwriting (overwrite or
@@ -98,6 +116,24 @@ its layout, divider positions as fractions and each panel's path, hidden-files t
 sort. A version 1 file (single layout) is migrated into one tab. A missing or invalid file
 falls back to defaults with a logged warning (`RUST_LOG=warn`).
 
+## Sidebar
+
+`Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
+home and the standard user folders (XDG user dirs, else `~/Desktop` & co.), the root and
+mounted volumes (`/mnt`, `/media`, `/run/media`, `/home`, macOS `/Volumes`, Windows drives).
+Clicking a place navigates the active panel; the place matching the panel's directory is
+highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and
+function key bar shift right while it is open; the status bar keeps the full width.
+
+## Themes
+
+Besides the built-in light and dark themes, any [gpui-kit theme file](https://gpui-kit.com/component/theme)
+(JSON, a `themes` array with `name`, `mode`, `colors`, optional fonts and radius) placed in
+`~/.config/vais-commander/themes/` is loaded and watched, so edits apply while the app runs.
+`Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"` in the config
+(`light`, `dark` and `system` are the built-ins). Themes are personal and not part of this
+repository.
+
 ## Layout of the code
 
 ```
@@ -112,4 +148,6 @@ src/ops/           copy / move / delete with byte-level progress and cancel; man
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)
 src/keymap.rs      actions and default bindings
 src/config.rs      TOML config
+src/theme.rs       theme directory watching and applying a theme by name
+src/sidebar.rs     places sidebar (user folders, volumes)
 ```

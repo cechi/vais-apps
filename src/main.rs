@@ -8,14 +8,16 @@ mod ops;
 mod ops_panel;
 mod panel;
 mod platform;
+mod settings;
+mod sidebar;
 mod tabs;
+mod theme;
 mod ui;
 
-use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::*;
 
 use crate::app::Workspace;
-use crate::config::{Config, ThemeChoice};
+use crate::config::Config;
 
 fn main() {
     env_logger::init();
@@ -23,7 +25,13 @@ fn main() {
 
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
+        settings::init(&config, cx);
         cx.bind_keys(keymap::bindings());
+        // File lists are long; keep their scrollbars visible instead of fading out.
+        gpui_kit::component::theme::Theme::set_scrollbar_mode(
+            gpui_kit::component::scroll::ScrollbarMode::Always,
+            cx,
+        );
 
         let window_bounds = config.window.map(|w| {
             let bounds = Bounds {
@@ -47,13 +55,9 @@ fn main() {
             ..Default::default()
         };
 
-        let theme = config.theme;
+        let theme = config.theme.clone();
         open_window(options, cx, move |window, cx| {
-            match theme {
-                ThemeChoice::Light => Theme::change(ThemeMode::Light, Some(window), cx),
-                ThemeChoice::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
-                ThemeChoice::System => Theme::sync_system_appearance(Some(window), cx),
-            }
+            theme::apply(&theme, Some(window), cx);
             let workspace = cx.new(|cx| Workspace::new(config, window, cx));
             workspace.update(cx, |ws, cx| ws.focus_active(window, cx));
             workspace

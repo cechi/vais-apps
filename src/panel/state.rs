@@ -1,7 +1,7 @@
 //! Pure, testable state of one file panel: entries, cursor, marks, history.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::fs::{Entry, Sort};
 
@@ -21,6 +21,8 @@ pub struct PanelState {
     pub history: Vec<PathBuf>,
     pub error: Option<String>,
     pub loading: bool,
+    /// Directories shown expanded inline (tree view).
+    pub expanded: BTreeSet<PathBuf>,
 }
 
 impl PanelState {
@@ -36,7 +38,40 @@ impl PanelState {
             history: Vec::new(),
             error: None,
             loading: false,
+            expanded: BTreeSet::new(),
         }
+    }
+
+    pub fn is_expanded(&self, ix: usize) -> bool {
+        self.entries
+            .get(ix)
+            .is_some_and(|e| self.expanded.contains(&e.path))
+    }
+
+    /// Expand or collapse the directory at `ix`; returns its path when it is
+    /// a directory (the caller then reloads the listing).
+    pub fn toggle_expanded(&mut self, ix: usize) -> Option<PathBuf> {
+        let entry = self.entries.get(ix)?;
+        if entry.is_parent || !entry.is_dir() {
+            return None;
+        }
+        let path = entry.path.clone();
+        if !self.expanded.remove(&path) {
+            self.expanded.insert(path.clone());
+        } else {
+            // Collapsing a directory also forgets what was expanded inside it.
+            self.expanded.retain(|p| !p.starts_with(&path));
+        }
+        Some(path)
+    }
+
+    /// Index of the row the entry at `ix` is nested under, if any.
+    pub fn parent_index(&self, ix: usize) -> Option<usize> {
+        let depth = self.entries.get(ix)?.depth;
+        if depth == 0 {
+            return None;
+        }
+        (0..ix).rev().find(|&i| self.entries[i].depth < depth)
     }
 
     pub fn len(&self) -> usize {
@@ -118,6 +153,14 @@ impl PanelState {
             .collect();
     }
 
+    /// Set the marks to `base` plus `rows` (the rubber band selection).
+    pub fn mark_rows(&mut self, rows: impl IntoIterator<Item = usize>, base: &BTreeSet<usize>) {
+        let mut marked = base.clone();
+        marked.extend(rows);
+        self.marked = marked.into_iter().filter(|&i| self.markable(i)).collect();
+        self.anchor = None;
+    }
+
     pub fn clear_marks(&mut self) {
         self.marked.clear();
         self.anchor = None;
@@ -150,16 +193,32 @@ impl PanelState {
 
     /// Replace the listing. The cursor goes to `select` when found; otherwise a
     /// refresh of the same directory keeps its position (so deleting an entry
-    /// lands on the next one) and a new directory starts at the top.
-    pub fn set_entries(&mut self, path: PathBuf, entries: Vec<Entry>, select: Option<&str>) {
+    /// lands on the next one) and a new directory starts at the top. Marks
+    /// survive a refresh of the same directory, matched by path.
+    pub fn set_entries(&mut self, path: PathBuf, entries: Vec<Entry>, select: Option<&Path>) {
         let same_dir = path == self.path;
+        let marked_paths: Vec<PathBuf> = if same_dir {
+            self.marked
+                .iter()
+                .filter_map(|&i| self.entries.get(i))
+                .map(|e| e.path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.path = path;
         self.entries = entries;
-        self.marked.clear();
         self.anchor = None;
         self.error = None;
-        let by_name = select.and_then(|name| self.entries.iter().position(|e| e.name == name));
-        self.cursor = match by_name {
+        self.marked = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.is_parent && marked_paths.contains(&e.path))
+            .map(|(i, _)| i)
+            .collect();
+        let by_path = select.and_then(|p| self.entries.iter().position(|e| e.path == p));
+        self.cursor = match by_path {
             Some(ix) => ix,
             None if same_dir => self.cursor.min(self.entries.len().saturating_sub(1)),
             None => 0,
@@ -187,6 +246,7 @@ mod tests {
             size: 0,
             modified: None,
             is_parent: true,
+            depth: 0,
         }];
         for i in 0..n {
             entries.push(Entry {
@@ -196,6 +256,7 @@ mod tests {
                 size: 10,
                 modified: None,
                 is_parent: false,
+                depth: 0,
             });
         }
         let mut s = PanelState::new("/d".into(), false, Sort::default());
@@ -225,6 +286,17 @@ mod tests {
         s.extend_to(usize::MAX);
         assert_eq!(s.cursor, 3);
         assert_eq!(s.marked.len(), 3);
+    }
+
+    #[test]
+    fn mark_rows_unions_with_base_and_skips_parent() {
+        let mut s = state(4);
+        s.toggle_mark(4);
+        let base = s.marked.clone();
+        s.mark_rows(0..=2, &base);
+        assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![1, 2, 4]);
+        s.mark_rows(3..=3, &BTreeSet::new());
+        assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![3]);
     }
 
     #[test]
@@ -280,18 +352,71 @@ mod tests {
         s.move_cursor_to(2); // f1
         let mut entries = s.entries.clone();
         entries.remove(2);
-        s.set_entries("/d".into(), entries, Some("f1"));
+        s.set_entries("/d".into(), entries, Some(Path::new("/d/f1")));
         assert_eq!(s.cursor, 2, "lands on the entry that followed f1");
         let entries = s.entries.clone();
-        s.set_entries("/other".into(), entries, Some("f1"));
+        s.set_entries("/other".into(), entries, Some(Path::new("/d/f1")));
         assert_eq!(s.cursor, 0, "a different directory starts at the top");
     }
 
     #[test]
-    fn set_entries_selects_by_name() {
+    fn set_entries_selects_by_path_and_keeps_marks() {
         let mut s = state(3);
-        let entries = s.entries.clone();
-        s.set_entries("/d".into(), entries, Some("f2"));
-        assert_eq!(s.cursor, 3);
+        s.toggle_mark(1);
+        s.toggle_mark(3);
+        let mut entries = s.entries.clone();
+        entries.insert(
+            1,
+            Entry {
+                name: "new".into(),
+                path: "/d/new".into(),
+                kind: EntryKind::Dir,
+                size: 0,
+                modified: None,
+                is_parent: false,
+                depth: 0,
+            },
+        );
+        s.set_entries("/d".into(), entries, Some(Path::new("/d/f2")));
+        assert_eq!(s.cursor, 4);
+        let marked: Vec<_> = s
+            .marked
+            .iter()
+            .map(|&i| s.entries[i].name.clone())
+            .collect();
+        assert_eq!(marked, ["f0", "f2"], "marks follow their paths");
+    }
+
+    #[test]
+    fn expand_and_parent_index() {
+        let mut s = state(2);
+        let dir = Entry {
+            name: "dir".into(),
+            path: "/d/dir".into(),
+            kind: EntryKind::Dir,
+            size: 0,
+            modified: None,
+            is_parent: false,
+            depth: 0,
+        };
+        let child = Entry {
+            name: "c".into(),
+            path: "/d/dir/c".into(),
+            kind: EntryKind::File,
+            size: 1,
+            modified: None,
+            is_parent: false,
+            depth: 1,
+        };
+        let entries = vec![s.entries[0].clone(), dir, child, s.entries[1].clone()];
+        s.set_entries("/d".into(), entries, None);
+        assert_eq!(s.toggle_expanded(0), None, ".. is not expandable");
+        assert_eq!(s.toggle_expanded(3), None, "files are not expandable");
+        assert_eq!(s.toggle_expanded(1), Some(PathBuf::from("/d/dir")));
+        assert!(s.is_expanded(1));
+        assert_eq!(s.parent_index(2), Some(1));
+        assert_eq!(s.parent_index(1), None);
+        s.toggle_expanded(1);
+        assert!(!s.is_expanded(1));
     }
 }

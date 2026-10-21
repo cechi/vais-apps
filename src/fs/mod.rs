@@ -4,6 +4,7 @@ pub mod format;
 pub mod sort;
 
 use std::{
+    collections::BTreeSet,
     fs, io,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -28,6 +29,8 @@ pub struct Entry {
     pub modified: Option<SystemTime>,
     /// The synthetic ".." entry.
     pub is_parent: bool,
+    /// Nesting level when shown inside an expanded directory (0 = top level).
+    pub depth: usize,
 }
 
 impl Entry {
@@ -89,6 +92,7 @@ pub fn read_dir_sorted(path: &Path, opts: ReadOptions) -> io::Result<Vec<Entry>>
             size,
             modified,
             is_parent: false,
+            depth: 0,
         });
     }
 
@@ -112,8 +116,48 @@ pub fn read_roots() -> Vec<Entry> {
             size: 0,
             modified: None,
             is_parent: false,
+            depth: 0,
         })
         .collect()
+}
+
+/// Read `path` and, recursively, every directory listed in `expanded`, as one
+/// flattened list where children follow their parent with `depth + 1`.
+pub fn read_tree(
+    path: &Path,
+    opts: ReadOptions,
+    expanded: &BTreeSet<PathBuf>,
+) -> io::Result<Vec<Entry>> {
+    let mut entries = read_dir_sorted(path, opts)?;
+    if !expanded.is_empty() {
+        expand_into(&mut entries, opts, expanded);
+    }
+    Ok(entries)
+}
+
+fn expand_into(entries: &mut Vec<Entry>, opts: ReadOptions, expanded: &BTreeSet<PathBuf>) {
+    let mut i = 0;
+    while i < entries.len() {
+        let entry = &entries[i];
+        if !entry.is_parent && entry.is_dir() && expanded.contains(&entry.path) {
+            let depth = entry.depth + 1;
+            if let Ok(children) = read_dir_sorted(&entry.path, opts) {
+                let mut children: Vec<Entry> = children
+                    .into_iter()
+                    .filter(|c| !c.is_parent)
+                    .map(|mut c| {
+                        c.depth = depth;
+                        c
+                    })
+                    .collect();
+                expand_into(&mut children, opts, expanded);
+                let count = children.len();
+                entries.splice(i + 1..i + 1, children);
+                i += count;
+            }
+        }
+        i += 1;
+    }
 }
 
 fn parent_entry(parent: PathBuf) -> Entry {
@@ -124,5 +168,43 @@ fn parent_entry(parent: PathBuf) -> Entry {
         size: 0,
         modified: None,
         is_parent: true,
+        depth: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_tree_flattens_expanded_directories() {
+        let root = std::env::temp_dir().join(format!("vais-tree-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a/inner")).unwrap();
+        fs::create_dir_all(root.join("b")).unwrap();
+        fs::write(root.join("a/x.txt"), "x").unwrap();
+        fs::write(root.join("a/inner/y.txt"), "y").unwrap();
+        fs::write(root.join("z.txt"), "z").unwrap();
+
+        let opts = ReadOptions::default();
+        let mut expanded = BTreeSet::new();
+        expanded.insert(root.join("a"));
+        expanded.insert(root.join("a/inner"));
+        let entries = read_tree(&root, opts, &expanded).unwrap();
+        let rows: Vec<(String, usize)> =
+            entries.iter().map(|e| (e.name.clone(), e.depth)).collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("..".into(), 0),
+                ("a".into(), 0),
+                ("inner".into(), 1),
+                ("y.txt".into(), 2),
+                ("x.txt".into(), 1),
+                ("b".into(), 0),
+                ("z.txt".into(), 0),
+            ]
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -68,6 +68,170 @@ pub fn parent_of(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Home and the standard user folders that exist, with an icon for each.
+pub fn user_places() -> Vec<(String, PathBuf, gpui_kit::component::IconName)> {
+    use gpui_kit::component::IconName;
+    let mut places = Vec::new();
+    let Some(dirs) = directories::UserDirs::new() else {
+        return places;
+    };
+    places.push((
+        "Home".to_string(),
+        dirs.home_dir().to_path_buf(),
+        IconName::User,
+    ));
+    let home = dirs.home_dir();
+    // XDG user dirs when configured, else the conventional folder names.
+    let known: [(&str, Option<&Path>, IconName); 6] = [
+        ("Desktop", dirs.desktop_dir(), IconName::Frame),
+        ("Documents", dirs.document_dir(), IconName::FileText),
+        ("Downloads", dirs.download_dir(), IconName::Inbox),
+        ("Pictures", dirs.picture_dir(), IconName::GalleryVerticalEnd),
+        ("Music", dirs.audio_dir(), IconName::Mic),
+        ("Videos", dirs.video_dir(), IconName::Play),
+    ];
+    for (name, dir, icon) in known {
+        let dir = dir
+            .map(Path::to_path_buf)
+            .filter(|d| d.is_dir())
+            .or_else(|| Some(home.join(name)).filter(|d| d.is_dir()));
+        if let Some(dir) = dir {
+            places.push((name.to_string(), dir, icon));
+        }
+    }
+    places
+}
+
+/// Mounted volumes worth listing: the roots plus real file systems mounted
+/// under the usual media/mount locations.
+pub fn volumes() -> Vec<(String, PathBuf)> {
+    let mut volumes: Vec<(String, PathBuf)> = roots()
+        .into_iter()
+        .map(|r| (r.to_string_lossy().into_owned(), r))
+        .collect();
+    #[cfg(target_os = "linux")]
+    {
+        const REAL_FS: [&str; 22] = [
+            "ext2",
+            "ext3",
+            "ext4",
+            "btrfs",
+            "xfs",
+            "zfs",
+            "f2fs",
+            "vfat",
+            "exfat",
+            "ntfs",
+            "ntfs3",
+            "fuseblk",
+            "nfs",
+            "nfs4",
+            "cifs",
+            "smb3",
+            "autofs",
+            "fuse.sshfs",
+            "iso9660",
+            "udf",
+            "hfsplus",
+            "apfs",
+        ];
+        if let Ok(mounts) = std::fs::read_to_string("/proc/self/mounts") {
+            for line in mounts.lines() {
+                let mut fields = line.split_whitespace();
+                let (Some(_dev), Some(target), Some(fstype)) =
+                    (fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                if !REAL_FS.contains(&fstype) || target == "/" {
+                    continue;
+                }
+                // Keep user-facing mount points, skip system subvolumes and internals.
+                let user_facing = target.starts_with("/mnt/")
+                    || target.starts_with("/media/")
+                    || target.starts_with("/run/media/")
+                    || target == "/home"
+                    || target.starts_with("/home/")
+                    || target.starts_with("/Volumes/");
+                if !user_facing || target.contains("/docker/") {
+                    continue;
+                }
+                let target = target.replace("\\040", " ");
+                let path = PathBuf::from(&target);
+                if volumes.iter().any(|(_, p)| *p == path) {
+                    continue;
+                }
+                // The full mount point: names like "home" repeat across mounts.
+                volumes.push((target.clone(), path));
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(rd) = std::fs::read_dir("/Volumes") {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                if path.is_dir() && !volumes.iter().any(|(_, p)| *p == path) {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    volumes.push((name, path));
+                }
+            }
+        }
+    }
+    volumes
+}
+
+/// Open the user's terminal emulator in `dir`.
+pub fn open_terminal(dir: &Path) -> std::io::Result<()> {
+    use std::process::Command;
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("open")
+            .args(["-a", "Terminal"])
+            .arg(dir)
+            .spawn()
+            .map(|_| ());
+    }
+    #[cfg(windows)]
+    {
+        return Command::new("cmd")
+            .args(["/C", "start", "cmd"])
+            .current_dir(dir)
+            .spawn()
+            .map(|_| ());
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let mut candidates: Vec<String> = Vec::new();
+        if let Ok(term) = std::env::var("TERMINAL") {
+            if !term.is_empty() {
+                candidates.push(term);
+            }
+        }
+        for name in [
+            "xdg-terminal-exec",
+            "ghostty",
+            "alacritty",
+            "kitty",
+            "foot",
+            "wezterm",
+            "gnome-terminal",
+            "konsole",
+            "xterm",
+        ] {
+            candidates.push(name.to_string());
+        }
+        let mut last_err = std::io::Error::other("no terminal emulator found");
+        for term in candidates {
+            match Command::new(&term).current_dir(dir).spawn() {
+                Ok(_) => return Ok(()),
+                Err(err) => last_err = err,
+            }
+        }
+        Err(last_err)
+    }
+}
+
 /// Human readable label for a location, for the path bar and tab titles.
 pub fn display_name(path: &Path) -> String {
     if is_roots_path(path) {

@@ -8,7 +8,9 @@ use std::rc::Rc;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::config::{LayoutConfig, TabConfig, TabKind};
@@ -18,10 +20,18 @@ use crate::layout::{Dir, Layout, MAX_PANELS};
 use crate::ops::manager::{ManagerEvent, OperationsManager};
 use crate::ops::{self, OpKind, Request};
 use crate::panel::{FilePanel, PanelEvent};
+use crate::settings::{self, DropAction};
 
 /// What an input dialog does on confirm. It runs inside an update of the view,
 /// so it must not call `Entity::update` on the view again.
 type ConfirmFn = Rc<dyn Fn(&mut GridView, &mut Window, &mut Context<GridView>)>;
+
+/// The Move / Copy menu shown at the mouse after a drop.
+struct DropMenu {
+    menu: Entity<PopupMenu>,
+    position: Point<Pixels>,
+    _subscription: Subscription,
+}
 
 pub enum GridEvent {
     /// Something worth persisting (or showing in the tab title) changed.
@@ -37,6 +47,7 @@ pub struct GridView {
     /// Fractions loaded from the config, applied once the grid has been laid out.
     pending_sizes: Option<(Vec<f32>, Vec<Vec<f32>>)>,
     ops: Entity<OperationsManager>,
+    drop_menu: Option<DropMenu>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -55,8 +66,10 @@ impl GridView {
 
         let mut subscriptions = Vec::new();
         for (ix, panel) in panels.iter().enumerate() {
-            subscriptions.push(
-                cx.subscribe(panel, move |this, _panel, event, cx| match event {
+            subscriptions.push(cx.subscribe_in(
+                panel,
+                window,
+                move |this, _panel, event, window, cx| match event {
                     PanelEvent::Focused => this.set_active(ix, cx),
                     PanelEvent::Changed => cx.emit(GridEvent::Changed),
                     PanelEvent::CancelRequested => {
@@ -64,8 +77,11 @@ impl GridView {
                             m.cancel_latest(cx);
                         });
                     }
-                }),
-            );
+                    PanelEvent::Dropped { paths, dest } => {
+                        this.handle_drop(paths.clone(), dest.clone(), window, cx);
+                    }
+                },
+            ));
         }
         // Any finished operation may have changed what the panels show.
         subscriptions.push(cx.subscribe(&ops, |this, _ops, event, cx| {
@@ -84,6 +100,7 @@ impl GridView {
             prev_active: None,
             pending_sizes: cfg.layout.fractions(),
             ops,
+            drop_menu: None,
             _subscriptions: subscriptions,
         }
     }
@@ -192,7 +209,7 @@ impl GridView {
     }
 
     /// F5 / F6: ask for the destination (prefilled with the target panel), then run.
-    fn start_transfer(&mut self, kind: OpKind, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_transfer(&mut self, kind: OpKind, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
@@ -298,8 +315,81 @@ impl GridView {
         });
     }
 
+    /// Entries dropped onto `dest`: move or copy them there according to the
+    /// `drop_action` setting, asking when it says so.
+    fn handle_drop(
+        &mut self,
+        paths: Vec<PathBuf>,
+        dest: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !dest.is_dir() {
+            return;
+        }
+        let dest = std::fs::canonicalize(&dest).unwrap_or(dest);
+        let sources: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|p| p.parent() != Some(dest.as_path()) && *p != dest && !dest.starts_with(p))
+            .collect();
+        if sources.is_empty() {
+            return;
+        }
+        match settings::get(cx).drop_action {
+            DropAction::Move => self.confirm_transfer(OpKind::Move, sources, dest, window, cx),
+            DropAction::Copy => self.confirm_transfer(OpKind::Copy, sources, dest, window, cx),
+            DropAction::Ask => self.ask_drop(sources, dest, window, cx),
+        }
+    }
+
+    /// A two-item popup menu (Move / Copy) right where the entries were dropped.
+    fn ask_drop(
+        &mut self,
+        sources: Vec<PathBuf>,
+        dest: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let position = window.mouse_position();
+        let view = cx.entity();
+        let run = Rc::new(move |kind: OpKind, window: &mut Window, cx: &mut App| {
+            let (view, sources, dest) = (view.clone(), sources.clone(), dest.clone());
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    this.drop_menu = None;
+                    this.confirm_transfer(kind, sources, dest, window, cx);
+                    cx.notify();
+                });
+            });
+        });
+        let menu = PopupMenu::build(window, cx, |menu, _window, _cx| {
+            let (run_move, run_copy) = (run.clone(), run.clone());
+            menu.item(
+                PopupMenuItem::new("Move here")
+                    .on_click(move |_, window, cx| run_move(OpKind::Move, window, cx)),
+            )
+            .item(
+                PopupMenuItem::new("Copy here")
+                    .on_click(move |_, window, cx| run_copy(OpKind::Copy, window, cx)),
+            )
+        });
+        let subscription = cx.subscribe(&menu, |this, _menu, _: &DismissEvent, cx| {
+            this.drop_menu = None;
+            cx.notify();
+        });
+        // Focus the menu once it is on screen so Esc and the arrows work.
+        let focus = menu.focus_handle(cx);
+        window.defer(cx, move |window, cx| focus.focus(window, cx));
+        self.drop_menu = Some(DropMenu {
+            menu,
+            position,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
     /// F8 / Shift+F8: confirm, then delete.
-    fn start_delete(&mut self, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_delete(&mut self, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
@@ -346,7 +436,7 @@ impl GridView {
     }
 
     /// F7: ask for a name, create it in the active panel's directory.
-    fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let base = self.active_panel().read(cx).path().to_path_buf();
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("New folder name"));
         let confirm: ConfirmFn = {
@@ -362,7 +452,7 @@ impl GridView {
                         let first = PathBuf::from(&name)
                             .components()
                             .next()
-                            .map(|c| c.as_os_str().to_string_lossy().into_owned());
+                            .map(|c| base.join(c.as_os_str()));
                         this.refresh_active(first, cx);
                     }
                     Err(err) => this.notify(
@@ -385,13 +475,13 @@ impl GridView {
     }
 
     /// Shift+F6 / F2: rename the entry under the cursor in place.
-    fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = self.active_panel().read(cx);
-        let Some(old_name) = panel.current_name() else {
+        let (Some(old_name), Some(from)) = (panel.current_name(), panel.current_path()) else {
             self.notify(Notification::warning("Nothing to rename"), window, cx);
             return;
         };
-        let base = panel.path().to_path_buf();
+        let base = from.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let input = cx.new(|cx| InputState::new(window, cx).default_value(old_name.clone()));
         let confirm: ConfirmFn = {
             let input = input.clone();
@@ -410,7 +500,7 @@ impl GridView {
                     std::fs::rename(&from, &to)
                 };
                 match result {
-                    Ok(()) => this.refresh_active(Some(new_name.clone()), cx),
+                    Ok(()) => this.refresh_active(Some(base.join(&new_name)), cx),
                     Err(err) => this.notify(
                         Notification::error(format!("{new_name}: {err}")),
                         window,
@@ -481,7 +571,7 @@ impl GridView {
         });
     }
 
-    fn refresh_active(&mut self, select: Option<String>, cx: &mut Context<Self>) {
+    fn refresh_active(&mut self, select: Option<PathBuf>, cx: &mut Context<Self>) {
         self.active_panel()
             .update(cx, |p, cx| p.refresh(select, cx));
     }
@@ -584,5 +674,16 @@ impl Render for GridView {
                 &self.panels,
                 on_resize,
             ))
+            .when_some(self.drop_menu.as_ref(), |d, drop| {
+                d.child(
+                    deferred(
+                        anchored()
+                            .position(drop.position)
+                            .snap_to_window_with_margin(px(8.))
+                            .child(div().occlude().child(drop.menu.clone())),
+                    )
+                    .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                )
+            })
     }
 }

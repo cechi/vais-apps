@@ -111,6 +111,7 @@ mod tests {
             size,
             modified: None,
             is_parent: false,
+            depth: 0,
         }
     }
 

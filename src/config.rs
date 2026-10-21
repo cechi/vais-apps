@@ -7,16 +7,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
+use crate::settings::DropAction;
 
 pub const CONFIG_VERSION: u32 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// `"light"`, `"dark"`, `"system"` or the name of a theme from the themes directory.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum ThemeChoice {
     Light,
     Dark,
     #[default]
     System,
+    Named(String),
+}
+
+impl From<String> for ThemeChoice {
+    fn from(value: String) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "light" => ThemeChoice::Light,
+            "dark" => ThemeChoice::Dark,
+            "system" | "" => ThemeChoice::System,
+            _ => ThemeChoice::Named(value.trim().to_string()),
+        }
+    }
+}
+
+impl From<ThemeChoice> for String {
+    fn from(value: ThemeChoice) -> Self {
+        match value {
+            ThemeChoice::Light => "light".into(),
+            ThemeChoice::Dark => "dark".into(),
+            ThemeChoice::System => "system".into(),
+            ThemeChoice::Named(name) => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +51,10 @@ pub struct Config {
     pub theme: ThemeChoice,
     /// UI scale factor; 1.0 is the default size.
     pub ui_scale: f32,
+    /// Whether the places sidebar is shown.
+    pub sidebar_open: bool,
+    /// What dragging entries onto a directory does: ask, move or copy.
+    pub drop_action: DropAction,
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
@@ -43,6 +72,8 @@ impl Default for Config {
             version: CONFIG_VERSION,
             theme: ThemeChoice::default(),
             ui_scale: 1.0,
+            sidebar_open: false,
+            drop_action: DropAction::Ask,
             window: None,
             active_tab: 0,
             tabs: Vec::new(),
@@ -261,6 +292,20 @@ mod tests {
 
         let empty = Config::default();
         assert_eq!(empty.tabs().len(), 1);
+    }
+
+    #[test]
+    fn theme_choice_roundtrips_names() {
+        let cfg: Config = toml::from_str("theme = \"Dank Dark\"\n").unwrap();
+        assert_eq!(cfg.theme, ThemeChoice::Named("Dank Dark".into()));
+        let cfg: Config = toml::from_str("theme = \"dark\"\n").unwrap();
+        assert_eq!(cfg.theme, ThemeChoice::Dark);
+        let text = toml::to_string(&Config {
+            theme: ThemeChoice::Named("X".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(text.contains("theme = \"X\""));
     }
 
     #[test]
