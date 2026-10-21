@@ -1,11 +1,13 @@
 # VAIS Commander
 
-Part of the **VAIS** family of apps (VAIS = *vibecoded AI slop*, worn with pride).
+VAIS stands for *vibecoded AI slop*.
 
 Keyboard-driven file manager in the spirit of Total/Midnight Commander, with one twist:
 instead of two fixed panes, the panels sit in a configurable **grid** (1x2, 2x1, 1x3, 3x1,
 2x2, 2x3, 3x2, 3x3, 1x1), and the window has **tabs**, each holding its own grid.
 Built in Rust on [gpui-kit](https://gpui-kit.com) (GPUI from Zed).
+
+![VAIS Commander: sidebar, tabs, a 1x2 grid with an expanded tree and marked files](docs/screenshot.png)
 
 Status: navigation, marking, tabs, layouts, persistence and the basic file operations
 (copy, move, rename, new folder, delete to trash) work. F3 view and F4 edit are not
