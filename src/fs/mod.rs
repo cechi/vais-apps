@@ -1,6 +1,8 @@
 //! Directory reading: synchronous, `Send`, meant to run on the background executor.
 
+pub mod filter;
 pub mod format;
+pub mod search;
 pub mod sort;
 
 use std::{
@@ -160,7 +162,8 @@ fn expand_into(entries: &mut Vec<Entry>, opts: ReadOptions, expanded: &BTreeSet<
     }
 }
 
-fn parent_entry(parent: PathBuf) -> Entry {
+/// The synthetic `..` row pointing at `parent`.
+pub fn parent_entry(parent: PathBuf) -> Entry {
     Entry {
         name: "..".to_string(),
         path: parent,

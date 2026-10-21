@@ -65,8 +65,10 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Esc` | Cancel path edit, dismiss error, or clear marks |
 | `Enter` | Enter directory (`..` goes up) |
 | `→` / `←` | Expand the directory under the cursor inline (tree view) / collapse it, or jump to the parent row |
-| `Backspace` / `Alt+←` | Parent directory / back in history |
-| `Ctrl+L` | Edit the path (`~` expands); `Enter` to go, `Esc` to cancel |
+| `Backspace` | Parent directory |
+| `Alt+←` / `Alt+→` | Back / forward in the panel's history (also the arrows before the path) |
+| `Ctrl+L` | Edit the path (`~` expands); `Enter` to go, `Esc` to cancel. The path bar is also a breadcrumb: click a segment to go there, click the space after it to edit |
+| `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |

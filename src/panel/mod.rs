@@ -4,22 +4,29 @@ pub mod state;
 
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::config::PanelConfig;
 use crate::fs::format::{format_time, human_size};
-use crate::fs::{ReadOptions, Sort, SortDir, read_roots, read_tree};
+use crate::fs::search::search_tree;
+use crate::fs::{ReadOptions, Sort, SortDir, parent_entry, read_roots, read_tree};
 use crate::keymap::*;
 use crate::platform;
 use crate::ui::{h_flex, v_flex};
-use state::PanelState;
+use state::{Filter, PanelState};
 
 /// Row height in rems, so the list follows the UI scale.
 pub const ROW_HEIGHT_REMS: f32 = 1.5;
@@ -95,6 +102,11 @@ pub struct FilePanel {
     pub state: PanelState,
     path_input: Entity<InputState>,
     editing_path: bool,
+    filter_input: Entity<InputState>,
+    /// Cancel flag of the running recursive search, if any.
+    search_cancel: Option<Arc<AtomicBool>>,
+    search_debounce: Option<Task<()>>,
+    searching: bool,
     generation: u64,
     load_task: Option<Task<()>>,
     /// Last left mouse press in the body: where a rubber band would start, and
@@ -122,6 +134,9 @@ struct Colors {
     list_even: Hsla,
     muted_foreground: Hsla,
     foreground: Hsla,
+    list_hover: Hsla,
+    list_head: Hsla,
+    border: Hsla,
     yellow: Hsla,
     blue: Hsla,
 }
@@ -135,12 +150,23 @@ impl FilePanel {
     ) -> Self {
         let focus_handle = cx.focus_handle();
         let path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Path"));
+        let filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter… (* and ? for globs)"));
 
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.on_focus_in(&focus_handle, window, |_this, _window, cx| {
             cx.emit(PanelEvent::Focused);
             cx.notify();
         }));
+        subscriptions.push(cx.subscribe_in(
+            &filter_input,
+            window,
+            |this, _input, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => this.on_filter_changed(cx),
+                InputEvent::PressEnter { .. } => this.focus_handle.focus(window, cx),
+                _ => {}
+            },
+        ));
         subscriptions.push(cx.subscribe_in(
             &path_input,
             window,
@@ -171,6 +197,10 @@ impl FilePanel {
             state: PanelState::new(cfg.path.clone(), cfg.show_hidden, sort),
             path_input,
             editing_path: false,
+            filter_input,
+            search_cancel: None,
+            search_debounce: None,
+            searching: false,
             generation: 0,
             load_task: None,
             pending_press: None,
@@ -195,14 +225,6 @@ impl FilePanel {
             .collect()
     }
 
-    /// Name of the entry under the cursor, unless it is `..`.
-    pub fn current_name(&self) -> Option<String> {
-        self.state
-            .current()
-            .filter(|e| !e.is_parent)
-            .map(|e| e.name.clone())
-    }
-
     /// Path of the entry under the cursor, unless it is `..`.
     pub fn current_path(&self) -> Option<PathBuf> {
         self.state
@@ -215,6 +237,10 @@ impl FilePanel {
     /// cursor on `select` or keeping it on the current entry.
     pub fn refresh(&mut self, select: Option<PathBuf>, cx: &mut Context<Self>) {
         let select = select.or_else(|| self.state.current().map(|e| e.path.clone()));
+        if self.recursive_search_active() {
+            self.start_search(cx);
+            return;
+        }
         let path = self.state.path.clone();
         self.load(path, select, cx);
     }
@@ -297,6 +323,7 @@ impl FilePanel {
             let current = self.state.path.clone();
             self.state.push_history(current);
             self.state.expanded.clear();
+            self.drop_filter(cx);
         }
         self.load(path, select, cx);
     }
@@ -325,13 +352,346 @@ impl FilePanel {
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
-        if let Some(prev) = self.state.history.pop() {
+        if let Some(prev) = self.state.pop_back() {
+            self.state.expanded.clear();
+            self.drop_filter(cx);
             self.load(prev, None, cx);
+        }
+    }
+
+    fn go_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(next) = self.state.pop_forward() {
+            self.state.expanded.clear();
+            self.drop_filter(cx);
+            self.load(next, None, cx);
         }
     }
 
     fn reload(&mut self, cx: &mut Context<Self>) {
         self.refresh(None, cx);
+    }
+
+    /// Whether one of the panel's text inputs has the keyboard: list actions
+    /// bound to keys the input does not consume (Enter, Space, Insert, …) must
+    /// then stay out of the way.
+    fn typing(&self, window: &Window, cx: &App) -> bool {
+        self.filter_input.focus_handle(cx).is_focused(window)
+            || self.path_input.focus_handle(cx).is_focused(window)
+    }
+
+    // ----- filter / search -------------------------------------------------
+
+    const SEARCH_LIMIT: usize = 5000;
+    const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
+
+    fn recursive_search_active(&self) -> bool {
+        self.state
+            .filter
+            .as_ref()
+            .is_some_and(|f| f.recursive && !f.matcher().is_all())
+    }
+
+    /// Ctrl+F / the magnifier: show the bar and put the caret into it.
+    fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.filter.is_none() {
+            self.state.filter = Some(Filter::default());
+        }
+        self.filter_input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Esc / the close button: hide the bar and show the plain listing again.
+    fn close_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_recursive = self.recursive_search_active();
+        self.drop_filter(cx);
+        self.filter_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        if was_recursive {
+            self.refresh(None, cx);
+        } else {
+            self.state.refilter(None);
+        }
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Forget the filter state without reloading (navigation does its own load).
+    fn drop_filter(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
+        if self.state.filter.take().is_some() {
+            self.state.search_truncated = false;
+            cx.notify();
+        }
+    }
+
+    fn on_filter_changed(&mut self, cx: &mut Context<Self>) {
+        let query = self.filter_input.read(cx).value().to_string();
+        let Some(filter) = self.state.filter.as_mut() else {
+            return;
+        };
+        if filter.query == query {
+            return;
+        }
+        filter.query = query;
+        if filter.recursive {
+            self.schedule_search(cx);
+        } else {
+            self.state.refilter(None);
+            self.scroll_to_cursor();
+            cx.notify();
+        }
+    }
+
+    fn toggle_recursive(&mut self, cx: &mut Context<Self>) {
+        let Some(filter) = self.state.filter.as_mut() else {
+            return;
+        };
+        filter.recursive = !filter.recursive;
+        if filter.recursive {
+            self.schedule_search(cx);
+        } else {
+            self.cancel_search();
+            // Back to the plain listing with the live filter applied.
+            let path = self.state.path.clone();
+            self.load(path, None, cx);
+        }
+        cx.notify();
+    }
+
+    fn cancel_search(&mut self) {
+        if let Some(cancel) = self.search_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.search_debounce = None;
+        self.searching = false;
+    }
+
+    /// Run the recursive search shortly after the user stops typing.
+    fn schedule_search(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
+        if !self.recursive_search_active() {
+            // Empty query: show the plain listing.
+            let path = self.state.path.clone();
+            self.load(path, None, cx);
+            return;
+        }
+        self.search_debounce = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Self::SEARCH_DEBOUNCE).await;
+            this.update(cx, |panel, cx| panel.start_search(cx)).ok();
+        }));
+    }
+
+    fn start_search(&mut self, cx: &mut Context<Self>) {
+        self.cancel_search();
+        let Some(filter) = self.state.filter.clone() else {
+            return;
+        };
+        if platform::is_roots_path(&self.state.path) {
+            return;
+        }
+        self.generation += 1;
+        let generation = self.generation;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.search_cancel = Some(cancel.clone());
+        self.searching = true;
+        let root = self.state.path.clone();
+        let opts = ReadOptions {
+            show_hidden: self.state.show_hidden,
+            sort: self.state.sort,
+        };
+        let matcher = filter.matcher();
+        let task = cx.background_spawn({
+            let root = root.clone();
+            async move { search_tree(&root, opts, &matcher, Self::SEARCH_LIMIT, &cancel) }
+        });
+        self.load_task = Some(cx.spawn(async move |this, cx| {
+            let (results, truncated) = task.await;
+            this.update(cx, |panel, cx| {
+                if panel.generation != generation {
+                    return;
+                }
+                panel.searching = false;
+                panel.search_cancel = None;
+                let mut entries = Vec::with_capacity(results.len() + 1);
+                if let Some(parent) = platform::parent_of(&root) {
+                    entries.push(parent_entry(parent));
+                }
+                entries.extend(results);
+                panel.state.search_truncated = truncated;
+                panel.state.set_entries(root, entries, None);
+                panel.scroll_to_cursor();
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    fn on_open_filter(&mut self, _: &OpenFilter, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_filter(window, cx);
+    }
+
+    fn on_close_filter(&mut self, _: &CloseFilter, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_filter(window, cx);
+    }
+
+    /// Ctrl+Shift+F: open the bar if needed and flip the Subfolders toggle.
+    fn on_toggle_filter_recursive(
+        &mut self,
+        _: &ToggleFilterRecursive,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.filter.is_none() {
+            self.open_filter(window, cx);
+        }
+        self.toggle_recursive(cx);
+    }
+
+    /// The bar under the header: query input, Subfolders toggle, counts, close.
+    fn render_filter_bar(&self, c: &Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let filter = self.state.filter.as_ref()?;
+        let shown = self.state.item_count();
+        let total = self
+            .state
+            .all_entries
+            .iter()
+            .filter(|e| !e.is_parent)
+            .count();
+        let count = if filter.recursive {
+            format!(
+                "{shown} results{}{}",
+                if self.state.search_truncated {
+                    " (limit)"
+                } else {
+                    ""
+                },
+                if self.searching {
+                    " · searching…"
+                } else {
+                    ""
+                }
+            )
+        } else {
+            format!("{shown} / {total}")
+        };
+        Some(
+            h_flex()
+                .key_context(PANEL_FILTER_CONTEXT)
+                .on_action(cx.listener(Self::on_close_filter))
+                .h(rems(1.75))
+                .flex_none()
+                .px_2()
+                .gap_2()
+                .bg(c.list_head)
+                .border_b_1()
+                .border_color(c.border)
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Input::new(&self.filter_input)
+                            .small()
+                            .focus_bordered(false)
+                            .h(rems(1.375)),
+                    ),
+                )
+                .child(
+                    Button::new(("filter-recursive", self.index))
+                        .xsmall()
+                        .label("Subfolders")
+                        .selected(filter.recursive)
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_recursive(cx))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(c.muted_foreground)
+                        .whitespace_nowrap()
+                        .child(count),
+                )
+                .child(
+                    Button::new(("filter-close", self.index))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Close)
+                        .on_click(cx.listener(|this, _, window, cx| this.close_filter(window, cx))),
+                )
+                .into_any_element(),
+        )
+    }
+
+    // ----- path bar ------------------------------------------------------
+
+    /// The path as clickable segments; a click in the space after the last
+    /// segment switches to the text editor (same as Ctrl+L).
+    fn render_breadcrumbs(&self, active: bool, c: &Colors, cx: &mut Context<Self>) -> AnyElement {
+        use std::path::Component;
+
+        let path = &self.state.path;
+        let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
+        if platform::is_roots_path(path) {
+            crumbs.push((platform::display_name(path), path.clone()));
+        } else {
+            let mut acc = PathBuf::new();
+            for component in path.components() {
+                acc.push(component.as_os_str());
+                let label = match component {
+                    Component::RootDir => "/".to_string(),
+                    other => other.as_os_str().to_string_lossy().into_owned(),
+                };
+                crumbs.push((label, acc.clone()));
+            }
+        }
+        let last = crumbs.len().saturating_sub(1);
+        let (hover, fg, muted) = (c.list_hover, c.foreground, c.muted_foreground);
+
+        h_flex()
+            .id(("crumbs", self.index))
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .text_sm()
+            .overflow_x_hidden()
+            .children(
+                crumbs
+                    .into_iter()
+                    .enumerate()
+                    .flat_map(|(i, (label, target))| {
+                        let is_last = i == last;
+                        let crumb = div()
+                            .id(("crumb", i))
+                            .flex_none()
+                            .px_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .text_color(if is_last && active { fg } else { muted })
+                            .hover(|s| s.bg(hover))
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                if target != this.state.path {
+                                    this.navigate_to(target.clone(), cx);
+                                }
+                            }))
+                            .child(label);
+                        let separator = (!is_last && i > 0)
+                            .then(|| div().flex_none().text_color(muted).child("›"));
+                        std::iter::once(crumb.into_any_element())
+                            .chain(separator.map(|s| s.into_any_element()))
+                    }),
+            )
+            // The empty space after the path: click to type or copy the path.
+            .child(
+                div()
+                    .id(("crumbs-edit", self.index))
+                    .flex_1()
+                    .min_w(rems(1.))
+                    .h_full()
+                    .cursor_text()
+                    .on_click(cx.listener(|this, _, window, cx| this.edit_path(window, cx))),
+            )
+            .into_any_element()
     }
 
     // ----- rubber band selection ------------------------------------------
@@ -496,7 +856,10 @@ impl FilePanel {
         }
     }
 
-    fn on_expand(&mut self, _: &ExpandEntry, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_expand(&mut self, _: &ExpandEntry, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         let ix = self.state.cursor;
         if !self.state.is_expanded(ix) {
             self.toggle_expand(ix, cx);
@@ -504,7 +867,10 @@ impl FilePanel {
     }
 
     /// Collapse the expanded directory under the cursor, or jump to the parent row.
-    fn on_collapse(&mut self, _: &CollapseEntry, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_collapse(&mut self, _: &CollapseEntry, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         let ix = self.state.cursor;
         if self.state.is_expanded(ix) {
             self.toggle_expand(ix, cx);
@@ -624,25 +990,37 @@ impl FilePanel {
         self.state.extend_to(self.state.last_index());
         self.after_cursor_move(cx);
     }
-    fn on_toggle_mark(&mut self, _: &ToggleMark, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_toggle_mark(&mut self, _: &ToggleMark, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.state.toggle_mark(self.state.cursor);
         cx.notify();
     }
     fn on_toggle_mark_and_down(
         &mut self,
         _: &ToggleMarkAndDown,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.state.toggle_mark(self.state.cursor);
         self.state.move_cursor_by(1);
         self.after_cursor_move(cx);
     }
-    fn on_mark_all(&mut self, _: &MarkAll, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mark_all(&mut self, _: &MarkAll, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.state.mark_all();
         cx.notify();
     }
-    fn on_invert_marks(&mut self, _: &InvertMarks, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_invert_marks(&mut self, _: &InvertMarks, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.state.invert_marks();
         cx.notify();
     }
@@ -654,6 +1032,8 @@ impl FilePanel {
     ) {
         if self.editing_path {
             self.cancel_edit(window, cx);
+        } else if self.state.filter.is_some() {
+            self.close_filter(window, cx);
         } else if self.state.error.is_some() {
             self.state.error = None;
             cx.notify();
@@ -665,13 +1045,22 @@ impl FilePanel {
         }
     }
     fn on_open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.open(window, cx);
     }
-    fn on_go_up(&mut self, _: &GoUp, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_go_up(&mut self, _: &GoUp, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            return;
+        }
         self.go_up(cx);
     }
     fn on_go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) {
         self.go_back(cx);
+    }
+    fn on_go_forward(&mut self, _: &GoForward, _: &mut Window, cx: &mut Context<Self>) {
+        self.go_forward(cx);
     }
     fn on_edit_path(&mut self, _: &EditPath, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_path {
@@ -759,12 +1148,14 @@ impl FilePanel {
             .menu("Mark all", Box::new(MarkAll))
             .menu("Clear marks", Box::new(CancelOrClear))
             .separator()
+            .menu("Filter…", Box::new(OpenFilter))
             .menu("Edit path…", Box::new(EditPath))
             .menu("Toggle hidden files", Box::new(ToggleHidden))
             .menu("Reload", Box::new(Reload))
             .separator()
             .menu("Go up", Box::new(GoUp))
             .menu("Back", Box::new(GoBack))
+            .menu("Forward", Box::new(GoForward))
     }
 
     // ----- rendering -----------------------------------------------------
@@ -990,6 +1381,9 @@ impl Render for FilePanel {
             list_even: theme.list_even,
             muted_foreground: theme.muted_foreground,
             foreground: theme.foreground,
+            list_hover: theme.list_hover,
+            list_head: theme.list_head,
+            border: theme.border,
             yellow: theme.yellow,
             blue: theme.blue,
         };
@@ -1010,28 +1404,40 @@ impl Render for FilePanel {
         let marquee_allowed = !matches!(self.pending_press, Some((_, _, true)));
         let count = self.state.len();
 
-        let path_text = if platform::is_roots_path(&self.state.path) {
-            platform::display_name(&self.state.path)
-        } else {
-            self.state.path.to_string_lossy().into_owned()
-        };
         let header: AnyElement = if self.editing_path {
-            Input::new(&self.path_input).into_any_element()
-        } else {
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_sm()
-                .when(active, |d| d.font_weight(FontWeight::SEMIBOLD))
-                .child(path_text)
+            Input::new(&self.path_input)
+                .small()
+                .focus_bordered(false)
+                .h(rems(1.5))
                 .into_any_element()
+        } else {
+            self.render_breadcrumbs(active, &colors, cx)
         };
 
-        let footer_text = if self.state.loading {
-            "Loading…".to_string()
+        let filter_bar = self.render_filter_bar(&colors, cx);
+        let footer_text = if self.state.loading || self.searching {
+            if self.searching {
+                "Searching…"
+            } else {
+                "Loading…"
+            }
+            .to_string()
         } else if let Some(err) = &self.state.error {
             err.clone()
+        } else if self.state.filter.is_some() {
+            let total = self
+                .state
+                .all_entries
+                .iter()
+                .filter(|e| !e.is_parent)
+                .count();
+            format!(
+                "{} / {} selected · {} of {} shown",
+                self.state.marked.len(),
+                self.state.item_count(),
+                self.state.item_count(),
+                total
+            )
         } else {
             format!(
                 "{} / {} selected · {}",
@@ -1085,6 +1491,7 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_open))
             .on_action(cx.listener(Self::on_go_up))
             .on_action(cx.listener(Self::on_go_back))
+            .on_action(cx.listener(Self::on_go_forward))
             .on_action(cx.listener(Self::on_edit_path))
             .on_action(cx.listener(Self::on_toggle_hidden))
             .on_action(cx.listener(Self::on_reload))
@@ -1092,6 +1499,8 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_open_terminal))
             .on_action(cx.listener(Self::on_expand))
             .on_action(cx.listener(Self::on_collapse))
+            .on_action(cx.listener(Self::on_open_filter))
+            .on_action(cx.listener(Self::on_toggle_filter_recursive))
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -1117,8 +1526,48 @@ impl Render for FilePanel {
                             .bg(title_bar)
                             .border_b_1()
                             .border_color(border)
-                            .child(header),
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .gap_0p5()
+                                    .child(
+                                        Button::new(("nav-back", self.index))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(IconName::ArrowLeft)
+                                            .disabled(self.state.history.is_empty())
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| this.go_back(cx)),
+                                            ),
+                                    )
+                                    .child(
+                                        Button::new(("nav-forward", self.index))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(IconName::ArrowRight)
+                                            .disabled(self.state.forward.is_empty())
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| this.go_forward(cx)),
+                                            ),
+                                    ),
+                            )
+                            .child(header)
+                            .child(
+                                Button::new(("search", self.index))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Search)
+                                    .selected(self.state.filter.is_some())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if this.state.filter.is_some() {
+                                            this.close_filter(window, cx);
+                                        } else {
+                                            this.open_filter(window, cx);
+                                        }
+                                    })),
+                            ),
                     )
+                    .children(filter_bar)
                     .child(
                         h_flex()
                             .h(rems(1.375))

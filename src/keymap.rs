@@ -7,6 +7,7 @@ use crate::layout::Layout;
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
+pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 
 actions!(
     vais,
@@ -62,6 +63,7 @@ actions!(
         Open,
         GoUp,
         GoBack,
+        GoForward,
         EditPath,
         ToggleHidden,
         Reload,
@@ -69,6 +71,9 @@ actions!(
         OpenTerminal,
         ExpandEntry,
         CollapseEntry,
+        OpenFilter,
+        CloseFilter,
+        ToggleFilterRecursive,
     ]
 );
 
@@ -163,12 +168,16 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("enter", Open, p),
         KeyBinding::new("backspace", GoUp, p),
         KeyBinding::new("alt-left", GoBack, p),
+        KeyBinding::new("alt-right", GoForward, p),
         KeyBinding::new("secondary-l", EditPath, p),
         KeyBinding::new(hidden_key, ToggleHidden, p),
         KeyBinding::new("secondary-r", Reload, p),
         KeyBinding::new("secondary-shift-c", CopyPath, p),
         KeyBinding::new("f9", OpenTerminal, p),
         KeyBinding::new("right", ExpandEntry, p),
+        KeyBinding::new("secondary-f", OpenFilter, p),
+        KeyBinding::new("secondary-shift-f", ToggleFilterRecursive, p),
+        KeyBinding::new("escape", CloseFilter, Some(PANEL_FILTER_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),
     ];
     if mac {

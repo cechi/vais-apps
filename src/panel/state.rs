@@ -3,14 +3,35 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::fs::filter::Matcher;
 use crate::fs::{Entry, Sort};
 
 const HISTORY_LIMIT: usize = 64;
 
+/// The panel's filter bar state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Filter {
+    pub query: String,
+    /// Search subdirectories recursively instead of filtering the listing.
+    pub recursive: bool,
+}
+
+impl Filter {
+    pub fn matcher(&self) -> Matcher {
+        Matcher::new(&self.query)
+    }
+}
+
 #[derive(Debug)]
 pub struct PanelState {
     pub path: PathBuf,
+    /// Everything the loader (or a recursive search) produced.
+    pub all_entries: Vec<Entry>,
+    /// The displayed rows: `all_entries` after the filter. Cursor and marks index these.
     pub entries: Vec<Entry>,
+    pub filter: Option<Filter>,
+    /// A recursive search stopped at its result limit.
+    pub search_truncated: bool,
     pub cursor: usize,
     /// Commander-style marks, independent of the cursor.
     pub marked: BTreeSet<usize>,
@@ -18,7 +39,10 @@ pub struct PanelState {
     pub anchor: Option<usize>,
     pub sort: Sort,
     pub show_hidden: bool,
+    /// Back stack: directories visited before the current one.
     pub history: Vec<PathBuf>,
+    /// Forward stack: directories left by going back.
+    pub forward: Vec<PathBuf>,
     pub error: Option<String>,
     pub loading: bool,
     /// Directories shown expanded inline (tree view).
@@ -29,13 +53,17 @@ impl PanelState {
     pub fn new(path: PathBuf, show_hidden: bool, sort: Sort) -> Self {
         Self {
             path,
+            all_entries: Vec::new(),
             entries: Vec::new(),
+            filter: None,
+            search_truncated: false,
             cursor: 0,
             marked: BTreeSet::new(),
             anchor: None,
             sort,
             show_hidden,
             history: Vec::new(),
+            forward: Vec::new(),
             error: None,
             loading: false,
             expanded: BTreeSet::new(),
@@ -191,11 +219,38 @@ impl PanelState {
             .sum()
     }
 
-    /// Replace the listing. The cursor goes to `select` when found; otherwise a
+    /// Replace the full listing and rebuild the displayed rows through the filter.
+    pub fn set_entries(&mut self, path: PathBuf, entries: Vec<Entry>, select: Option<&Path>) {
+        self.all_entries = entries;
+        self.apply_view(path, select);
+    }
+
+    /// Re-run the filter over the current full listing (same directory).
+    pub fn refilter(&mut self, select: Option<&Path>) {
+        let path = self.path.clone();
+        self.apply_view(path, select);
+    }
+
+    fn filtered_rows(&self) -> Vec<Entry> {
+        match &self.filter {
+            // Recursive results arrive already matched; the live filter matches names.
+            Some(filter) if !filter.recursive && !filter.matcher().is_all() => {
+                let matcher = filter.matcher();
+                self.all_entries
+                    .iter()
+                    .filter(|e| e.is_parent || matcher.matches(&e.name))
+                    .cloned()
+                    .collect()
+            }
+            _ => self.all_entries.clone(),
+        }
+    }
+
+    /// Rebuild `entries`. The cursor goes to `select` when found; otherwise a
     /// refresh of the same directory keeps its position (so deleting an entry
     /// lands on the next one) and a new directory starts at the top. Marks
     /// survive a refresh of the same directory, matched by path.
-    pub fn set_entries(&mut self, path: PathBuf, entries: Vec<Entry>, select: Option<&Path>) {
+    fn apply_view(&mut self, path: PathBuf, select: Option<&Path>) {
         let same_dir = path == self.path;
         let marked_paths: Vec<PathBuf> = if same_dir {
             self.marked
@@ -207,7 +262,7 @@ impl PanelState {
             Vec::new()
         };
         self.path = path;
-        self.entries = entries;
+        self.entries = self.filtered_rows();
         self.anchor = None;
         self.error = None;
         self.marked = self
@@ -225,11 +280,27 @@ impl PanelState {
         };
     }
 
+    /// A new navigation: remember where we were and drop the forward stack.
     pub fn push_history(&mut self, path: PathBuf) {
         self.history.push(path);
         if self.history.len() > HISTORY_LIMIT {
             self.history.remove(0);
         }
+        self.forward.clear();
+    }
+
+    /// Where "Back" goes; the current path moves to the forward stack.
+    pub fn pop_back(&mut self) -> Option<PathBuf> {
+        let target = self.history.pop()?;
+        self.forward.push(self.path.clone());
+        Some(target)
+    }
+
+    /// Where "Forward" goes; the current path moves to the back stack.
+    pub fn pop_forward(&mut self) -> Option<PathBuf> {
+        let target = self.forward.pop()?;
+        self.history.push(self.path.clone());
+        Some(target)
     }
 }
 
@@ -296,6 +367,48 @@ mod tests {
         s.mark_rows(0..=2, &base);
         assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![1, 2, 4]);
         s.mark_rows(3..=3, &BTreeSet::new());
+        assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![3]);
+    }
+
+    #[test]
+    fn back_and_forward_stacks() {
+        let mut s = state(1);
+        s.push_history("/a".into());
+        s.path = "/b".into();
+        s.push_history("/b".into());
+        s.path = "/c".into();
+        assert_eq!(s.pop_back(), Some(PathBuf::from("/b")));
+        s.path = "/b".into();
+        assert_eq!(s.forward, vec![PathBuf::from("/c")]);
+        assert_eq!(s.pop_forward(), Some(PathBuf::from("/c")));
+        s.path = "/c".into();
+        assert!(s.forward.is_empty());
+        assert_eq!(s.pop_back(), Some(PathBuf::from("/b")));
+        s.path = "/b".into();
+        s.push_history("/b".into());
+        assert!(
+            s.forward.is_empty(),
+            "a new navigation drops the forward stack"
+        );
+    }
+
+    #[test]
+    fn filter_narrows_rows_and_keeps_marks_by_path() {
+        let mut s = state(4);
+        s.toggle_mark(3); // f2
+        s.filter = Some(Filter {
+            query: "f2".into(),
+            recursive: false,
+        });
+        s.refilter(Some(Path::new("/d/f2")));
+        let names: Vec<_> = s.entries.iter().map(|e| e.name.clone()).collect();
+        assert_eq!(names, ["..", "f2"]);
+        assert_eq!(s.cursor, 1);
+        assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![1]);
+        s.filter = None;
+        s.refilter(Some(Path::new("/d/f2")));
+        assert_eq!(s.entries.len(), 5);
+        assert_eq!(s.cursor, 3);
         assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![3]);
     }
 

@@ -477,7 +477,11 @@ impl GridView {
     /// Shift+F6 / F2: rename the entry under the cursor in place.
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = self.active_panel().read(cx);
-        let (Some(old_name), Some(from)) = (panel.current_name(), panel.current_path()) else {
+        // The file name itself, not the relative path a recursive search shows.
+        let old_name = panel
+            .current_path()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let (Some(old_name), Some(from)) = (old_name, panel.current_path()) else {
             self.notify(Notification::warning("Nothing to rename"), window, cx);
             return;
         };
@@ -551,7 +555,7 @@ impl GridView {
                 .content(move |content, _, _| {
                     content
                         .child(div().text_sm().child(label))
-                        .child(Input::new(&input))
+                        .child(Input::new(&input).focus_bordered(false))
                 })
                 .ok_text(ok_text)
                 .show_cancel(true)
