@@ -13,6 +13,19 @@ Status: navigation, marking, tabs, layouts, persistence and the basic file opera
 (copy, move, rename, new folder, delete to trash) work. F3 view and F4 edit are not
 implemented yet.
 
+## Install
+
+Prebuilt binaries are on the [Releases](https://github.com/cechi/vais-commander/releases) page,
+with `SHA256SUMS` next to them.
+
+- **Linux (x86_64)**: extract `vais-commander-<version>-x86_64-linux.tar.gz` and run
+  `./install.sh` inside it (binary to `~/.local/bin`, launcher entry and icon to
+  `~/.local/share`). Needs a Vulkan driver and a Wayland or X11 session.
+- **macOS (Apple Silicon or Intel)**: unzip, move `VAIS Commander.app` to Applications. The app
+  is not signed, so the first launch needs `xattr -dr com.apple.quarantine "/Applications/VAIS Commander.app"`
+  (or right-click → Open).
+- **Windows (x86_64)**: unzip and run `vais-commander.exe`; put the folder wherever you like.
+
 ## Build & run
 
 ```sh
@@ -23,6 +36,15 @@ cargo test           # unit tests (sorting, formatting, layout, marks, config, k
 Requires Rust 1.92+. Linux needs a Vulkan driver and a Wayland or X11 session;
 Arch/CachyOS packages: `clang fontconfig wayland libxkbcommon libxkbcommon-x11 libxcb
 libx11 openssl zstd vulkan-icd-loader` plus your GPU's Vulkan ICD.
+
+## Releasing
+
+1. Bump `version` in `Cargo.toml`, commit.
+2. `git tag -a v0.x.y -m "VAIS Commander 0.x.y"` and `git push origin master v0.x.y`.
+3. The `Release` workflow builds Linux, macOS (arm64 + x86_64) and Windows packages
+   (`scripts/package.sh`), checks the tag against `Cargo.toml`, and publishes a GitHub release
+   with generated notes and `SHA256SUMS`. A tag containing `-` (e.g. `v0.2.0-beta.1`) becomes a
+   pre-release.
 
 ## Platforms
 
