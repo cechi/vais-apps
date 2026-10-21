@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=VAIS Commander
+GenericName=File Manager
+Comment=Keyboard-driven file manager with a grid of panels and tabs
+Exec=vais-commander
+Icon=vais-commander
+Terminal=false
+Categories=Utility;FileManager;FileTools;
+Keywords=files;commander;panels;grid;vais;
+StartupWMClass=vais-commander

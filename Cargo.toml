@@ -1,0 +1,29 @@
+[package]
+name = "vais-commander"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Keyboard-driven file manager with a configurable grid of panels"
+license = "MIT"
+
+[[bin]]
+name = "vais-commander"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "=0.8.0"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "5"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
+trash = "5"
+open = "5"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
