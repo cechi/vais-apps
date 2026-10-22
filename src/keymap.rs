@@ -30,6 +30,9 @@ actions!(
         // Grid: file operations
         CopyFiles,
         MoveFiles,
+        CopyToClipboard,
+        CutToClipboard,
+        PasteFromClipboard,
         RenameFile,
         MakeDir,
         DeleteFiles,
@@ -145,6 +148,9 @@ pub fn bindings() -> Vec<KeyBinding> {
         // Grid: file operations (Commander F-keys)
         KeyBinding::new("f5", CopyFiles, g),
         KeyBinding::new("f6", MoveFiles, g),
+        KeyBinding::new("secondary-c", CopyToClipboard, g),
+        KeyBinding::new("secondary-x", CutToClipboard, g),
+        KeyBinding::new("secondary-v", PasteFromClipboard, g),
         KeyBinding::new("shift-f6", RenameFile, g),
         KeyBinding::new("f2", RenameFile, g),
         KeyBinding::new("f7", MakeDir, g),

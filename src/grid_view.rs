@@ -14,6 +14,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::clipboard;
 use crate::config::{LayoutConfig, TabConfig, TabKind};
 use crate::keymap::*;
 use crate::layout::grid::{GridState, OnResize, render_grid};
@@ -38,6 +39,8 @@ struct DropMenu {
 pub enum GridEvent {
     /// Something worth persisting (or showing in the tab title) changed.
     Changed,
+    /// The file clipboard changed (the status bar shows it).
+    ClipboardChanged,
 }
 
 pub struct GridView {
@@ -684,6 +687,71 @@ impl GridView {
     fn on_move(&mut self, _: &MoveFiles, window: &mut Window, cx: &mut Context<Self>) {
         self.start_transfer(OpKind::Move, window, cx);
     }
+    fn on_copy_to_clipboard(
+        &mut self,
+        _: &CopyToClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.fill_clipboard(false, window, cx);
+    }
+    fn on_cut_to_clipboard(
+        &mut self,
+        _: &CutToClipboard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.fill_clipboard(true, window, cx);
+    }
+    fn on_paste(&mut self, _: &PasteFromClipboard, window: &mut Window, cx: &mut Context<Self>) {
+        self.paste(window, cx);
+    }
+
+    /// Ctrl+C / Ctrl+X: remember the selection for a later paste.
+    fn fill_clipboard(&mut self, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(paths) = self.selection(window, cx) else {
+            return;
+        };
+        clipboard::set(cx, paths, cut);
+        self.clipboard_changed(cx);
+    }
+
+    /// Ctrl+V: copy or move the clipboard into the active panel's directory.
+    /// Entries already there are skipped; a cut clipboard is spent.
+    fn paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let clip = clipboard::get(cx);
+        if clip.is_empty() {
+            self.notify(Notification::warning("Nothing to paste"), window, cx);
+            return;
+        }
+        let dest = self.active_panel().read(cx).path().to_path_buf();
+        let dest = std::fs::canonicalize(&dest).unwrap_or(dest);
+        let sources: Vec<PathBuf> = clip
+            .paths
+            .iter()
+            .filter(|p| p.parent() != Some(dest.as_path()))
+            .cloned()
+            .collect();
+        if clip.cut {
+            clipboard::clear(cx);
+            self.clipboard_changed(cx);
+        }
+        if sources.is_empty() {
+            self.notify(Notification::info("Already in this directory"), window, cx);
+            return;
+        }
+        let kind = if clip.cut { OpKind::Move } else { OpKind::Copy };
+        self.confirm_transfer(kind, sources, dest, window, cx);
+    }
+
+    /// Re-render every panel (cut entries are dimmed) and tell the workspace.
+    fn clipboard_changed(&mut self, cx: &mut Context<Self>) {
+        for panel in &self.panels {
+            panel.update(cx, |_, cx| cx.notify());
+        }
+        cx.emit(GridEvent::ClipboardChanged);
+    }
+
     fn on_rename(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {
         self.start_rename(window, cx);
     }
@@ -759,6 +827,9 @@ impl Render for GridView {
             .on_action(cx.listener(Self::on_mkdir))
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_delete_permanently))
+            .on_action(cx.listener(Self::on_copy_to_clipboard))
+            .on_action(cx.listener(Self::on_cut_to_clipboard))
+            .on_action(cx.listener(Self::on_paste))
             .on_action(cx.listener(Self::on_focus_next))
             .on_action(cx.listener(Self::on_focus_prev))
             .on_action(cx.listener(Self::on_focus_up))

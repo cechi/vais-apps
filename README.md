@@ -96,6 +96,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload |
 | `Ctrl+F3` / `Ctrl+F4` / `Ctrl+F5` / `Ctrl+F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
 | `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
@@ -175,6 +176,7 @@ src/ops/           copy / move / delete with byte-level progress and cancel; man
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)
 src/palette.rs     command-center style chooser: an input plus a list that fills it (used for F5/F6 destinations)
 src/keymap.rs      actions and default bindings
+src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)

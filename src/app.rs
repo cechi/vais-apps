@@ -418,6 +418,7 @@ impl Workspace {
                         this.schedule_save(cx);
                         cx.notify();
                     }
+                    GridEvent::ClipboardChanged => cx.notify(),
                 })
             })
             .collect();
@@ -900,6 +901,10 @@ impl Render for Workspace {
                 )
             }
             None => format!("Tab {}/{}", self.active_tab + 1, self.tabs.len()),
+        };
+        let status_left = match crate::clipboard::get(cx).summary() {
+            Some(clip) => format!("{status_left}  ·  Clipboard: {clip}"),
+            None => status_left,
         };
         let status_right = if cfg!(target_os = "macos") {
             "Cmd+T new tab · Cmd+W close · Ctrl+Tab / Cmd+1..9 tabs · Tab panel · Alt+1..9 layout · Cmd+L path · Cmd+Shift+. hidden · Cmd+Shift+T theme · Cmd+±/0 zoom · Cmd+Q quit"

@@ -1,4 +1,5 @@
 mod app;
+mod clipboard;
 mod config;
 mod fs;
 mod grid_view;
@@ -27,6 +28,7 @@ fn main() {
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
         settings::init(&config, cx);
+        clipboard::init(cx);
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
         gpui_kit::component::theme::Theme::set_scrollbar_mode(

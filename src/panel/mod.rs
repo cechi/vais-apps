@@ -19,6 +19,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::clipboard::FileClipboard;
 use crate::config::PanelConfig;
 use crate::fs::format::{format_time, human_size};
 use crate::fs::search::search_tree;
@@ -1151,6 +1152,10 @@ impl FilePanel {
         .menu("Move to other panel…", Box::new(MoveFiles))
         .menu("Rename…", Box::new(RenameFile))
         .separator()
+        .menu("Copy", Box::new(CopyToClipboard))
+        .menu("Cut", Box::new(CutToClipboard))
+        .menu("Paste", Box::new(PasteFromClipboard))
+        .separator()
         .menu("Toggle mark", Box::new(ToggleMark))
         .menu("Mark all", Box::new(MarkAll))
         .separator()
@@ -1166,6 +1171,8 @@ impl FilePanel {
     fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort) -> PopupMenu {
         let menu = menu
             .action_context(focus)
+            .menu("Paste", Box::new(PasteFromClipboard))
+            .separator()
             .menu("New folder…", Box::new(MakeDir))
             .menu("Open terminal here", Box::new(OpenTerminal))
             .menu("Copy directory path", Box::new(CopyPath))
@@ -1254,6 +1261,8 @@ impl FilePanel {
         };
         let is_cursor = ix == self.state.cursor;
         let is_marked = self.state.marked.contains(&ix);
+        // Cut entries wait for a paste: show them dimmed.
+        let is_cut = cx.global::<FileClipboard>().is_cut(&entry.path);
 
         // The cursor row gets a strong tint and a 1px outline in the accent
         // colour; marked rows get a yellow tint, yellow text and a yellow bar.
@@ -1272,6 +1281,7 @@ impl FilePanel {
             (transparent_black(), transparent_black())
         };
         let fg = if is_marked { c.yellow } else { c.foreground };
+        let fg = if is_cut { fg.alpha(0.5) } else { fg };
         let bar = if is_marked {
             c.yellow
         } else {
@@ -1292,6 +1302,7 @@ impl FilePanel {
         } else {
             Icon::new(IconName::File).text_color(c.muted_foreground)
         };
+        let icon = if is_cut { icon.opacity(0.5) } else { icon };
 
         // The name column keeps the full name; the extension is repeated in
         // the type column so files can be scanned by kind.
