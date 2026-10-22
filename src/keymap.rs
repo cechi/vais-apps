@@ -106,6 +106,7 @@ actions!(
         OpenFilter,
         CloseFilter,
         ToggleFilterRecursive,
+        ToggleFilterContent,
         // Palette (the command-center style chooser)
         PaletteUp,
         PaletteDown,
@@ -293,6 +294,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("right", ExpandEntry, p),
         KeyBinding::new("secondary-f", OpenFilter, p),
         KeyBinding::new("secondary-shift-f", ToggleFilterRecursive, p),
+        KeyBinding::new("secondary-shift-g", ToggleFilterContent, p),
         KeyBinding::new("escape", CloseFilter, Some(PANEL_FILTER_CONTEXT)),
         // Palette: the single-line input lets Up/Down through; Enter and Esc
         // are handled here before they reach the hosting dialog.

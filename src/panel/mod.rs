@@ -289,7 +289,7 @@ impl FilePanel {
     /// cursor on `select` or keeping it on the current entry.
     pub fn refresh(&mut self, select: Option<Location>, cx: &mut Context<Self>) {
         let select = select.or_else(|| self.state.current().map(|e| e.location.clone()));
-        if self.recursive_search_active() {
+        if self.search_active() {
             self.start_search(cx);
             return;
         }
@@ -447,7 +447,7 @@ impl FilePanel {
     /// Reload because the directory changed on disk. Not while a recursive
     /// search shows results: it would restart the whole search.
     pub fn refresh_from_disk(&mut self, cx: &mut Context<Self>) {
-        if self.recursive_search_active() || self.state.loading {
+        if self.search_active() || self.state.loading {
             return;
         }
         self.refresh(None, cx);
@@ -562,11 +562,12 @@ impl FilePanel {
     const SEARCH_LIMIT: usize = 5000;
     const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
-    fn recursive_search_active(&self) -> bool {
+    /// A subfolder or content search is what the listing shows.
+    fn search_active(&self) -> bool {
         self.state
             .filter
             .as_ref()
-            .is_some_and(|f| f.recursive && !f.matcher().is_all())
+            .is_some_and(|f| f.is_search() && !f.matcher().is_all())
     }
 
     /// Ctrl+F / the magnifier: show the bar and put the caret into it.
@@ -619,7 +620,7 @@ impl FilePanel {
 
     /// Esc / the close button: hide the bar and show the plain listing again.
     fn close_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let was_recursive = self.recursive_search_active();
+        let was_recursive = self.search_active();
         self.drop_filter(cx);
         self.filter_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -650,7 +651,7 @@ impl FilePanel {
             return;
         }
         filter.query = query;
-        if filter.recursive {
+        if filter.is_search() {
             self.schedule_search(cx);
         } else {
             self.state.refilter(None);
@@ -664,11 +665,24 @@ impl FilePanel {
             return;
         };
         filter.recursive = !filter.recursive;
-        if filter.recursive {
+        self.after_filter_mode_change(cx);
+    }
+
+    fn toggle_content(&mut self, cx: &mut Context<Self>) {
+        let Some(filter) = self.state.filter.as_mut() else {
+            return;
+        };
+        filter.content = !filter.content;
+        self.after_filter_mode_change(cx);
+    }
+
+    /// Subfolders / Contents flipped: search, or go back to the plain
+    /// listing with the live filter applied.
+    fn after_filter_mode_change(&mut self, cx: &mut Context<Self>) {
+        if self.state.filter.as_ref().is_some_and(Filter::is_search) {
             self.schedule_search(cx);
         } else {
             self.cancel_search();
-            // Back to the plain listing with the live filter applied.
             let path = self.state.path.clone();
             self.load(path, None, cx);
         }
@@ -686,7 +700,7 @@ impl FilePanel {
     /// Run the recursive search shortly after the user stops typing.
     fn schedule_search(&mut self, cx: &mut Context<Self>) {
         self.cancel_search();
-        if !self.recursive_search_active() {
+        if !self.search_active() {
             // Empty query: show the plain listing.
             let path = self.state.path.clone();
             self.load(path, None, cx);
@@ -716,10 +730,17 @@ impl FilePanel {
             show_hidden: self.state.show_hidden,
             sort: self.state.sort,
         };
-        let matcher = filter.matcher();
+        let needle = if filter.content {
+            crate::fs::search::Needle::content(&filter.query)
+        } else {
+            crate::fs::search::Needle::Name(filter.matcher())
+        };
+        let recursive = filter.recursive;
         let task = cx.background_spawn({
             let root = root.clone();
-            async move { search_tree(&root, opts, &matcher, Self::SEARCH_LIMIT, &cancel) }
+            async move {
+                search_tree(&root, opts, &needle, recursive, Self::SEARCH_LIMIT, &cancel)
+            }
         });
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let (results, truncated) = task.await;
@@ -765,6 +786,19 @@ impl FilePanel {
         self.toggle_recursive(cx);
     }
 
+    /// Ctrl+Shift+G: open the bar if needed and flip the Contents toggle.
+    fn on_toggle_filter_content(
+        &mut self,
+        _: &ToggleFilterContent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.filter.is_none() {
+            self.open_filter(window, cx);
+        }
+        self.toggle_content(cx);
+    }
+
     /// The bar under the header: query input, Subfolders toggle, counts, close.
     fn render_filter_bar(&self, c: &Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
         let filter = self.state.filter.as_ref()?;
@@ -775,7 +809,7 @@ impl FilePanel {
             .iter()
             .filter(|e| !e.is_parent)
             .count();
-        let count = if filter.recursive {
+        let count = if filter.is_search() {
             format!(
                 "{shown} results{}{}",
                 if self.state.search_truncated {
@@ -817,6 +851,13 @@ impl FilePanel {
                         .label("Subfolders")
                         .selected(filter.recursive)
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_recursive(cx))),
+                )
+                .child(
+                    Button::new(("filter-content", self.index))
+                        .xsmall()
+                        .label("Contents")
+                        .selected(filter.content)
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_content(cx))),
                 )
                 .child(
                     div()
@@ -2252,6 +2293,7 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_collapse))
             .on_action(cx.listener(Self::on_open_filter))
             .on_action(cx.listener(Self::on_toggle_filter_recursive))
+            .on_action(cx.listener(Self::on_toggle_filter_content))
             .on_action(cx.listener(Self::on_set_view))
             .on_action(cx.listener(Self::on_toggle_column))
             .size_full()

@@ -14,11 +14,19 @@ pub struct Filter {
     pub query: String,
     /// Search subdirectories recursively instead of filtering the listing.
     pub recursive: bool,
+    /// Look for the text inside files instead of matching names.
+    pub content: bool,
 }
 
 impl Filter {
     pub fn matcher(&self) -> Matcher {
         Matcher::new(&self.query)
+    }
+
+    /// The listing comes from a search task (subfolders or contents), not
+    /// from filtering the directory's own entries.
+    pub fn is_search(&self) -> bool {
+        self.recursive || self.content
     }
 }
 
@@ -261,7 +269,7 @@ impl PanelState {
     fn filtered_rows(&self) -> Vec<Entry> {
         match &self.filter {
             // Recursive results arrive already matched; the live filter matches names.
-            Some(filter) if !filter.recursive && !filter.matcher().is_all() => {
+            Some(filter) if !filter.is_search() && !filter.matcher().is_all() => {
                 let matcher = filter.matcher();
                 self.all_entries
                     .iter()
@@ -435,6 +443,7 @@ mod tests {
         s.filter = Some(Filter {
             query: "f2".into(),
             recursive: false,
+            content: false,
         });
         s.refilter(Some(&Location::local("/d/f2")));
         let names: Vec<_> = s.entries.iter().map(|e| e.name.clone()).collect();

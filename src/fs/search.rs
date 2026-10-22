@@ -1,19 +1,68 @@
-//! Recursive name search below a directory, for the panel's "Subfolders" filter.
+//! Name and content search below a directory, for the panel's "Subfolders"
+//! and "Contents" filter toggles.
 
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::filter::Matcher;
 use super::{Entry, ReadOptions, read_dir_sorted};
 use crate::vfs::Location;
 
-/// Walk `root` depth first (sorted like the panel) and collect entries whose
-/// name matches. Names become paths relative to `root`; directory symlinks are
-/// not followed. Stops at `limit` results or when `cancel` is set; the second
-/// value says whether the walk was cut short.
+/// How much of a file the content search reads.
+const CONTENT_LIMIT: u64 = 8 * 1024 * 1024;
+
+/// What to look for: a name pattern, or text inside files.
+#[derive(Debug, Clone)]
+pub enum Needle {
+    Name(Matcher),
+    /// Lowercased text; files are matched case-insensitively.
+    Content(String),
+}
+
+impl Needle {
+    pub fn content(text: &str) -> Self {
+        Needle::Content(text.trim().to_lowercase())
+    }
+
+    fn matches(&self, entry: &Entry) -> bool {
+        match self {
+            Needle::Name(matcher) => matcher.matches(&entry.name),
+            Needle::Content(text) => {
+                !entry.is_dir() && !text.is_empty() && file_contains(&entry.location, text)
+            }
+        }
+    }
+}
+
+/// Whether the (text) file at `loc` contains `needle`; binary files and the
+/// unreadable are skipped.
+fn file_contains(loc: &Location, needle: &str) -> bool {
+    let Ok(backend) = crate::vfs::backend_for(loc) else {
+        return false;
+    };
+    let Ok(reader) = backend.open_read(loc) else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    if reader.take(CONTENT_LIMIT).read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    if bytes.iter().take(8192).any(|&b| b == 0) {
+        return false;
+    }
+    String::from_utf8_lossy(&bytes).to_lowercase().contains(needle)
+}
+
+/// Walk `root` depth first (sorted like the panel; only `root` itself when
+/// `recursive` is off) and collect the entries `needle` matches. Names
+/// become paths relative to `root`; directory symlinks are not followed.
+/// Stops at `limit` results or when `cancel` is set; the second value says
+/// whether the walk was cut short.
 pub fn search_tree(
     root: &Location,
     opts: ReadOptions,
-    matcher: &Matcher,
+    needle: &Needle,
+    recursive: bool,
     limit: usize,
     cancel: &AtomicBool,
 ) -> (Vec<Entry>, bool) {
@@ -28,10 +77,10 @@ pub fn search_tree(
         };
         let mut subdirs = Vec::new();
         for mut entry in entries.into_iter().filter(|e| !e.is_parent) {
-            if entry.is_dir() && !entry.is_symlink() {
+            if recursive && entry.is_dir() && !entry.is_symlink() {
                 subdirs.push(entry.location.clone());
             }
-            if matcher.matches(&entry.name) {
+            if needle.matches(&entry) {
                 entry.name = entry
                     .location
                     .relative_to(root)
@@ -71,7 +120,8 @@ mod tests {
         let (found, truncated) = search_tree(
             &root_loc,
             ReadOptions::default(),
-            &Matcher::new("*.png"),
+            &Needle::Name(Matcher::new("*.png")),
+            true,
             100,
             &cancel,
         );
@@ -102,12 +152,39 @@ mod tests {
         let (found, truncated) = search_tree(
             &root_loc,
             ReadOptions::default(),
-            &Matcher::new("png"),
+            &Needle::Name(Matcher::new("png")),
+            true,
             2,
             &cancel,
         );
         assert_eq!(found.len(), 2);
         assert!(truncated);
+
+        // Contents: case-insensitive text, binary files skipped, only the
+        // top level without recursion.
+        fs::write(root.join("a/notes.txt"), "Hello Needle").unwrap();
+        fs::write(root.join("a/inner/deep.txt"), "needle again").unwrap();
+        fs::write(root.join("a/blob.bin"), b"needle\0binary").unwrap();
+        fs::write(root.join("top.txt"), "no match").unwrap();
+        let (found, _) = search_tree(
+            &root_loc,
+            ReadOptions::default(),
+            &Needle::content("NEEDLE"),
+            true,
+            100,
+            &cancel,
+        );
+        let names: Vec<_> = found.iter().map(|e| e.name.clone()).collect();
+        assert_eq!(names, [rel(&["a", "notes.txt"]), rel(&["a", "inner", "deep.txt"])]);
+        let (found, _) = search_tree(
+            &Location::local(root.join("a")),
+            ReadOptions::default(),
+            &Needle::content("needle"),
+            false,
+            100,
+            &cancel,
+        );
+        assert_eq!(found.len(), 1);
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -94,7 +94,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Backspace` | Parent directory |
 | `Alt+←` / `Alt+→` | Back / forward in the panel's history (also the arrows before the path) |
 | `Ctrl+L` | Edit the path (`~` expands); `Enter` to go, `Esc` to cancel. The path bar is also a breadcrumb: click a segment to go there, click the space after it to edit |
-| `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
+| `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000); "Contents" (`Ctrl+Shift+G`) looks for the text inside files instead (case-insensitive, text files up to 8 MiB, also on connections and in archives). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload (local panels also reload on their own when the directory changes) |
 | `Shift+Enter` | Open the file with its default application (Enter does too, except for archives) |
