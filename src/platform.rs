@@ -105,6 +105,8 @@ pub fn user_places() -> Vec<(String, PathBuf, gpui_kit::component::IconName)> {
 /// Mounted volumes worth listing: the roots plus real file systems mounted
 /// under the usual media/mount locations.
 pub fn volumes() -> Vec<(String, PathBuf)> {
+    // Only Linux and macOS add to the list below.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(unused_mut))]
     let mut volumes: Vec<(String, PathBuf)> = roots()
         .into_iter()
         .map(|r| (r.to_string_lossy().into_owned(), r))

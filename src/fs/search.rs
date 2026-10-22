@@ -75,8 +75,23 @@ mod tests {
             100,
             &cancel,
         );
+        // Relative names use the platform separator.
+        let rel = |parts: &[&str]| {
+            parts
+                .iter()
+                .collect::<PathBuf>()
+                .to_string_lossy()
+                .into_owned()
+        };
         let names: Vec<_> = found.iter().map(|e| e.name.clone()).collect();
-        assert_eq!(names, ["top.png", "a/x.png", "a/inner/y.png"]);
+        assert_eq!(
+            names,
+            [
+                rel(&["top.png"]),
+                rel(&["a", "x.png"]),
+                rel(&["a", "inner", "y.png"]),
+            ]
+        );
         assert!(!truncated);
         assert!(found.iter().all(|e| e.depth == 0 && e.path.is_absolute()));
 
