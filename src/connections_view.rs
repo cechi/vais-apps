@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -175,9 +176,16 @@ impl ConnectionsView {
             "" => self.protocol.default_port(),
             p => p.parse().map_err(|_| "port must be a number".to_string())?,
         };
+        // An empty SFTP user is fine when ~/.ssh/config knows the host.
         let user = text(&self.user);
-        if user.is_empty() && self.protocol.uses_keys() {
-            return Err("user is required".into());
+        if user.is_empty()
+            && self.protocol.uses_keys()
+            && crate::ssh_config::SshConfig::load()
+                .resolve(&host)
+                .user
+                .is_none()
+        {
+            return Err("user is required (or set it for this host in ~/.ssh/config)".into());
         }
         let path = match text(&self.path).as_str() {
             "" => "/".to_string(),
@@ -267,6 +275,85 @@ impl ConnectionsView {
 
     fn on_close(&mut self, _: &CloseConnections, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(ConnectionsEvent::Close);
+    }
+
+    /// Pick a host from `~/.ssh/config` and start a new connection from it.
+    fn import_from_ssh_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::palette::{self, Palette, PaletteItem};
+        let hosts = crate::ssh_config::SshConfig::load().aliases();
+        let items: Vec<PaletteItem> = hosts
+            .iter()
+            .map(|h| {
+                let detail = match (&h.user, h.port) {
+                    (Some(user), Some(port)) => format!("{user}@{}:{port}", h.address()),
+                    (Some(user), None) => format!("{user}@{}", h.address()),
+                    (None, Some(port)) => format!("{}:{port}", h.address()),
+                    (None, None) => h.address().to_string(),
+                };
+                PaletteItem::new(h.alias.clone())
+                    .detail(detail)
+                    .icon(IconName::Globe)
+            })
+            .collect();
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::pick_filtered(items, "Filter hosts", window, cx)
+                .hint("No Host entries in ~/.ssh/config")
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let Some(host) = choice.item.and_then(|ix| hosts.get(ix).cloned()) else {
+                        return;
+                    };
+                    let view = view.clone();
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| this.fill_from_ssh_host(&host, window, cx));
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Add from ssh config".to_string(), palette, window, cx);
+    }
+
+    /// A new, unsaved connection for an ssh config host: the alias as the
+    /// host (so later changes to the ssh config still apply) with the known
+    /// values shown.
+    fn fill_from_ssh_host(
+        &mut self,
+        host: &crate::ssh_config::SshHost,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selected = None;
+        self.load_selected(window, cx);
+        self.protocol = Protocol::Sftp;
+        self.auth = AuthMethod::Auto;
+        self.set_text(&self.name, host.alias.clone(), window, cx);
+        self.set_text(&self.host, host.alias.clone(), window, cx);
+        self.set_text(
+            &self.port,
+            host.port
+                .unwrap_or(Protocol::Sftp.default_port())
+                .to_string(),
+            window,
+            cx,
+        );
+        self.set_text(
+            &self.user,
+            host.user.clone().unwrap_or_default(),
+            window,
+            cx,
+        );
+        self.set_text(
+            &self.key,
+            host.identity_files
+                .first()
+                .map(|k| k.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            window,
+            cx,
+        );
+        self.dirty = true;
+        cx.notify();
     }
 
     fn field(label: &'static str, input: &Entity<InputState>, muted: Hsla) -> Div {
@@ -432,6 +519,16 @@ impl Render for ConnectionsView {
                             .border_color(border)
                             .child(div().flex_1().font_semibold().child("Connections"))
                             .child(
+                                Button::new("connections-import")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Globe)
+                                    .label("ssh config")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.import_from_ssh_config(window, cx)
+                                    })),
+                            )
+                            .child(
                                 Button::new("connections-new")
                                     .ghost()
                                     .xsmall()
@@ -540,7 +637,7 @@ impl Render for ConnectionsView {
                             .text_xs()
                             .text_color(muted)
                             .child(if uses_keys {
-                                "Without a stored password you are asked when connecting. Agent / keys tries the SSH agent and ~/.ssh keys first."
+                                "Host may be an alias from ~/.ssh/config: its HostName, Port, User and IdentityFile apply where the fields are empty or at their defaults. Without a stored password you are asked when connecting; Agent / keys tries the SSH agent and ~/.ssh keys first."
                             } else {
                                 "Plain FTP, passive mode. Leave the user empty for anonymous access; otherwise you are asked for the password unless it is stored."
                             }),

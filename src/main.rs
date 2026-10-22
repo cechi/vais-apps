@@ -18,6 +18,7 @@ mod rename;
 mod settings;
 mod settings_view;
 mod sidebar;
+mod ssh_config;
 mod tabs;
 mod theme;
 mod thumbs;

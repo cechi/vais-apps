@@ -182,7 +182,11 @@ connections…" in the sidebar opens the connection manager tab (list + form, Co
 Disconnect, Remove). Authentication tries the SSH agent and the usual `~/.ssh` keys, a
 chosen key file, or a password; a password is asked for with a masked prompt and, for
 connections set to password authentication, stored in the system keyring (Secret
-Service / Keychain / Credential Manager). The host key is not verified yet.
+Service / Keychain / Credential Manager). The host key is not verified yet. Hosts from
+`~/.ssh/config` (with `Include`) work too: a host field holding an alias gets its
+`HostName`, `Port`, `User` and `IdentityFile` from there where the connection leaves
+them empty or at the default, and the "ssh config" button in the manager lists the
+aliases to start a connection from.
 
 A remote location is written as `id:/path` (`nas:/srv/www`) and can be typed into the
 path bar (`Ctrl+L`); panels on a connection are restored at startup and connect when
@@ -230,6 +234,7 @@ src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, ma
 src/vfs/           Location (local path or connection + path) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab
+src/ssh_config.rs  reader for ~/.ssh/config (aliases, HostName, Port, User, IdentityFile, Include)
 src/fs/            directory listing through the backend, natural sort, search, size/date formatting
 src/ops/           copy / move / delete with byte-level progress and cancel; manager.rs runs them
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)

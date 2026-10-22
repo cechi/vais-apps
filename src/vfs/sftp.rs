@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ssh2::{FileStat, RenameFlags, Session, Sftp};
 
 use super::{Backend, ConnId, Location, Meta};
-use crate::connections::{AuthMethod, ConnectError, ConnectionConfig};
+use crate::connections::{AuthMethod, ConnectError, ConnectionConfig, Protocol};
 use crate::fs::{Entry, EntryKind};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -33,11 +33,29 @@ pub fn connect(
     password: Option<&str>,
 ) -> Result<Arc<dyn Backend>, ConnectError> {
     let other = |e: String| ConnectError::Other(e);
-    let addr = (config.host.as_str(), config.port)
+    // `~/.ssh/config` fills in what the connection leaves at its defaults:
+    // the address behind an alias, its port, user and identity files.
+    let ssh = crate::ssh_config::SshConfig::load().resolve(&config.host);
+    let address = ssh.address().to_string();
+    let port = match ssh.port {
+        Some(port) if config.port == Protocol::Sftp.default_port() => port,
+        _ => config.port,
+    };
+    let user = if config.user.is_empty() {
+        ssh.user.clone().ok_or_else(|| {
+            other(format!(
+                "{}: no user (set one, or in ~/.ssh/config)",
+                config.host
+            ))
+        })?
+    } else {
+        config.user.clone()
+    };
+    let addr = (address.as_str(), port)
         .to_socket_addrs()
-        .map_err(|e| other(format!("{}: {e}", config.host)))?
+        .map_err(|e| other(format!("{address}: {e}")))?
         .next()
-        .ok_or_else(|| other(format!("{}: no address", config.host)))?;
+        .ok_or_else(|| other(format!("{address}: no address")))?;
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| other(format!("{}: {e}", config.host)))?;
     let mut session = Session::new().map_err(|e| other(e.message().to_string()))?;
@@ -51,7 +69,7 @@ pub fn connect(
         log::info!("{}: host key {} bytes", config.host, key.len());
     }
 
-    let user = config.user.as_str();
+    let user = user.as_str();
     match config.auth {
         AuthMethod::Password => {
             let Some(password) = password else {
@@ -72,7 +90,7 @@ pub fn connect(
         AuthMethod::Auto => {
             let _ = session.userauth_agent(user);
             if !session.authenticated() {
-                for key in default_keys(config) {
+                for key in default_keys(config, &ssh.identity_files) {
                     if session.userauth_pubkey_file(user, None, &key, None).is_ok() {
                         break;
                     }
@@ -102,11 +120,12 @@ pub fn connect(
 }
 
 /// The configured key and the usual files in `~/.ssh`, those that exist.
-fn default_keys(config: &ConnectionConfig) -> Vec<PathBuf> {
+fn default_keys(config: &ConnectionConfig, from_ssh_config: &[PathBuf]) -> Vec<PathBuf> {
     let mut keys = Vec::new();
     if let Some(key) = &config.key {
         keys.push(key.clone());
     }
+    keys.extend(from_ssh_config.iter().cloned());
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         let ssh = Path::new(&home).join(".ssh");
         for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
