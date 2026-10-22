@@ -416,10 +416,9 @@ fn action_detail(action: &dyn Action) -> Option<String> {
         Some(format!("{:?}", a.column))
     } else if let Some(a) = any.downcast_ref::<ActivateTab>() {
         Some((a.index + 1).to_string())
-    } else if let Some(a) = any.downcast_ref::<SetLayout>() {
-        Some(format!("{}x{}", a.rows, a.cols))
     } else {
-        None
+        any.downcast_ref::<SetLayout>()
+            .map(|a| format!("{}x{}", a.rows, a.cols))
     }
 }
 
