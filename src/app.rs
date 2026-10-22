@@ -25,6 +25,7 @@ use crate::ops::OpKind;
 use crate::ops::manager::{ManagerEvent, OperationsManager, summary};
 use crate::ops_panel::{OperationsPanel, PanelEvent as OpsPanelEvent};
 use crate::palette::{self, Palette, PaletteItem};
+use crate::rename::view::{RenameEvent, RenameView};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
@@ -362,25 +363,83 @@ impl Workspace {
         let ops = self.ops.clone();
         let view = cx.new(|cx| GridView::new(cfg, ops, window, cx));
         self.tabs.push(Tab::grid(view));
-        self.resubscribe(cx);
+        self.resubscribe(window, cx);
     }
 
     /// Tabs come and go, so the subscriptions are rebuilt from the list.
-    fn resubscribe(&mut self, cx: &mut Context<Self>) {
-        self.tab_subscriptions = self
+    fn resubscribe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut subscriptions = Vec::new();
+        for tab in &self.tabs {
+            if let Some(view) = tab.grid_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, _view, event, window, cx| match event {
+                        GridEvent::Changed => {
+                            this.schedule_save(cx);
+                            cx.notify();
+                        }
+                        GridEvent::ClipboardChanged => cx.notify(),
+                        GridEvent::BatchRename(paths) => {
+                            this.open_rename(paths.clone(), window, cx)
+                        }
+                    },
+                ));
+            }
+            if let Some(view) = tab.rename_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, view, event, window, cx| {
+                        this.finish_rename(view, event, window, cx);
+                    },
+                ));
+            }
+        }
+        self.tab_subscriptions = subscriptions;
+    }
+
+    /// Open the batch rename form for `paths` in a new tab next to the current one.
+    fn open_rename(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.new(|cx| RenameView::new(paths, window, cx));
+        let ix = self.active_tab + 1;
+        self.tabs.insert(ix, Tab::rename(view));
+        self.resubscribe(window, cx);
+        self.activate_tab(ix, window, cx);
+    }
+
+    /// The rename form is done: close its tab, reload the panels showing
+    /// that directory and say what happened.
+    fn finish_rename(
+        &mut self,
+        view: &Entity<RenameView>,
+        event: &RenameEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self
             .tabs
             .iter()
-            .filter_map(|tab| tab.grid_view())
-            .map(|view| {
-                cx.subscribe(view, |this, _view, event, cx| match event {
-                    GridEvent::Changed => {
-                        this.schedule_save(cx);
-                        cx.notify();
-                    }
-                    GridEvent::ClipboardChanged => cx.notify(),
-                })
-            })
-            .collect();
+            .position(|tab| tab.rename_view() == Some(view))
+        {
+            self.tabs.remove(ix);
+            self.resubscribe(window, cx);
+            let next = if ix < self.active_tab || self.active_tab >= self.tabs.len() {
+                self.active_tab.saturating_sub(1)
+            } else {
+                self.active_tab
+            };
+            self.activate_tab(next, window, cx);
+        }
+        if let RenameEvent::Done { dir, renamed } = event {
+            for grid in self.tabs.iter().filter_map(|tab| tab.grid_view()) {
+                grid.update(cx, |grid, cx| grid.refresh_dir(dir, cx));
+            }
+            window.push_notification(
+                Notification::success(format!("Renamed {renamed} items")),
+                cx,
+            );
+        }
     }
 
     fn activate_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -395,17 +454,17 @@ impl Workspace {
 
     /// Open a new tab next to the current one, as a copy of its layout and paths.
     fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let cfg = self.active_tab().config(cx);
+        let cfg = self.active_tab().config(cx).unwrap_or_default();
         let ops = self.ops.clone();
         let view = cx.new(|cx| GridView::new(&cfg, ops, window, cx));
         let ix = self.active_tab + 1;
         self.tabs.insert(ix, Tab::grid(view));
-        self.resubscribe(cx);
+        self.resubscribe(window, cx);
         self.activate_tab(ix, window, cx);
     }
 
     /// Move the tab at `from` so that it ends up at position `to`.
-    fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+    fn move_tab(&mut self, from: usize, to: usize, window: &mut Window, cx: &mut Context<Self>) {
         let to = to.min(self.tabs.len().saturating_sub(1));
         if from >= self.tabs.len() || from == to {
             return;
@@ -423,7 +482,7 @@ impl Workspace {
         } else {
             active_id
         };
-        self.resubscribe(cx);
+        self.resubscribe(window, cx);
         self.schedule_save(cx);
         cx.notify();
     }
@@ -433,7 +492,7 @@ impl Workspace {
             return;
         }
         self.tabs.remove(ix);
-        self.resubscribe(cx);
+        self.resubscribe(window, cx);
         let next = if ix < self.active_tab || self.active_tab >= self.tabs.len() {
             self.active_tab.saturating_sub(1)
         } else {
@@ -481,8 +540,12 @@ impl Workspace {
             sidebar_open: self.sidebar_open,
             drop_action: crate::settings::get(cx).drop_action,
             window: self.window_cfg,
-            active_tab: self.active_tab,
-            tabs: self.tabs.iter().map(|t| t.config(cx)).collect(),
+            // Transient tabs are not saved; the active index counts saved tabs only.
+            active_tab: self.tabs[..self.active_tab.min(self.tabs.len())]
+                .iter()
+                .filter(|t| t.config(cx).is_some())
+                .count(),
+            tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             ..Default::default()
         };
         if let Err(err) = config.save() {
@@ -695,8 +758,8 @@ impl Workspace {
                     }
                 })
                 .drag_over::<DragTab>(move |style, _, _, _| style.bg(drop_bg))
-                .on_drop(cx.listener(move |this, drag: &DragTab, _window, cx| {
-                    this.move_tab(drag.index, ix, cx);
+                .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
+                    this.move_tab(drag.index, ix, window, cx);
                 }))
                 // Fonts reserve more room above capitals (accents) than below
                 // the baseline, so a centred line box leaves the title looking
@@ -795,9 +858,9 @@ impl Workspace {
                     .border_b_1()
                     .border_color(border)
                     .drag_over::<DragTab>(move |style, _, _, _| style.bg(drop_bg))
-                    .on_drop(cx.listener(|this, drag: &DragTab, _window, cx| {
+                    .on_drop(cx.listener(|this, drag: &DragTab, window, cx| {
                         let last = this.tabs.len().saturating_sub(1);
-                        this.move_tab(drag.index, last, cx);
+                        this.move_tab(drag.index, last, window, cx);
                     })),
             )
             .child(

@@ -100,7 +100,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
 | `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
-| `F2` / `Shift+F6` | Rename the entry under the cursor (the name without its extension is preselected) |
+| `F2` / `Shift+F6` | Rename the entry under the cursor (the name without its extension is preselected). With several entries marked, a batch rename form opens in its own tab: masks (`[N]` name, `[E]` extension, `[C]` counter with start / step / digits), find & replace (plain or regex with `$1` groups, optional ignore case), case change, and a live preview that flags empty, duplicate or existing names. `Ctrl+Enter` renames, `Esc` closes |
 | `F7` | New folder |
 | `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently |
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
@@ -177,6 +177,7 @@ src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, ca
 src/palette.rs     command-center style dialog body: value input + rows (F5/F6, F2, F7) or a choice list (F8, conflicts, themes)
 src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
+src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)

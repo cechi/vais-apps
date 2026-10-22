@@ -34,6 +34,8 @@ pub enum GridEvent {
     Changed,
     /// The file clipboard changed (the status bar shows it).
     ClipboardChanged,
+    /// F2 with several entries marked: open the batch rename form for them.
+    BatchRename(Vec<PathBuf>),
 }
 
 pub struct GridView {
@@ -530,6 +532,11 @@ impl GridView {
     }
 
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let marked = self.active_panel().read(cx).selected_paths();
+        if marked.len() > 1 {
+            cx.emit(GridEvent::BatchRename(marked));
+            return;
+        }
         let panel = self.active_panel().read(cx);
         // The file name itself, not the relative path a recursive search shows.
         let old_name = panel
@@ -604,6 +611,15 @@ impl GridView {
         self.ops.update(cx, |m, cx| {
             m.start(request, cx);
         });
+    }
+
+    /// Reload every panel showing `dir` (after a batch rename).
+    pub fn refresh_dir(&mut self, dir: &Path, cx: &mut Context<Self>) {
+        for panel in &self.panels {
+            if panel.read(cx).path() == dir {
+                panel.update(cx, |p, cx| p.refresh(None, cx));
+            }
+        }
     }
 
     fn refresh_active(&mut self, select: Option<PathBuf>, cx: &mut Context<Self>) {

@@ -6950,6 +6950,7 @@ dependencies = [
  "gpui-kit",
  "log",
  "open",
+ "regex",
  "serde",
  "toml 0.8.23",
  "trash",

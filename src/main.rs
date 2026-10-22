@@ -10,6 +10,7 @@ mod ops_panel;
 mod palette;
 mod panel;
 mod platform;
+mod rename;
 mod settings;
 mod sidebar;
 mod tabs;

@@ -10,6 +10,7 @@ pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 pub const PALETTE_CONTEXT: &str = "Palette";
+pub const RENAME_CONTEXT: &str = "RenameForm";
 
 actions!(
     vais,
@@ -84,6 +85,9 @@ actions!(
         PaletteDown,
         PaletteConfirm,
         PaletteCancel,
+        // Batch rename form
+        ApplyRename,
+        CancelRename,
     ]
 );
 
@@ -215,6 +219,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("down", PaletteDown, Some(PALETTE_CONTEXT)),
         KeyBinding::new("enter", PaletteConfirm, Some(PALETTE_CONTEXT)),
         KeyBinding::new("escape", PaletteCancel, Some(PALETTE_CONTEXT)),
+        KeyBinding::new("secondary-enter", ApplyRename, Some(RENAME_CONTEXT)),
+        KeyBinding::new("escape", CancelRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),
     ];
     if mac {
