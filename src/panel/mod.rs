@@ -5,6 +5,8 @@ pub mod view;
 
 use std::ops::Range;
 use std::path::PathBuf;
+
+use crate::vfs::Location;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -71,7 +73,7 @@ struct Marquee {
 /// Entries being dragged with the mouse.
 #[derive(Clone, Debug)]
 pub struct DragEntries {
-    pub paths: Vec<PathBuf>,
+    pub paths: Vec<Location>,
 }
 
 /// The little label that follows the mouse while dragging.
@@ -103,7 +105,10 @@ pub enum PanelEvent {
     /// Escape with nothing left to clear: cancel a running operation, if any.
     CancelRequested,
     /// Entries were dropped onto `dest` (a directory shown in this panel).
-    Dropped { paths: Vec<PathBuf>, dest: PathBuf },
+    Dropped {
+        paths: Vec<Location>,
+        dest: Location,
+    },
 }
 
 pub struct FilePanel {
@@ -246,31 +251,31 @@ impl FilePanel {
         }
     }
 
-    pub fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &Location {
         &self.state.path
     }
 
     /// Absolute paths an operation acts on (marked entries, else the cursor entry).
-    pub fn selected_paths(&self) -> Vec<PathBuf> {
+    pub fn selected_paths(&self) -> Vec<Location> {
         self.state
             .selected_entries()
             .into_iter()
-            .map(|e| e.path.clone())
+            .map(|e| e.location.clone())
             .collect()
     }
 
     /// Path of the entry under the cursor, unless it is `..`.
-    pub fn current_path(&self) -> Option<PathBuf> {
+    pub fn current_path(&self) -> Option<Location> {
         self.state
             .current()
             .filter(|e| !e.is_parent)
-            .map(|e| e.path.clone())
+            .map(|e| e.location.clone())
     }
 
     /// Re-read the directory (and its expanded subdirectories), placing the
     /// cursor on `select` or keeping it on the current entry.
-    pub fn refresh(&mut self, select: Option<PathBuf>, cx: &mut Context<Self>) {
-        let select = select.or_else(|| self.state.current().map(|e| e.path.clone()));
+    pub fn refresh(&mut self, select: Option<Location>, cx: &mut Context<Self>) {
+        let select = select.or_else(|| self.state.current().map(|e| e.location.clone()));
         if self.recursive_search_active() {
             self.start_search(cx);
             return;
@@ -321,10 +326,10 @@ impl FilePanel {
 
     /// Read `path` on the background executor and apply the result unless a
     /// newer load has been started in the meantime.
-    fn load(&mut self, path: PathBuf, select: Option<PathBuf>, cx: &mut Context<Self>) {
+    fn load(&mut self, path: Location, select: Option<Location>, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
-        if platform::is_roots_path(&path) {
+        if path.is_roots() {
             let roots = platform::roots();
             if roots.len() == 1 {
                 // A single root (Unix): the roots listing would be pointless.
@@ -332,15 +337,36 @@ impl FilePanel {
                     .into_iter()
                     .next()
                     .unwrap_or_else(platform::default_root);
-                return self.load(root, select, cx);
+                return self.load(Location::Local(root), select, cx);
             }
             self.state.loading = false;
-            self.state
-                .set_entries(path, read_roots(), select.as_deref());
+            self.state.set_entries(path, read_roots(), select.as_ref());
             self.scroll_to_cursor();
             cx.emit(PanelEvent::Changed);
             cx.notify();
             return;
+        }
+        // A remote directory needs its connection first; the grid reloads the
+        // panel once the connection reports a change.
+        if let Some(conn) = path.conn().cloned() {
+            use crate::connections::Status;
+            match crate::connections::ensure(&conn, cx) {
+                Status::Connected => {}
+                Status::Failed(err) => {
+                    self.state.loading = false;
+                    self.state.path = path;
+                    self.state.error = Some(format!("{conn}: {err}"));
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    self.state.loading = true;
+                    self.state.path = path;
+                    self.state.error = None;
+                    cx.notify();
+                    return;
+                }
+            }
         }
         self.state.loading = true;
         let opts = ReadOptions {
@@ -361,7 +387,7 @@ impl FilePanel {
                 panel.state.loading = false;
                 match result {
                     Ok(entries) => {
-                        panel.state.set_entries(path, entries, select.as_deref());
+                        panel.state.set_entries(path, entries, select.as_ref());
                         panel.scroll_to_cursor();
                         cx.emit(PanelEvent::Changed);
                     }
@@ -377,11 +403,11 @@ impl FilePanel {
     }
 
     /// Go to `path` (recorded in the history), as if entered from the path bar.
-    pub fn navigate_to(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    pub fn navigate_to(&mut self, path: Location, cx: &mut Context<Self>) {
         self.navigate(path, None, cx);
     }
 
-    fn navigate(&mut self, path: PathBuf, select: Option<PathBuf>, cx: &mut Context<Self>) {
+    fn navigate(&mut self, path: Location, select: Option<Location>, cx: &mut Context<Self>) {
         if path != self.state.path {
             let current = self.state.path.clone();
             self.state.push_history(current);
@@ -398,16 +424,31 @@ impl FilePanel {
         if entry.is_parent {
             self.go_up(cx);
         } else if entry.is_dir() {
-            let path = entry.path.clone();
+            let path = entry.location.clone();
             self.navigate(path, None, cx);
-        } else if let Err(err) = open::that_detached(&entry.path) {
-            self.state.error = Some(format!("{}: {err}", entry.name));
-            cx.notify();
+        } else {
+            // Remote files are fetched into the cache first, off the UI thread.
+            let (name, location) = (entry.name.clone(), entry.location.clone());
+            let task = cx.background_spawn(async move {
+                crate::vfs::local_copy(&location)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| open::that_detached(&path).map_err(|e| e.to_string()))
+            });
+            cx.spawn(async move |this, cx| {
+                if let Err(err) = task.await {
+                    this.update(cx, |panel, cx| {
+                        panel.state.error = Some(format!("{name}: {err}"));
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            })
+            .detach();
         }
     }
 
     fn go_up(&mut self, cx: &mut Context<Self>) {
-        let Some(parent) = platform::parent_of(&self.state.path) else {
+        let Some(parent) = self.state.path.parent() else {
             return;
         };
         let select = Some(self.state.path.clone());
@@ -552,7 +593,7 @@ impl FilePanel {
         let Some(filter) = self.state.filter.clone() else {
             return;
         };
-        if platform::is_roots_path(&self.state.path) {
+        if self.state.path.is_roots() {
             return;
         }
         self.generation += 1;
@@ -579,7 +620,7 @@ impl FilePanel {
                 panel.searching = false;
                 panel.search_cancel = None;
                 let mut entries = Vec::with_capacity(results.len() + 1);
-                if let Some(parent) = platform::parent_of(&root) {
+                if let Some(parent) = root.parent() {
                     entries.push(parent_entry(parent));
                 }
                 entries.extend(results);
@@ -694,21 +735,36 @@ impl FilePanel {
         use std::path::Component;
 
         let path = &self.state.path;
-        let mut crumbs: Vec<(String, PathBuf)> = Vec::new();
-        if platform::is_roots_path(path) {
-            crumbs.push((platform::display_name(path), path.clone()));
-        } else {
-            let mut acc = PathBuf::new();
-            for component in path.components() {
-                acc.push(component.as_os_str());
-                let label = match component {
-                    Component::RootDir => "/".to_string(),
-                    other => other.as_os_str().to_string_lossy().into_owned(),
-                };
-                crumbs.push((label, acc.clone()));
+        let mut crumbs: Vec<(String, Location)> = Vec::new();
+        match path {
+            Location::Local(local) if platform::is_roots_path(local) => {
+                crumbs.push((platform::display_name(local), path.clone()));
+            }
+            Location::Local(local) => {
+                let mut acc = PathBuf::new();
+                for component in local.components() {
+                    acc.push(component.as_os_str());
+                    let label = match component {
+                        Component::RootDir => "/".to_string(),
+                        other => other.as_os_str().to_string_lossy().into_owned(),
+                    };
+                    crumbs.push((label, Location::Local(acc.clone())));
+                }
+            }
+            Location::Remote { conn, path: remote } => {
+                // The connection first, then each directory.
+                let mut acc = Location::remote(conn.0.clone(), "/");
+                crumbs.push((conn.to_string(), acc.clone()));
+                for segment in remote.split('/').filter(|s| !s.is_empty()) {
+                    acc = acc.join(segment);
+                    crumbs.push((segment.to_string(), acc.clone()));
+                }
             }
         }
         let last = crumbs.len().saturating_sub(1);
+        // A local path starts with "/" which needs no separator after it; a
+        // connection name does.
+        let separator_after_first = !path.is_local();
         let (hover, fg, muted) = (c.list_hover, c.foreground, c.muted_foreground);
 
         h_flex()
@@ -738,7 +794,7 @@ impl FilePanel {
                                 }
                             }))
                             .child(label);
-                        let separator = (!is_last && i > 0)
+                        let separator = (!is_last && (i > 0 || separator_after_first))
                             .then(|| div().flex_none().text_color(muted).child("›"));
                         std::iter::once(crumb.into_any_element())
                             .chain(separator.map(|s| s.into_any_element()))
@@ -1022,7 +1078,7 @@ impl FilePanel {
 
     fn edit_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing_path = true;
-        let text = self.state.path.to_string_lossy().into_owned();
+        let text = self.state.path.display();
         self.path_input.update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.focus(window, cx);
@@ -1035,7 +1091,12 @@ impl FilePanel {
         let raw = self.path_input.read(cx).value().to_string();
         self.editing_path = false;
         let expanded = expand_path(raw.trim());
-        if expanded.is_dir() {
+        let is_dir = match expanded.as_local() {
+            Some(local) => local.is_dir(),
+            // Remote paths are checked by the listing itself.
+            None => true,
+        };
+        if is_dir {
             self.navigate(expanded, None, cx);
         } else {
             self.state.error = Some(format!("{}: not a directory", expanded.display()));
@@ -1239,7 +1300,7 @@ impl FilePanel {
         }
         let text = paths
             .iter()
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(Location::display)
             .collect::<Vec<_>>()
             .join("\n");
         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -1249,10 +1310,15 @@ impl FilePanel {
     }
 
     pub fn open_terminal(&mut self, cx: &mut Context<Self>) {
-        if platform::is_roots_path(&self.state.path) {
+        if self.state.path.is_roots() {
             return;
         }
-        if let Err(err) = platform::open_terminal(&self.state.path) {
+        let Some(dir) = self.state.path.as_local() else {
+            self.state.error = Some("terminal: not a local directory".into());
+            cx.notify();
+            return;
+        };
+        if let Err(err) = platform::open_terminal(dir) {
             self.state.error = Some(format!("terminal: {err}"));
             cx.notify();
         }
@@ -1424,7 +1490,7 @@ impl FilePanel {
     ) -> EntryLook {
         let is_cursor = ix == self.state.cursor;
         let is_marked = self.state.marked.contains(&ix);
-        let is_cut = cx.global::<FileClipboard>().is_cut(&entry.path);
+        let is_cut = cx.global::<FileClipboard>().is_cut(&entry.location);
         let (bg, outline) = if is_cursor && active {
             (c.primary.alpha(0.28), c.list_active_border)
         } else if is_cursor {
@@ -1502,10 +1568,10 @@ impl FilePanel {
         c: &Colors,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let drag_paths: Vec<PathBuf> = if look.is_marked {
+        let drag_paths: Vec<Location> = if look.is_marked {
             self.selected_paths()
         } else {
-            vec![entry.path.clone()]
+            vec![entry.location.clone()]
         };
         let drop_bg = c.primary.alpha(0.35);
         el.on_mouse_down(
@@ -1551,7 +1617,7 @@ impl FilePanel {
         })
         // Directories (and `..`) accept drops into them.
         .when(entry.is_dir(), |d| {
-            let dest = entry.path.clone();
+            let dest = entry.location.clone();
             d.drag_over::<DragEntries>(move |style, _, _, _| style.bg(drop_bg))
                 .on_drop(cx.listener(move |_this, drag: &DragEntries, _window, cx| {
                     cx.stop_propagation();
@@ -1814,16 +1880,16 @@ fn column_value(column: Column, entry: &Entry, look: &EntryLook, c: &Colors) -> 
     }
 }
 
-/// Expand `~` and turn user input into a path.
-pub fn expand_path(raw: &str) -> PathBuf {
+/// Expand `~` and turn user input into a location (`conn:/path` is remote).
+pub fn expand_path(raw: &str) -> Location {
     if raw == "~" {
-        crate::config::home_dir()
+        Location::Local(crate::config::home_dir())
     } else if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
-        crate::config::home_dir().join(rest)
+        Location::Local(crate::config::home_dir().join(rest))
     } else if raw.is_empty() {
-        platform::default_root()
+        Location::Local(platform::default_root())
     } else {
-        PathBuf::from(raw)
+        Location::parse(raw)
     }
 }
 
@@ -1877,11 +1943,12 @@ impl Render for FilePanel {
         let filter_bar = self.render_filter_bar(&colors, cx);
         let footer_text = if self.state.loading || self.searching {
             if self.searching {
-                "Searching…"
+                "Searching…".to_string()
+            } else if let Some(conn) = self.state.path.conn() {
+                format!("Connecting to {conn}…")
             } else {
-                "Loading…"
+                "Loading…".to_string()
             }
-            .to_string()
         } else if let Some(err) = &self.state.error {
             err.clone()
         } else if self.state.filter.is_some() {

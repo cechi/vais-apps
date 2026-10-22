@@ -158,12 +158,12 @@ pub fn sort_entries(entries: &mut [Entry], sort: Sort) {
 mod tests {
     use super::*;
     use crate::fs::EntryKind;
-    use std::path::PathBuf;
+    use crate::vfs::Location;
 
     fn entry(name: &str, kind: EntryKind, size: u64) -> Entry {
         Entry {
             name: name.into(),
-            path: PathBuf::from(name),
+            location: Location::local(name),
             kind,
             size,
             modified: None,

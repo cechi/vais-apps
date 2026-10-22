@@ -100,11 +100,7 @@ impl OperationsPanel {
         } else {
             String::new()
         };
-        let dest = op
-            .dest
-            .as_ref()
-            .map(|d| d.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let dest = op.dest.as_ref().map(|d| d.display()).unwrap_or_default();
 
         let max_speed = op.speed_samples.iter().cloned().fold(1.0_f64, f64::max);
         let sparkline = h_flex()

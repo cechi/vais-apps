@@ -1,7 +1,7 @@
 //! Pure, testable state of one file panel: entries, cursor, marks, history.
 
+use crate::vfs::Location;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 
 use crate::fs::filter::Matcher;
 use crate::fs::{Entry, Sort};
@@ -24,7 +24,7 @@ impl Filter {
 
 #[derive(Debug)]
 pub struct PanelState {
-    pub path: PathBuf,
+    pub path: Location,
     /// Everything the loader (or a recursive search) produced.
     pub all_entries: Vec<Entry>,
     /// The displayed rows: `all_entries` after the filter. Cursor and marks index these.
@@ -40,17 +40,17 @@ pub struct PanelState {
     pub sort: Sort,
     pub show_hidden: bool,
     /// Back stack: directories visited before the current one.
-    pub history: Vec<PathBuf>,
+    pub history: Vec<Location>,
     /// Forward stack: directories left by going back.
-    pub forward: Vec<PathBuf>,
+    pub forward: Vec<Location>,
     pub error: Option<String>,
     pub loading: bool,
     /// Directories shown expanded inline (tree view).
-    pub expanded: BTreeSet<PathBuf>,
+    pub expanded: BTreeSet<Location>,
 }
 
 impl PanelState {
-    pub fn new(path: PathBuf, show_hidden: bool, sort: Sort) -> Self {
+    pub fn new(path: Location, show_hidden: bool, sort: Sort) -> Self {
         Self {
             path,
             all_entries: Vec::new(),
@@ -73,17 +73,17 @@ impl PanelState {
     pub fn is_expanded(&self, ix: usize) -> bool {
         self.entries
             .get(ix)
-            .is_some_and(|e| self.expanded.contains(&e.path))
+            .is_some_and(|e| self.expanded.contains(&e.location))
     }
 
     /// Expand or collapse the directory at `ix`; returns its path when it is
     /// a directory (the caller then reloads the listing).
-    pub fn toggle_expanded(&mut self, ix: usize) -> Option<PathBuf> {
+    pub fn toggle_expanded(&mut self, ix: usize) -> Option<Location> {
         let entry = self.entries.get(ix)?;
         if entry.is_parent || !entry.is_dir() {
             return None;
         }
-        let path = entry.path.clone();
+        let path = entry.location.clone();
         if !self.expanded.remove(&path) {
             self.expanded.insert(path.clone());
         } else {
@@ -220,13 +220,13 @@ impl PanelState {
     }
 
     /// Replace the full listing and rebuild the displayed rows through the filter.
-    pub fn set_entries(&mut self, path: PathBuf, entries: Vec<Entry>, select: Option<&Path>) {
+    pub fn set_entries(&mut self, path: Location, entries: Vec<Entry>, select: Option<&Location>) {
         self.all_entries = entries;
         self.apply_view(path, select);
     }
 
     /// Re-run the filter over the current full listing (same directory).
-    pub fn refilter(&mut self, select: Option<&Path>) {
+    pub fn refilter(&mut self, select: Option<&Location>) {
         let path = self.path.clone();
         self.apply_view(path, select);
     }
@@ -250,13 +250,13 @@ impl PanelState {
     /// refresh of the same directory keeps its position (so deleting an entry
     /// lands on the next one) and a new directory starts at the top. Marks
     /// survive a refresh of the same directory, matched by path.
-    fn apply_view(&mut self, path: PathBuf, select: Option<&Path>) {
+    fn apply_view(&mut self, path: Location, select: Option<&Location>) {
         let same_dir = path == self.path;
-        let marked_paths: Vec<PathBuf> = if same_dir {
+        let marked_paths: Vec<Location> = if same_dir {
             self.marked
                 .iter()
                 .filter_map(|&i| self.entries.get(i))
-                .map(|e| e.path.clone())
+                .map(|e| e.location.clone())
                 .collect()
         } else {
             Vec::new()
@@ -269,10 +269,10 @@ impl PanelState {
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| !e.is_parent && marked_paths.contains(&e.path))
+            .filter(|(_, e)| !e.is_parent && marked_paths.contains(&e.location))
             .map(|(i, _)| i)
             .collect();
-        let by_path = select.and_then(|p| self.entries.iter().position(|e| e.path == p));
+        let by_path = select.and_then(|p| self.entries.iter().position(|e| e.location == *p));
         self.cursor = match by_path {
             Some(ix) => ix,
             None if same_dir => self.cursor.min(self.entries.len().saturating_sub(1)),
@@ -281,7 +281,7 @@ impl PanelState {
     }
 
     /// A new navigation: remember where we were and drop the forward stack.
-    pub fn push_history(&mut self, path: PathBuf) {
+    pub fn push_history(&mut self, path: Location) {
         self.history.push(path);
         if self.history.len() > HISTORY_LIMIT {
             self.history.remove(0);
@@ -290,14 +290,14 @@ impl PanelState {
     }
 
     /// Where "Back" goes; the current path moves to the forward stack.
-    pub fn pop_back(&mut self) -> Option<PathBuf> {
+    pub fn pop_back(&mut self) -> Option<Location> {
         let target = self.history.pop()?;
         self.forward.push(self.path.clone());
         Some(target)
     }
 
     /// Where "Forward" goes; the current path moves to the back stack.
-    pub fn pop_forward(&mut self) -> Option<PathBuf> {
+    pub fn pop_forward(&mut self) -> Option<Location> {
         let target = self.forward.pop()?;
         self.history.push(self.path.clone());
         Some(target)
@@ -312,7 +312,7 @@ mod tests {
     fn state(n: usize) -> PanelState {
         let mut entries = vec![Entry {
             name: "..".into(),
-            path: "/".into(),
+            location: "/".into(),
             kind: EntryKind::Dir,
             size: 0,
             modified: None,
@@ -325,7 +325,7 @@ mod tests {
         for i in 0..n {
             entries.push(Entry {
                 name: format!("f{i}"),
-                path: format!("/d/f{i}").into(),
+                location: Location::local(format!("/d/f{i}")),
                 kind: EntryKind::File,
                 size: 10,
                 modified: None,
@@ -383,13 +383,13 @@ mod tests {
         s.path = "/b".into();
         s.push_history("/b".into());
         s.path = "/c".into();
-        assert_eq!(s.pop_back(), Some(PathBuf::from("/b")));
+        assert_eq!(s.pop_back(), Some(Location::local("/b")));
         s.path = "/b".into();
-        assert_eq!(s.forward, vec![PathBuf::from("/c")]);
-        assert_eq!(s.pop_forward(), Some(PathBuf::from("/c")));
+        assert_eq!(s.forward, vec![Location::local("/c")]);
+        assert_eq!(s.pop_forward(), Some(Location::local("/c")));
         s.path = "/c".into();
         assert!(s.forward.is_empty());
-        assert_eq!(s.pop_back(), Some(PathBuf::from("/b")));
+        assert_eq!(s.pop_back(), Some(Location::local("/b")));
         s.path = "/b".into();
         s.push_history("/b".into());
         assert!(
@@ -406,13 +406,13 @@ mod tests {
             query: "f2".into(),
             recursive: false,
         });
-        s.refilter(Some(Path::new("/d/f2")));
+        s.refilter(Some(&Location::local("/d/f2")));
         let names: Vec<_> = s.entries.iter().map(|e| e.name.clone()).collect();
         assert_eq!(names, ["..", "f2"]);
         assert_eq!(s.cursor, 1);
         assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![1]);
         s.filter = None;
-        s.refilter(Some(Path::new("/d/f2")));
+        s.refilter(Some(&Location::local("/d/f2")));
         assert_eq!(s.entries.len(), 5);
         assert_eq!(s.cursor, 3);
         assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![3]);
@@ -471,10 +471,10 @@ mod tests {
         s.move_cursor_to(2); // f1
         let mut entries = s.entries.clone();
         entries.remove(2);
-        s.set_entries("/d".into(), entries, Some(Path::new("/d/f1")));
+        s.set_entries("/d".into(), entries, Some(&Location::local("/d/f1")));
         assert_eq!(s.cursor, 2, "lands on the entry that followed f1");
         let entries = s.entries.clone();
-        s.set_entries("/other".into(), entries, Some(Path::new("/d/f1")));
+        s.set_entries("/other".into(), entries, Some(&Location::local("/d/f1")));
         assert_eq!(s.cursor, 0, "a different directory starts at the top");
     }
 
@@ -488,7 +488,7 @@ mod tests {
             1,
             Entry {
                 name: "new".into(),
-                path: "/d/new".into(),
+                location: "/d/new".into(),
                 kind: EntryKind::Dir,
                 size: 0,
                 modified: None,
@@ -499,7 +499,7 @@ mod tests {
                 depth: 0,
             },
         );
-        s.set_entries("/d".into(), entries, Some(Path::new("/d/f2")));
+        s.set_entries("/d".into(), entries, Some(&Location::local("/d/f2")));
         assert_eq!(s.cursor, 4);
         let marked: Vec<_> = s
             .marked
@@ -514,7 +514,7 @@ mod tests {
         let mut s = state(2);
         let dir = Entry {
             name: "dir".into(),
-            path: "/d/dir".into(),
+            location: "/d/dir".into(),
             kind: EntryKind::Dir,
             size: 0,
             modified: None,
@@ -526,7 +526,7 @@ mod tests {
         };
         let child = Entry {
             name: "c".into(),
-            path: "/d/dir/c".into(),
+            location: "/d/dir/c".into(),
             kind: EntryKind::File,
             size: 1,
             modified: None,
@@ -540,7 +540,7 @@ mod tests {
         s.set_entries("/d".into(), entries, None);
         assert_eq!(s.toggle_expanded(0), None, ".. is not expandable");
         assert_eq!(s.toggle_expanded(3), None, "files are not expandable");
-        assert_eq!(s.toggle_expanded(1), Some(PathBuf::from("/d/dir")));
+        assert_eq!(s.toggle_expanded(1), Some(Location::local("/d/dir")));
         assert!(s.is_expanded(1));
         assert_eq!(s.parent_index(2), Some(1));
         assert_eq!(s.parent_index(1), None);

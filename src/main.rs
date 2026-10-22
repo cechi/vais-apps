@@ -1,6 +1,8 @@
 mod app;
 mod clipboard;
 mod config;
+mod connections;
+mod connections_view;
 mod editor_view;
 mod fs;
 mod grid_view;
@@ -16,10 +18,12 @@ mod rename;
 mod settings;
 mod settings_view;
 mod sidebar;
+mod ssh_config;
 mod tabs;
 mod theme;
 mod thumbs;
 mod ui;
+mod vfs;
 
 use gpui_kit::*;
 
@@ -36,6 +40,7 @@ fn main() {
         clipboard::init(cx);
         thumbs::init(cx);
         icons::init(cx);
+        connections::init(config.connections.clone(), cx);
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
         gpui_kit::component::theme::Theme::set_scrollbar_mode(

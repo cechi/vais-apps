@@ -1,8 +1,8 @@
 //! The batch rename form shown in its own tab: the rules on top, a live
 //! preview of old → new names below, Rename / Cancel at the bottom.
 
+use crate::vfs::Location;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -20,15 +20,15 @@ use crate::ui::{h_flex, v_flex};
 pub enum RenameEvent {
     /// The files were renamed; panels showing `dir` should reload.
     Done {
-        dir: PathBuf,
+        dir: Location,
         renamed: usize,
     },
     Cancelled,
 }
 
 pub struct RenameView {
-    paths: Vec<PathBuf>,
-    dir: PathBuf,
+    paths: Vec<Location>,
+    dir: Location,
     name: Entity<InputState>,
     ext: Entity<InputState>,
     find: Entity<InputState>,
@@ -49,12 +49,11 @@ pub struct RenameView {
 impl EventEmitter<RenameEvent> for RenameView {}
 
 impl RenameView {
-    pub fn new(paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(paths: Vec<Location>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let dir = paths
             .first()
             .and_then(|p| p.parent())
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
+            .unwrap_or_else(|| Location::local(""));
         let defaults = Rules::default();
         let mut subscriptions = Vec::new();
         let mut input = |value: String, placeholder: &str| {

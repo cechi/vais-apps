@@ -1,8 +1,8 @@
 //! Runs file operations on the background executor and keeps a row per
 //! operation (progress, speed samples, result) for the operations panel.
 
+use crate::vfs::Location;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,7 +33,7 @@ pub struct Operation {
     pub kind: OpKind,
     /// "3 items" or the single file name.
     pub label: String,
-    pub dest: Option<PathBuf>,
+    pub dest: Option<Location>,
     pub started: Instant,
     pub finished: Option<Instant>,
     pub status: OpStatus,

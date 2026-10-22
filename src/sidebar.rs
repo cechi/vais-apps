@@ -2,8 +2,6 @@
 //! volumes). Clicking a place navigates the active panel there. More kinds of
 //! sidebar content can be added later.
 
-use std::path::PathBuf;
-
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, IconName, Sizable as _};
@@ -12,16 +10,19 @@ use gpui_kit::*;
 
 use crate::platform;
 use crate::ui::{h_flex, v_flex};
+use crate::vfs::Location;
 
 pub enum SidebarEvent {
     /// Navigate the active panel to this directory.
-    Open(PathBuf),
+    Open(Location),
+    /// Open the connection manager.
+    ManageConnections,
 }
 
 #[derive(Clone)]
 pub struct Place {
     pub name: String,
-    pub path: PathBuf,
+    pub path: Location,
     pub icon: IconName,
     /// Muted text after the name (the parent of a recent directory).
     pub detail: Option<String>,
@@ -34,8 +35,9 @@ pub struct Sidebar {
     places: Vec<Place>,
     volumes: Vec<Place>,
     recent: Vec<Place>,
+    connections: Vec<Place>,
     /// Directory of the active panel, highlighted when it is a listed place.
-    current: Option<PathBuf>,
+    current: Option<Location>,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -46,6 +48,7 @@ impl Sidebar {
             places: Vec::new(),
             volumes: Vec::new(),
             recent: Vec::new(),
+            connections: Vec::new(),
             current: None,
         };
         this.refresh();
@@ -58,7 +61,7 @@ impl Sidebar {
             .into_iter()
             .map(|(name, path, icon)| Place {
                 name,
-                path,
+                path: Location::Local(path),
                 icon,
                 detail: None,
             })
@@ -67,7 +70,7 @@ impl Sidebar {
             .into_iter()
             .map(|(name, path)| Place {
                 name,
-                path,
+                path: Location::Local(path),
                 icon: IconName::HardDrive,
                 detail: None,
             })
@@ -75,14 +78,17 @@ impl Sidebar {
     }
 
     /// The recently visited directories, newest first.
-    pub fn set_recent(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+    pub fn set_recent(&mut self, paths: &[Location], cx: &mut Context<Self>) {
         let home = crate::config::home_dir();
         self.recent = paths
             .iter()
             .map(|path| {
-                let parent = path.parent().map(|p| abbreviate(p, &home));
+                let parent = path.parent().map(|p| match p.as_local() {
+                    Some(local) => abbreviate(local, &home),
+                    None => p.display(),
+                });
                 Place {
-                    name: platform::display_name(path),
+                    name: path.display_name(),
                     path: path.clone(),
                     icon: IconName::Folder,
                     detail: parent.filter(|p| !p.is_empty()),
@@ -92,7 +98,38 @@ impl Sidebar {
         cx.notify();
     }
 
-    pub fn set_current(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    /// The saved connections with their state (shown as the detail).
+    pub fn set_connections(
+        &mut self,
+        connections: &[(
+            crate::connections::ConnectionConfig,
+            crate::connections::Status,
+        )],
+        cx: &mut Context<Self>,
+    ) {
+        use crate::connections::Status;
+        self.connections = connections
+            .iter()
+            .map(|(config, status)| Place {
+                name: if config.name.is_empty() {
+                    config.id.clone()
+                } else {
+                    config.name.clone()
+                },
+                path: config.home(),
+                icon: IconName::Globe,
+                detail: Some(match status {
+                    Status::Disconnected => format!("{}@{}", config.user, config.host),
+                    Status::Connecting => "connecting…".to_string(),
+                    Status::Connected => "connected".to_string(),
+                    Status::Failed(err) => format!("failed: {err}"),
+                }),
+            })
+            .collect();
+        cx.notify();
+    }
+
+    pub fn set_current(&mut self, path: Option<Location>, cx: &mut Context<Self>) {
         if self.current != path {
             self.current = path;
             cx.notify();
@@ -120,7 +157,7 @@ impl Sidebar {
             )
             .children(places.iter().enumerate().map(|(i, place)| {
                 let ix = offset + i;
-                let selected = self.current.as_deref() == Some(place.path.as_path());
+                let selected = self.current.as_ref() == Some(&place.path);
                 let path = place.path.clone();
                 h_flex()
                     .id(("place", ix))
@@ -204,6 +241,7 @@ impl Render for Sidebar {
         let places = self.places.clone();
         let volumes = self.volumes.clone();
         let recent = self.recent.clone();
+        let connections = self.connections.clone();
 
         v_flex()
             .size_full()
@@ -248,8 +286,29 @@ impl Render for Sidebar {
                     .when(!volumes.is_empty(), |d| {
                         d.child(self.render_section("Volumes", &volumes, places.len(), &c, cx))
                     })
-                    .when(!recent.is_empty(), |d| {
+                    .child({
                         let offset = places.len() + volumes.len();
+                        self.render_section("Connections", &connections, offset, &c, cx)
+                    })
+                    .child(
+                        h_flex()
+                            .id("sidebar-manage-connections")
+                            .w_full()
+                            .h(rems(1.75))
+                            .px_3()
+                            .gap_2()
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(c.muted_foreground)
+                            .hover(|s| s.bg(c.hover))
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ManageConnections)),
+                            )
+                            .child(Icon::new(IconName::Plus).size_4().flex_none())
+                            .child("Manage connections…"),
+                    )
+                    .when(!recent.is_empty(), |d| {
+                        let offset = places.len() + volumes.len() + connections.len();
                         d.child(self.render_section("Recent", &recent, offset, &c, cx))
                     }),
             )

@@ -28,6 +28,13 @@ regex = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "qoi"] }
 resvg = "0.46"
 usvg = "0.46"
+ssh2 = "0.9"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+suppaftp = { version = "12", default-features = false }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# No system libssh2 / OpenSSL to link against on macOS and Windows runners.
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
 [target.'cfg(windows)'.dependencies]
 # File icons from the shell (see src/icons/windows.rs); both crates are

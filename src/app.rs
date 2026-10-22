@@ -1,6 +1,5 @@
 //! The workspace: tabs (each with its own content), theme and persistence.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::theme;
@@ -17,6 +16,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::config::{CONFIG_VERSION, Config, TabConfig, ThemeChoice, WindowConfig};
+use crate::connections::{ConnectionEvent, ConnectionManager, Status};
+use crate::connections_view::{ConnectionsEvent, ConnectionsView};
 use crate::editor_view::{EditorEvent, EditorView};
 use crate::fs::format::human_size;
 use crate::grid_view::{GridEvent, GridView};
@@ -31,6 +32,7 @@ use crate::settings_view::{SettingsEvent, SettingsValues, SettingsView};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
+use crate::vfs::{ConnId, Location};
 
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Height of the tab bar, matching the sidebar header.
@@ -123,10 +125,11 @@ pub struct Workspace {
     main_split: Entity<ResizableState>,
     sidebar: Entity<Sidebar>,
     sidebar_open: bool,
+    connections: Entity<ConnectionManager>,
     /// Directories the focused panel showed, newest first (the sidebar's
     /// Recent group); `last_visited` is what was noted last.
-    recent: Vec<PathBuf>,
-    last_visited: Option<PathBuf>,
+    recent: Vec<Location>,
+    last_visited: Option<Location>,
     /// Personal font family from the config, applied over every theme.
     font_family: Option<String>,
     /// Divider between the sidebar and the main column.
@@ -205,17 +208,35 @@ impl Workspace {
 
         let sidebar = cx.new(|cx| Sidebar::new(cx));
         sidebar.update(cx, |s, cx| s.set_recent(&config.recent, cx));
-        subscriptions.push(
-            cx.subscribe(&sidebar, |this, _sidebar, event, cx| match event {
+        subscriptions.push(cx.subscribe_in(
+            &sidebar,
+            window,
+            |this, _sidebar, event, window, cx| match event {
                 SidebarEvent::Open(path) => this.open_place(path.clone(), cx),
-            }),
-        );
+                SidebarEvent::ManageConnections => this.open_connections(window, cx),
+            },
+        ));
+        let connections = crate::connections::manager(cx);
+        subscriptions.push(cx.subscribe_in(
+            &connections,
+            window,
+            |this, _manager, event, window, cx| match event {
+                ConnectionEvent::Changed(conn) => {
+                    for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
+                        grid.update(cx, |grid, cx| grid.refresh_conn(conn, cx));
+                    }
+                    this.sync_connections(cx);
+                }
+                ConnectionEvent::NeedsPassword(conn) => this.ask_password(conn.clone(), window, cx),
+            },
+        ));
 
         let mut this = Self {
             tabs: Vec::new(),
             active_tab: 0,
             sidebar,
             sidebar_open: config.sidebar_open,
+            connections,
             recent: config.recent.clone(),
             last_visited: None,
             font_family: config.font_family.clone(),
@@ -238,6 +259,7 @@ impl Workspace {
             this.push_grid_tab(&tab_cfg, window, cx);
         }
         this.active_tab = config.active_tab.min(this.tabs.len() - 1);
+        this.sync_connections(cx);
         this
     }
 
@@ -398,8 +420,8 @@ impl Workspace {
                         GridEvent::BatchRename(paths) => {
                             this.open_rename(paths.clone(), window, cx)
                         }
-                        GridEvent::OpenFile { path, readonly } => {
-                            this.open_file(path.clone(), *readonly, window, cx)
+                        GridEvent::OpenFile { location, readonly } => {
+                            this.open_file(location.clone(), *readonly, window, cx)
                         }
                     },
                 ));
@@ -422,6 +444,15 @@ impl Workspace {
                     },
                 ));
             }
+            if let Some(view) = tab.connections_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, view, event, window, cx| {
+                        this.on_connections_event(view, event, window, cx);
+                    },
+                ));
+            }
             if let Some(view) = tab.editor_view() {
                 subscriptions.push(cx.subscribe_in(
                     view,
@@ -437,10 +468,10 @@ impl Workspace {
                                     this.close_tab(ix, window, cx);
                                 }
                             }
-                            EditorEvent::Saved(path) => {
-                                if let Some(dir) = path.parent() {
+                            EditorEvent::Saved(location) => {
+                                if let Some(dir) = location.parent() {
                                     for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
-                                        grid.update(cx, |grid, cx| grid.refresh_dir(dir, cx));
+                                        grid.update(cx, |grid, cx| grid.refresh_dir(&dir, cx));
                                     }
                                 }
                                 cx.notify();
@@ -471,6 +502,141 @@ impl Workspace {
         for view in self.tabs.iter().filter_map(|t| t.settings_view()) {
             view.update(cx, |view, cx| view.sync(values.clone(), cx));
         }
+    }
+
+    // ----- connections -----------------------------------------------------
+
+    /// Configs with their current status, for the sidebar and the manager tab.
+    fn connection_rows(&self, cx: &App) -> Vec<(crate::connections::ConnectionConfig, Status)> {
+        let manager = self.connections.read(cx);
+        manager
+            .configs()
+            .iter()
+            .map(|c| (c.clone(), manager.status(&c.conn_id())))
+            .collect()
+    }
+
+    /// Push the connection list and statuses to the sidebar and an open
+    /// manager tab.
+    fn sync_connections(&mut self, cx: &mut Context<Self>) {
+        let rows = self.connection_rows(cx);
+        self.sidebar
+            .update(cx, |s, cx| s.set_connections(&rows, cx));
+        let status: std::collections::HashMap<ConnId, Status> =
+            rows.iter().map(|(c, s)| (c.conn_id(), s.clone())).collect();
+        for view in self.tabs.iter().filter_map(|t| t.connections_view()) {
+            view.update(cx, |view, cx| view.set_status(status.clone(), cx));
+        }
+        cx.notify();
+    }
+
+    /// Open the connection manager tab (or switch to it).
+    fn open_connections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self
+            .tabs
+            .iter()
+            .position(|t| t.connections_view().is_some())
+        {
+            self.activate_tab(ix, window, cx);
+            return;
+        }
+        let rows = self.connection_rows(cx);
+        let items = rows.iter().map(|(c, _)| c.clone()).collect();
+        let status = rows.iter().map(|(c, s)| (c.conn_id(), s.clone())).collect();
+        let view = cx.new(|cx| ConnectionsView::new(items, status, window, cx));
+        let ix = self.active_tab + 1;
+        self.tabs.insert(ix, Tab::connections(view));
+        self.resubscribe(window, cx);
+        self.activate_tab(ix, window, cx);
+    }
+
+    fn on_connections_event(
+        &mut self,
+        view: &Entity<ConnectionsView>,
+        event: &ConnectionsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ConnectionsEvent::Save(items) => {
+                let items = items.clone();
+                self.connections
+                    .update(cx, |m, cx| m.set_configs(items, cx));
+                self.schedule_save(cx);
+                self.sync_connections(cx);
+            }
+            ConnectionsEvent::Connect(conn) => {
+                let home = self.connections.read(cx).config(conn).map(|c| c.home());
+                if let Some(home) = home {
+                    // Listing the directory connects on demand.
+                    self.open_place(home, cx);
+                }
+            }
+            ConnectionsEvent::Disconnect(conn) => {
+                self.connections.update(cx, |m, cx| m.disconnect(conn, cx));
+            }
+            ConnectionsEvent::Close => {
+                if let Some(ix) = self
+                    .tabs
+                    .iter()
+                    .position(|t| t.connections_view() == Some(view))
+                {
+                    self.close_tab(ix, window, cx);
+                }
+            }
+        }
+    }
+
+    /// A connection needs a password: ask with a masked palette, then retry.
+    /// The password is remembered in the keyring when the connection is set
+    /// to password authentication.
+    fn ask_password(&mut self, conn: ConnId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(config) = self.connections.read(cx).config(&conn).cloned() else {
+            return;
+        };
+        let manager = self.connections.clone();
+        let remember =
+            config.auth == crate::connections::AuthMethod::Password || !config.protocol.uses_keys();
+        let palette = cx.new(|cx| {
+            let (manager_ok, manager_cancel, conn_ok, conn_cancel) =
+                (manager.clone(), manager, conn.clone(), conn);
+            Palette::new(Vec::new(), "", "Password", window, cx)
+                .masked(true)
+                .input_icon(Some(IconName::Globe))
+                .hint(if remember {
+                    "Stored in the system keyring after a successful login"
+                } else {
+                    "Asked again next time (set the connection to Password to store it)"
+                })
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    if choice.value.is_empty() {
+                        return;
+                    }
+                    manager_ok.update(cx, |m, cx| {
+                        m.connect(&conn_ok, Some(choice.value.clone()), remember, cx)
+                    });
+                })
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    manager_cancel.update(cx, |m, cx| m.disconnect(&conn_cancel, cx));
+                })
+        });
+        palette::open(
+            format!("Password for {}@{}", config.user, config.host),
+            palette,
+            window,
+            cx,
+        );
+    }
+
+    fn on_open_connections(
+        &mut self,
+        _: &OpenConnections,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_connections(window, cx);
     }
 
     /// Open the settings tab (or switch to it when it is already open).
@@ -538,23 +704,47 @@ impl Workspace {
     /// gets its tab activated instead; F4 on it makes it editable.
     fn open_file(
         &mut self,
-        path: PathBuf,
+        location: Location,
         readonly: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ix) = self
-            .tabs
-            .iter()
-            .position(|t| t.editor_view().is_some_and(|v| v.read(cx).path() == path))
-        {
+        if let Some(ix) = self.tabs.iter().position(|t| {
+            t.editor_view()
+                .is_some_and(|v| *v.read(cx).location() == location)
+        }) {
             if !readonly && let Some(view) = self.tabs[ix].editor_view() {
                 view.update(cx, |editor, cx| editor.set_readonly(false, cx));
             }
             self.activate_tab(ix, window, cx);
             return;
         }
-        match crate::editor_view::load(&path) {
+        // Reading may go over the network: do it on the background executor.
+        let task = cx.background_spawn({
+            let location = location.clone();
+            async move { crate::editor_view::load(&location) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.file_loaded(location, readonly, result, window, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The editor load finished: open the tab, or fall back to the default
+    /// application (through a local copy for remote files).
+    fn file_loaded(
+        &mut self,
+        location: Location,
+        readonly: bool,
+        result: Result<crate::editor_view::Loaded, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
             Ok(loaded) => {
                 let view = cx.new(|cx| EditorView::new(loaded, readonly, window, cx));
                 let ix = self.active_tab + 1;
@@ -566,21 +756,27 @@ impl Workspace {
                 window.push_notification(
                     Notification::info(format!(
                         "{}: {reason}",
-                        path.file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default()
+                        location.file_name().unwrap_or_default()
                     )),
                     cx,
                 );
-                if let Err(err) = open::that_detached(&path) {
-                    log::warn!("open {}: {err}", path.display());
-                }
+                cx.background_spawn(async move {
+                    match crate::vfs::local_copy(&location) {
+                        Ok(path) => {
+                            if let Err(err) = open::that_detached(&path) {
+                                log::warn!("open {}: {err}", path.display());
+                            }
+                        }
+                        Err(err) => log::warn!("open {}: {err}", location.display()),
+                    }
+                })
+                .detach();
             }
         }
     }
 
     /// Open the batch rename form for `paths` in a new tab next to the current one.
-    fn open_rename(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_rename(&mut self, paths: Vec<Location>, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.new(|cx| RenameView::new(paths, window, cx));
         let ix = self.active_tab + 1;
         self.tabs.insert(ix, Tab::rename(view));
@@ -743,7 +939,7 @@ impl Workspace {
     // ----- sidebar -------------------------------------------------------
 
     /// Navigate the active panel of the active tab to a sidebar place.
-    fn open_place(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn open_place(&mut self, path: Location, cx: &mut Context<Self>) {
         if let Some(view) = self.active_tab().grid_view() {
             let panel = view.read(cx).active_panel().clone();
             panel.update(cx, |panel, cx| panel.navigate_to(path, cx));
@@ -752,7 +948,7 @@ impl Workspace {
 
     /// The focused panel shows `path`: move it to the front of the recent
     /// list (newest first, bounded) when it is a different directory.
-    fn note_visit(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    fn note_visit(&mut self, path: Option<Location>, cx: &mut Context<Self>) {
         let Some(path) = path else {
             return;
         };
@@ -807,6 +1003,7 @@ impl Workspace {
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             recent: self.recent.clone(),
             font_family: self.font_family.clone(),
+            connections: self.connections.read(cx).configs().to_vec(),
             ..Default::default()
         };
         if let Err(err) = config.save() {
@@ -1078,6 +1275,7 @@ impl Workspace {
             .dropdown_menu(move |menu, _window, _cx| {
                 menu.action_context(tab_focus.clone())
                     .menu("Settings…", Box::new(OpenSettings))
+                    .menu("Connections…", Box::new(OpenConnections))
                     .menu("Theme…", Box::new(ChooseTheme))
                     .separator()
                     .menu_with_check("Places sidebar", sidebar_open, Box::new(ToggleSidebar))
@@ -1235,7 +1433,7 @@ impl Render for Workspace {
         let current = self
             .active_tab()
             .grid_view()
-            .map(|v| v.read(cx).active_panel().read(cx).path().to_path_buf());
+            .map(|v| v.read(cx).active_panel().read(cx).path().clone());
         self.note_visit(current.clone(), cx);
         if self.sidebar_open {
             self.sidebar.update(cx, |s, cx| s.set_current(current, cx));
@@ -1295,6 +1493,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_ops_panel))
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_open_settings))
+            .on_action(cx.listener(Self::on_open_connections))
             .on_action(cx.listener(Self::on_quit))
             // Repaint when Shift changes so the key bar shows the Shift captions.
             .on_modifiers_changed(cx.listener(|_this, _ev, _window, cx| cx.notify()))

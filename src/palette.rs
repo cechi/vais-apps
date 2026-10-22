@@ -105,6 +105,8 @@ pub struct Palette {
     footer: Option<SharedString>,
     /// Byte range to select on focus; the whole text when `None`.
     select: Option<std::ops::Range<usize>>,
+    /// Show the input's text as dots (passwords).
+    masked: bool,
     focus_handle: FocusHandle,
     scroll: ScrollHandle,
     on_confirm: Option<ConfirmFn>,
@@ -160,6 +162,7 @@ impl Palette {
             hint: None,
             footer: None,
             select: None,
+            masked: false,
             focus_handle: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             on_confirm: None,
@@ -237,6 +240,12 @@ impl Palette {
         self
     }
 
+    /// Hide the typed text (a password).
+    pub fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
     /// Select only this byte range of the initial text on focus (e.g. the
     /// file name without its extension) instead of everything.
     pub fn select_range(mut self, range: std::ops::Range<usize>) -> Self {
@@ -254,7 +263,9 @@ impl Palette {
             return;
         };
         let select = self.select.clone();
+        let masked = self.masked;
         input.update(cx, |input, cx| {
+            input.set_masked(masked, window, cx);
             input.focus(window, cx);
             match select {
                 Some(range) => input.set_selected_range(range, cx),
