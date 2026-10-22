@@ -805,6 +805,16 @@ impl Workspace {
             .items_stretch()
             .overflow_x_hidden()
             .children(tabs)
+            // "+" sits right after the last tab, like a browser.
+            .child(
+                h_flex()
+                    .h_full()
+                    .flex_none()
+                    .px_1()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(new_tab),
+            )
             // Filler and controls carry the bottom line the active tab omits.
             // Dropping a tab on the filler moves it to the end.
             .child(
@@ -828,8 +838,7 @@ impl Workspace {
                     .gap_1()
                     .border_b_1()
                     .border_color(border)
-                    .child(layout_button)
-                    .child(new_tab),
+                    .child(layout_button),
             )
     }
 }
