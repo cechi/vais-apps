@@ -419,6 +419,7 @@ impl Workspace {
             scale: self.scale,
             sidebar_open: self.sidebar_open,
             drop_action: crate::settings::get(cx).drop_action,
+            file_icons: crate::settings::get(cx).file_icons,
         }
     }
 
@@ -467,6 +468,13 @@ impl Workspace {
             SettingsEvent::DropAction(action) => {
                 crate::settings::set_drop_action(cx, *action);
                 self.schedule_save(cx);
+            }
+            SettingsEvent::FileIcons(icons) => {
+                crate::settings::set_file_icons(cx, *icons);
+                self.schedule_save(cx);
+                for grid in self.tabs.iter().filter_map(|tab| tab.grid_view()) {
+                    grid.update(cx, |grid, cx| grid.redraw_panels(cx));
+                }
             }
             SettingsEvent::Close => {
                 if let Some(ix) = self
@@ -625,6 +633,7 @@ impl Workspace {
             ui_scale: (self.scale * 100.0).round() / 100.0,
             sidebar_open: self.sidebar_open,
             drop_action: crate::settings::get(cx).drop_action,
+            file_icons: crate::settings::get(cx).file_icons,
             window: self.window_cfg,
             // Transient tabs are not saved; the active index counts saved tabs only.
             active_tab: self.tabs[..self.active_tab.min(self.tabs.len())]

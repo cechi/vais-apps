@@ -15,7 +15,7 @@ use gpui_kit::*;
 
 use crate::config::{Config, ThemeChoice};
 use crate::keymap::*;
-use crate::settings::DropAction;
+use crate::settings::{DropAction, FileIcons};
 use crate::theme;
 use crate::ui::{h_flex, v_flex};
 
@@ -25,6 +25,7 @@ pub enum SettingsEvent {
     Scale(f32),
     Sidebar(bool),
     DropAction(DropAction),
+    FileIcons(FileIcons),
     Close,
 }
 
@@ -35,6 +36,7 @@ pub struct SettingsValues {
     pub scale: f32,
     pub sidebar_open: bool,
     pub drop_action: DropAction,
+    pub file_icons: FileIcons,
 }
 
 pub struct SettingsView {
@@ -92,6 +94,14 @@ impl SettingsView {
 
     fn on_close(&mut self, _: &CloseSettings, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(SettingsEvent::Close);
+    }
+
+    fn set_file_icons(&mut self, icons: FileIcons, cx: &mut Context<Self>) {
+        if self.values.file_icons != icons {
+            self.values.file_icons = icons;
+            cx.emit(SettingsEvent::FileIcons(icons));
+            cx.notify();
+        }
     }
 
     fn set_drop_action(&mut self, action: DropAction, cx: &mut Context<Self>) {
@@ -180,6 +190,22 @@ impl Render for SettingsView {
         };
         let config_path = Config::path().unwrap_or_default();
         let themes_dir = theme::themes_dir().unwrap_or_default();
+        let icon_buttons = [
+            (FileIcons::System, "System"),
+            (FileIcons::Generic, "Generic"),
+        ]
+        .into_iter()
+        .map(|(icons, label)| {
+            let button = Button::new(("file-icons", icons as usize))
+                .small()
+                .label(label);
+            let button = if icons == self.values.file_icons {
+                button.primary()
+            } else {
+                button.ghost()
+            };
+            button.on_click(cx.listener(move |this, _, _, cx| this.set_file_icons(icons, cx)))
+        });
         let drop_buttons = [
             (DropAction::Ask, "Ask"),
             (DropAction::Move, "Move"),
@@ -255,6 +281,12 @@ impl Render for SettingsView {
                             .child(Slider::new(&self.slider).w(rems(12.)))
                             .child(div().w(rems(3.)).text_right().text_sm().child(scale_label))
                             .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        "File icons",
+                        "Icons from the desktop's icon theme (Linux), or the built-in generic ones",
+                        muted,
+                        h_flex().gap_1().children(icon_buttons).into_any_element(),
                     ))
                     .child(Self::row(
                         "Places sidebar",

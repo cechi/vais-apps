@@ -28,6 +28,7 @@ use crate::fs::{
 };
 use crate::keymap::*;
 use crate::platform;
+use crate::settings::FileIcons;
 use crate::ui::{h_flex, v_flex};
 use state::{Filter, PanelState};
 
@@ -1288,21 +1289,38 @@ impl FilePanel {
             transparent_black()
         };
 
-        let icon = if entry.is_parent {
-            Icon::new(IconName::ArrowUp).text_color(c.muted_foreground)
-        } else if is_marked {
-            Icon::new(if entry.is_dir() {
-                IconName::Folder
+        // The desktop's icon when wanted and available, else a generic one.
+        let system_icon =
+            if entry.is_parent || crate::settings::get(cx).file_icons != FileIcons::System {
+                None
             } else {
-                IconName::File
-            })
-            .text_color(c.yellow)
-        } else if entry.is_dir() {
-            Icon::new(IconName::Folder).text_color(c.blue)
-        } else {
-            Icon::new(IconName::File).text_color(c.muted_foreground)
+                crate::icons::file_icon(cx, &entry.name, entry.is_dir())
+            };
+        let icon: AnyElement = match system_icon {
+            Some(path) => img(path)
+                .size_full()
+                .when(is_cut, |i| i.opacity(0.5))
+                .into_any_element(),
+            None => {
+                let icon = if entry.is_parent {
+                    Icon::new(IconName::ArrowUp).text_color(c.muted_foreground)
+                } else if is_marked {
+                    Icon::new(if entry.is_dir() {
+                        IconName::Folder
+                    } else {
+                        IconName::File
+                    })
+                    .text_color(c.yellow)
+                } else if entry.is_dir() {
+                    Icon::new(IconName::Folder).text_color(c.blue)
+                } else {
+                    Icon::new(IconName::File).text_color(c.muted_foreground)
+                };
+                icon.size_4()
+                    .when(is_cut, |i| i.opacity(0.5))
+                    .into_any_element()
+            }
         };
-        let icon = if is_cut { icon.opacity(0.5) } else { icon };
 
         // The name column keeps the full name; the extension is repeated in
         // the type column so files can be scanned by kind.
@@ -1440,7 +1458,7 @@ impl FilePanel {
             .child(div().flex_none().w(px(3.)).h_full().bg(bar))
             .child(div().flex_none().w(rems(entry.depth as f32)))
             .child(chevron)
-            .child(icon.size_4().flex_none())
+            .child(div().size_4().flex_none().child(icon))
             .child(div().flex_1().min_w_0().truncate().child(name))
             .child(
                 div()

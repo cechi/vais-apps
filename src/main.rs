@@ -3,6 +3,7 @@ mod clipboard;
 mod config;
 mod fs;
 mod grid_view;
+mod icons;
 mod keymap;
 mod layout;
 mod ops;
@@ -31,6 +32,7 @@ fn main() {
         init(cx);
         settings::init(&config, cx);
         clipboard::init(cx);
+        icons::init(cx);
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
         gpui_kit::component::theme::Theme::set_scrollbar_mode(

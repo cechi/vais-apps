@@ -694,10 +694,15 @@ impl GridView {
 
     /// Re-render every panel (cut entries are dimmed) and tell the workspace.
     fn clipboard_changed(&mut self, cx: &mut Context<Self>) {
+        self.redraw_panels(cx);
+        cx.emit(GridEvent::ClipboardChanged);
+    }
+
+    /// Re-render every panel (a display setting changed).
+    pub fn redraw_panels(&mut self, cx: &mut Context<Self>) {
         for panel in &self.panels {
             panel.update(cx, |_, cx| cx.notify());
         }
-        cx.emit(GridEvent::ClipboardChanged);
     }
 
     fn on_rename(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
-use crate::settings::DropAction;
+use crate::settings::{DropAction, FileIcons};
 
 pub const CONFIG_VERSION: u32 = 2;
 
@@ -55,6 +55,8 @@ pub struct Config {
     pub sidebar_open: bool,
     /// What dragging entries onto a directory does: ask, move or copy.
     pub drop_action: DropAction,
+    /// File icons from the desktop theme or the built-in generic ones.
+    pub file_icons: FileIcons,
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
@@ -74,6 +76,7 @@ impl Default for Config {
             ui_scale: 1.0,
             sidebar_open: false,
             drop_action: DropAction::Ask,
+            file_icons: FileIcons::System,
             window: None,
             active_tab: 0,
             tabs: Vec::new(),

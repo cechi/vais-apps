@@ -17,9 +17,20 @@ pub enum DropAction {
     Copy,
 }
 
+/// Where file icons come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileIcons {
+    /// The desktop's icon theme (Linux); generic where that is not available.
+    #[default]
+    System,
+    Generic,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub drop_action: DropAction,
+    pub file_icons: FileIcons,
 }
 
 impl Global for Settings {}
@@ -27,6 +38,7 @@ impl Global for Settings {}
 pub fn init(config: &Config, cx: &mut App) {
     cx.set_global(Settings {
         drop_action: config.drop_action,
+        file_icons: config.file_icons,
     });
 }
 
@@ -36,4 +48,8 @@ pub fn get(cx: &App) -> &Settings {
 
 pub fn set_drop_action(cx: &mut App, action: DropAction) {
     cx.global_mut::<Settings>().drop_action = action;
+}
+
+pub fn set_file_icons(cx: &mut App, icons: FileIcons) {
+    cx.global_mut::<Settings>().file_icons = icons;
 }
