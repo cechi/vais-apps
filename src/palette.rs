@@ -44,6 +44,12 @@ pub struct Palette {
     input: Entity<InputState>,
     items: Vec<PaletteItem>,
     selected: Option<usize>,
+    /// Icon at the left of the input.
+    input_icon: Option<IconName>,
+    /// Muted text under the input when there are no rows.
+    hint: Option<SharedString>,
+    /// Byte range to select on focus; the whole text when `None`.
+    select: Option<std::ops::Range<usize>>,
     on_confirm: Option<ConfirmFn>,
     on_select: Option<SelectFn>,
     on_cancel: Option<CancelFn>,
@@ -80,11 +86,32 @@ impl Palette {
             selected: position_of(&items, initial),
             input,
             items,
+            input_icon: Some(IconName::Folder),
+            hint: None,
+            select: None,
             on_confirm: None,
             on_select: None,
             on_cancel: None,
             _subscriptions: vec![subscription],
         }
+    }
+
+    pub fn input_icon(mut self, icon: Option<IconName>) -> Self {
+        self.input_icon = icon;
+        self
+    }
+
+    /// Text shown under the input while the list is empty.
+    pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    /// Select only this byte range of the initial text on focus (e.g. the
+    /// file name without its extension) instead of everything.
+    pub fn select_range(mut self, range: std::ops::Range<usize>) -> Self {
+        self.select = Some(range);
+        self
     }
 
     pub fn on_confirm(
@@ -105,11 +132,16 @@ impl Palette {
         self
     }
 
-    /// Focus the input with its text selected, so typing replaces it.
+    /// Focus the input with its text (or the chosen range) selected, so
+    /// typing replaces it.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let select = self.select.clone();
         self.input.update(cx, |input, cx| {
             input.focus(window, cx);
-            input.select_all(window, cx);
+            match select {
+                Some(range) => input.set_selected_range(range, cx),
+                None => input.select_all(window, cx),
+            }
         });
     }
 
@@ -243,24 +275,16 @@ impl Render for Palette {
             .child(
                 Input::new(&self.input)
                     .focus_bordered(false)
-                    .prefix(Icon::new(IconName::Folder).text_color(muted)),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap_0p5()
-                    .children(rows)
-                    .when(self.items.is_empty(), |list| {
-                        list.child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .text_sm()
-                                .text_color(muted)
-                                .child("No other panel in this layout — type a path"),
-                        )
+                    .when_some(self.input_icon.clone(), |input, icon| {
+                        input.prefix(Icon::new(icon).text_color(muted))
                     }),
             )
+            .child(v_flex().w_full().gap_0p5().children(rows).when_some(
+                self.hint.clone().filter(|_| self.items.is_empty()),
+                |list, hint| {
+                    list.child(div().px_2().py_1().text_sm().text_color(muted).child(hint))
+                },
+            ))
     }
 }
 

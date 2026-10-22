@@ -2,7 +2,7 @@
 //! the file operations between the active and the target panel.
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::component::IconName;
@@ -270,6 +270,7 @@ impl GridView {
                     window.close_dialog(cx);
                     cancel_view.update(cx, |this, cx| this.set_highlight(None, cx));
                 })
+                .hint("No other panel in this layout — type a path")
         });
         let initial = palette.read(cx).selected().and_then(|row| {
             (0..self.layout.count())
@@ -278,6 +279,18 @@ impl GridView {
         });
         self.set_highlight(initial, cx);
 
+        self.open_palette(title, palette, window, cx);
+    }
+
+    /// Show `palette` in a command-center style dialog: near the top, no
+    /// buttons, the input focused.
+    fn open_palette(
+        &mut self,
+        title: String,
+        palette: Entity<Palette>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let initial_focus = Cell::new(true);
         window.open_dialog(cx, move |dialog, window, cx| {
             if initial_focus.replace(false) {
@@ -548,47 +561,67 @@ impl GridView {
             self.notify(Notification::warning("Nothing to rename"), window, cx);
             return;
         };
+        let is_dir = from.is_dir();
         let base = from.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(old_name.clone()));
-        let confirm: ConfirmFn = {
-            let input = input.clone();
-            let old_name = old_name.clone();
-            Rc::new(move |this, window, cx| {
-                let new_name = input.read(cx).value().trim().to_string();
-                if new_name.is_empty() || new_name == old_name {
-                    return;
-                }
-                let (from, to) = (base.join(&old_name), base.join(&new_name));
-                let result = if to.symlink_metadata().is_ok() {
-                    Err(std::io::Error::other(
-                        "a file with that name already exists",
-                    ))
+        let hint = format!("in {}", base.display());
+
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            let (confirm_view, old) = (view, old_name.clone());
+            let base_for_confirm = base.clone();
+            Palette::new(Vec::new(), &old_name, "New name", window, cx)
+                .input_icon(Some(if is_dir {
+                    IconName::Folder
                 } else {
-                    std::fs::rename(&from, &to)
-                };
-                match result {
-                    Ok(()) => this.refresh_active(Some(base.join(&new_name)), cx),
-                    Err(err) => this.notify(
-                        Notification::error(format!("{new_name}: {err}")),
-                        window,
-                        cx,
-                    ),
-                }
-            })
-        };
-        self.open_input_dialog(
-            format!("Rename {old_name}"),
-            "New name:",
-            input,
-            "Rename",
-            confirm,
-            window,
-            cx,
-        );
+                    IconName::File
+                }))
+                .hint(hint)
+                // Select the name without its extension, like a Commander.
+                .select_range(0..stem_len(&old_name, is_dir))
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, old, base) =
+                        (confirm_view.clone(), old.clone(), base_for_confirm.clone());
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.rename(&base, &old, choice.value.trim(), window, cx);
+                        });
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        self.open_palette(format!("Rename {old_name}"), palette, window, cx);
     }
 
-    /// A dialog with one text input. Enter in the input or the OK button confirms.
-    #[allow(clippy::too_many_arguments)]
+    fn rename(
+        &mut self,
+        base: &Path,
+        old_name: &str,
+        new_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if new_name.is_empty() || new_name == old_name {
+            return;
+        }
+        let (from, to) = (base.join(old_name), base.join(new_name));
+        let result = if to.symlink_metadata().is_ok() {
+            Err(std::io::Error::other(
+                "a file with that name already exists",
+            ))
+        } else {
+            std::fs::rename(&from, &to)
+        };
+        match result {
+            Ok(()) => self.refresh_active(Some(to), cx),
+            Err(err) => self.notify(
+                Notification::error(format!("{new_name}: {err}")),
+                window,
+                cx,
+            ),
+        }
+    }
+
     fn open_input_dialog(
         &mut self,
         title: String,
@@ -752,5 +785,32 @@ impl Render for GridView {
                     .with_priority(gpui_kit::base::POPUP_PRIORITY),
                 )
             })
+    }
+}
+
+/// Length of the part of `name` to preselect when renaming: everything
+/// before the extension for files, the whole name for directories and
+/// dot-files.
+fn stem_len(name: &str, is_dir: bool) -> usize {
+    if is_dir {
+        return name.len();
+    }
+    match name.rfind('.') {
+        Some(dot) if dot > 0 => dot,
+        _ => name.len(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stem_len;
+
+    #[test]
+    fn stem_excludes_only_a_real_extension() {
+        assert_eq!(stem_len("report.pdf", false), 6);
+        assert_eq!(stem_len("archive.tar.gz", false), 11);
+        assert_eq!(stem_len(".bashrc", false), 7);
+        assert_eq!(stem_len("Makefile", false), 8);
+        assert_eq!(stem_len("v1.0", true), 4);
     }
 }

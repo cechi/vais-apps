@@ -99,7 +99,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
 | `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
-| `F2` / `Shift+F6` | Rename the entry under the cursor |
+| `F2` / `Shift+F6` | Rename the entry under the cursor (the name without its extension is preselected) |
 | `F7` | New folder |
 | `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently |
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
