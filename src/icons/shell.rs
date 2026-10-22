@@ -11,23 +11,18 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits,
     GetObjectW, HBITMAP, HDC, HGDIOBJ, ReleaseDC,
 };
-use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
+use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
 use windows::Win32::UI::Shell::{
     SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 use windows::core::PCWSTR;
 
-/// The large (32px) shell icon for a file name or a directory, as PNG bytes.
-pub fn icon_png(name: &str, is_dir: bool) -> Option<Vec<u8>> {
-    // Only the extension matters; directories get the generic folder icon.
-    let pseudo = if is_dir { "folder" } else { name };
-    let wide: Vec<u16> = pseudo.encode_utf16().chain(std::iter::once(0)).collect();
-    let attributes = if is_dir {
-        FILE_ATTRIBUTE_DIRECTORY
-    } else {
-        FILE_ATTRIBUTE_NORMAL
-    };
+/// The large (32px) shell icon for a file name, as PNG bytes.
+pub fn icon_png(name: &str) -> Option<Vec<u8>> {
+    // Only the extension matters to the shell.
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let attributes = FILE_ATTRIBUTE_NORMAL;
     let flags = SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES;
     let mut info = SHFILEINFOW::default();
     // SAFETY: `wide` is NUL terminated and outlives the call; `info` is a

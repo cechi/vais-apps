@@ -107,9 +107,10 @@ pub fn init(cx: &mut App) {
     cx.set_global(IconTheme::load());
 }
 
-/// The desktop's icon for `name` (a file or directory name), if it has one.
-pub fn file_icon(cx: &App, name: &str, is_dir: bool) -> Option<ImageSource> {
-    cx.global::<IconTheme>().file_icon(name, is_dir)
+/// The desktop's icon for the file `name`, if it has one. Directories keep
+/// the built-in folder icon, so only files are looked up.
+pub fn file_icon(cx: &App, name: &str) -> Option<ImageSource> {
+    cx.global::<IconTheme>().file_icon(name)
 }
 
 impl IconTheme {
@@ -134,38 +135,30 @@ impl IconTheme {
         this
     }
 
-    pub fn file_icon(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
-        let key = if is_dir {
-            "/dir".to_string()
-        } else {
-            icon_key(name)
-        };
+    pub fn file_icon(&self, name: &str) -> Option<ImageSource> {
+        let key = icon_key(name);
         if let Some(hit) = self.cache.borrow().get(&key) {
             return hit.clone();
         }
-        let found = self.lookup(name, is_dir);
+        let found = self.lookup(name);
         self.cache.borrow_mut().insert(key, found.clone());
         found
     }
 
     #[cfg(target_os = "linux")]
-    fn lookup(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
+    fn lookup(&self, name: &str) -> Option<ImageSource> {
         if self.themes.is_empty() {
             return None;
         }
-        let path = if is_dir {
-            self.find_any(&["folder", "inode-directory"])
-        } else {
-            let names = self.icon_names(name);
-            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            self.find_any(&refs)
-        }?;
+        let names = self.icon_names(name);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let path = self.find_any(&refs)?;
         Some(ImageSource::from(path))
     }
 
     #[cfg(target_os = "windows")]
-    fn lookup(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
-        let png = shell::icon_png(name, is_dir)?;
+    fn lookup(&self, name: &str) -> Option<ImageSource> {
+        let png = shell::icon_png(name)?;
         Some(ImageSource::Image(Arc::new(Image::from_bytes(
             ImageFormat::Png,
             png,
@@ -173,7 +166,7 @@ impl IconTheme {
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    fn lookup(&self, _name: &str, _is_dir: bool) -> Option<ImageSource> {
+    fn lookup(&self, _name: &str) -> Option<ImageSource> {
         None
     }
 

@@ -1289,13 +1289,16 @@ impl FilePanel {
             transparent_black()
         };
 
-        // The desktop's icon when wanted and available, else a generic one.
-        let system_icon =
-            if entry.is_parent || crate::settings::get(cx).file_icons != FileIcons::System {
-                None
-            } else {
-                crate::icons::file_icon(cx, &entry.name, entry.is_dir())
-            };
+        // Files get the desktop's icon when wanted and available; directories
+        // and `..` always use the generic ones so folders look the same.
+        let system_icon = if entry.is_parent
+            || entry.is_dir()
+            || crate::settings::get(cx).file_icons != FileIcons::System
+        {
+            None
+        } else {
+            crate::icons::file_icon(cx, &entry.name)
+        };
         let icon: AnyElement = match system_icon {
             Some(source) => img(source)
                 .size_full()
