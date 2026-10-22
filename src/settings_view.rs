@@ -208,16 +208,10 @@ impl Render for SettingsView {
             }
         };
 
-        v_flex()
-            .id("settings")
-            .key_context(SETTINGS_CONTEXT)
-            .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::on_close))
-            .size_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .bg(bg)
-            .text_color(fg)
+        // The form keeps a readable width and sits in the middle of the tab.
+        let form = v_flex()
+            .w_full()
+            .max_w(rems(48.))
             .p_4()
             .gap_4()
             .child(
@@ -340,6 +334,19 @@ impl Render for SettingsView {
                                     open::that_detached("https://github.com/cechi/vais-commander");
                             }),
                     ),
-            )
+            );
+
+        v_flex()
+            .id("settings")
+            .key_context(SETTINGS_CONTEXT)
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::on_close))
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .items_center()
+            .bg(bg)
+            .text_color(fg)
+            .child(form)
     }
 }
