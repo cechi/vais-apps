@@ -106,7 +106,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
 | `Ctrl+J` | Show / hide the operations panel |
 | `Ctrl+B` | Show / hide the places sidebar (also the toggle at the left of the status bar) |
-| `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory) |
+| `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory); type to filter the list |
 | `Ctrl+Shift+D` | Toggle light / dark |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar) |
 | `Ctrl+Q` / `F10` | Quit |
@@ -174,7 +174,7 @@ src/panel/         FilePanel entity (rendering, actions) and PanelState (cursor,
 src/fs/            directory reading, natural sort, size/date formatting
 src/ops/           copy / move / delete with byte-level progress and cancel; manager.rs runs them
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)
-src/palette.rs     command-center style chooser: an input plus a list that fills it (used for F5/F6 destinations)
+src/palette.rs     command-center style dialog body: value input + rows (F5/F6, F2, F7) or a choice list (F8, conflicts, themes)
 src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
 src/config.rs      TOML config

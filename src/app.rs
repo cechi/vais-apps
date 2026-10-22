@@ -24,6 +24,7 @@ use crate::layout::Layout;
 use crate::ops::OpKind;
 use crate::ops::manager::{ManagerEvent, OperationsManager, summary};
 use crate::ops_panel::{OperationsPanel, PanelEvent as OpsPanelEvent};
+use crate::palette::{self, Palette, PaletteItem};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
@@ -276,86 +277,44 @@ impl Workspace {
     fn choose_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let themes = theme::available(cx);
         let current = self.theme.clone();
-        let view = cx.entity();
         let dir = theme::themes_dir()
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_default();
-        window.open_alert_dialog(cx, move |alert, _window, cx| {
-            let (themes, current, view, dir) =
-                (themes.clone(), current.clone(), view.clone(), dir.clone());
-            let (fg, muted, hover, accent) = {
-                let t = cx.theme();
-                (
-                    t.foreground,
-                    t.muted_foreground,
-                    t.list_hover,
-                    t.list_active,
-                )
-            };
-            // The registry already lists the built-in pair as "Default Light/Dark".
-            let mut choices: Vec<(String, ThemeChoice, String)> = vec![(
-                "System".into(),
-                ThemeChoice::System,
-                "built-in light or dark, following the desktop".into(),
-            )];
-            for (name, mode) in &themes {
-                choices.push((
-                    name.clone(),
-                    ThemeChoice::Named(name.clone()),
-                    if mode.is_dark() {
-                        "dark".into()
+        // The registry already lists the built-in pair as "Default Light/Dark".
+        let mut choices: Vec<ThemeChoice> = vec![ThemeChoice::System];
+        let mut items = vec![
+            PaletteItem::new("System")
+                .detail("built-in light or dark, following the desktop")
+                .icon(IconName::Palette)
+                .checked(current == ThemeChoice::System),
+        ];
+        for (name, mode) in themes {
+            let choice = ThemeChoice::Named(name.clone());
+            items.push(
+                PaletteItem::new(name)
+                    .detail(if mode.is_dark() { "dark" } else { "light" })
+                    .icon(if mode.is_dark() {
+                        IconName::Moon
                     } else {
-                        "light".into()
-                    },
-                ));
-            }
-            alert
-                .title("Theme")
-                .content(move |content, _, _| {
-                    let rows = choices
-                        .iter()
-                        .enumerate()
-                        .map(|(ix, (label, choice, note))| {
-                            let selected = *choice == current;
-                            let choice = choice.clone();
-                            let view = view.clone();
-                            h_flex()
-                                .id(("theme-row", ix))
-                                .w_full()
-                                .px_2()
-                                .py_1()
-                                .gap_2()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .when(selected, |d| d.bg(accent))
-                                .hover(|s| s.bg(hover))
-                                .on_click(move |_, window, cx| {
-                                    let choice = choice.clone();
-                                    view.update(cx, |this, cx| this.set_theme(choice, cx));
-                                    window.close_dialog(cx);
-                                })
-                                .child(div().flex_1().text_color(fg).child(label.clone()))
-                                .child(div().text_xs().text_color(muted).child(note.clone()))
-                        });
-                    content
-                        .child(
-                            div()
-                                .id("theme-rows")
-                                .max_h(rems(18.))
-                                .overflow_y_scroll()
-                                .text_sm()
-                                .children(rows),
-                        )
-                        .child(
-                            div()
-                                .pt_2()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(format!("User themes: {dir}")),
-                        )
+                        IconName::Sun
+                    })
+                    .checked(choice == current),
+            );
+            choices.push(choice);
+        }
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::pick_filtered(items, "Filter themes", window, cx)
+                .footer(format!("User themes: {dir}"))
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    if let Some(theme) = choice.item.and_then(|ix| choices.get(ix).cloned()) {
+                        view.update(cx, |this, cx| this.set_theme(theme, cx));
+                    }
                 })
-                .ok_text("Close")
+                .on_cancel(|window, cx| window.close_dialog(cx))
         });
+        palette::open("Theme".to_string(), palette, window, cx);
     }
 
     // ----- UI scale ------------------------------------------------------

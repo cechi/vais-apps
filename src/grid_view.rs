@@ -1,14 +1,11 @@
 //! One grid of file panels: layout, focus between panels, divider sizes, and
 //! the file operations between the active and the target panel.
 
-use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::component::IconName;
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -21,13 +18,9 @@ use crate::layout::grid::{GridState, OnResize, render_grid};
 use crate::layout::{Dir, Layout, MAX_PANELS};
 use crate::ops::manager::{ManagerEvent, OperationsManager};
 use crate::ops::{self, OpKind, Request};
-use crate::palette::{Palette, PaletteItem};
+use crate::palette::{self, Palette, PaletteItem};
 use crate::panel::{FilePanel, PanelEvent};
 use crate::settings::{self, DropAction};
-
-/// What an input dialog does on confirm. It runs inside an update of the view,
-/// so it must not call `Entity::update` on the view again.
-type ConfirmFn = Rc<dyn Fn(&mut GridView, &mut Window, &mut Context<GridView>)>;
 
 /// The Move / Copy menu shown at the mouse after a drop.
 struct DropMenu {
@@ -241,12 +234,11 @@ impl GridView {
                 .to_string_lossy()
                 .into_owned();
             panel_of.push(ix);
-            items.push(PaletteItem {
-                label: path.clone().into(),
-                detail: format!("Panel {}", ix + 1).into(),
-                value: path,
-                icon: Some(IconName::Folder),
-            });
+            items.push(
+                PaletteItem::new(path)
+                    .detail(format!("Panel {}", ix + 1))
+                    .icon(IconName::Folder),
+            );
         }
 
         let view = cx.entity();
@@ -282,31 +274,7 @@ impl GridView {
         });
         self.set_highlight(initial, cx);
 
-        self.open_palette(title, palette, window, cx);
-    }
-
-    /// Show `palette` in a command-center style dialog: near the top, no
-    /// buttons, the input focused.
-    fn open_palette(
-        &mut self,
-        title: String,
-        palette: Entity<Palette>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let initial_focus = Cell::new(true);
-        window.open_dialog(cx, move |dialog, window, cx| {
-            if initial_focus.replace(false) {
-                palette.update(cx, |palette, cx| palette.focus(window, cx));
-            }
-            let palette = palette.clone();
-            dialog
-                .title(title.clone())
-                .w(px(640.))
-                .margin_top(px(64.))
-                .close_button(false)
-                .content(move |content, _, _| content.child(palette.clone()))
-        });
+        palette::open(title, palette, window, cx);
     }
 
     /// Mark `target` as the panel the destination palette points at.
@@ -369,29 +337,28 @@ impl GridView {
                 ""
             }
         );
-        let overwrite = Rc::new(request.clone_with_overwrite(true));
-        let skip = Rc::new(request);
+        let overwrite = request.clone_with_overwrite(true);
         let view = cx.entity();
-        let view2 = view.clone();
-        window.open_alert_dialog(cx, move |alert, _window, _cx| {
-            let (overwrite, skip, view, view2) =
-                (overwrite.clone(), skip.clone(), view.clone(), view2.clone());
-            alert
-                .title("Files already exist")
-                .description(description.clone())
-                .ok_text("Overwrite")
-                .ok_variant(ButtonVariant::Danger)
-                .show_cancel(true)
-                .cancel_text("Skip existing")
-                .on_ok(move |_, _, cx| {
-                    view.update(cx, |this, cx| this.run_operation((*overwrite).clone(), cx));
-                    true
+        let palette = cx.new(|cx| {
+            let items = vec![
+                PaletteItem::new("Overwrite").danger(true),
+                PaletteItem::new("Skip existing"),
+                PaletteItem::new("Cancel"),
+            ];
+            Palette::pick(items, cx)
+                .description(description)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let request = match choice.item {
+                        Some(0) => overwrite.clone(),
+                        Some(1) => request.clone(),
+                        _ => return,
+                    };
+                    view.update(cx, |this, cx| this.run_operation(request, cx));
                 })
-                .on_cancel(move |_, _, cx| {
-                    view2.update(cx, |this, cx| this.run_operation((*skip).clone(), cx));
-                    true
-                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
         });
+        palette::open("Files already exist".to_string(), palette, window, cx);
     }
 
     /// Entries dropped onto `dest`: move or copy them there according to the
@@ -488,72 +455,80 @@ impl GridView {
             }
         );
         let title = format!("{} {}?", kind.verb(), ops::describe(&sources));
-        let request = Rc::new(Request {
+        let request = Request {
             kind,
             sources,
             dest: None,
             overwrite: false,
-        });
+        };
         let view = cx.entity();
-        window.open_alert_dialog(cx, move |alert, _window, _cx| {
-            let (request, view) = (request.clone(), view.clone());
-            alert
-                .title(title.clone())
-                .description(description.clone())
-                .ok_text(if permanent { "Delete" } else { "Trash" })
-                .show_cancel(true)
-                .ok_variant(if permanent {
-                    ButtonVariant::Danger
+        let palette = cx.new(|cx| {
+            let items = vec![
+                PaletteItem::new(if permanent {
+                    "Delete permanently"
                 } else {
-                    ButtonVariant::Primary
+                    "Move to trash"
                 })
-                .on_ok(move |_, _, cx| {
-                    view.update(cx, |this, cx| this.run_operation((*request).clone(), cx));
-                    true
+                .danger(permanent),
+                PaletteItem::new("Cancel"),
+            ];
+            Palette::pick(items, cx)
+                .description(description)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    if choice.item == Some(0) {
+                        let request = request.clone();
+                        view.update(cx, |this, cx| this.run_operation(request, cx));
+                    }
                 })
+                .on_cancel(|window, cx| window.close_dialog(cx))
         });
+        palette::open(title, palette, window, cx);
     }
 
-    /// F7: ask for a name, create it in the active panel's directory.
     pub fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let base = self.active_panel().read(cx).path().to_path_buf();
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("New folder name"));
-        let confirm: ConfirmFn = {
-            let input = input.clone();
-            Rc::new(move |this, window, cx| {
-                let name = input.read(cx).value().trim().to_string();
-                if name.is_empty() {
-                    return;
-                }
-                let path = base.join(&name);
-                match std::fs::create_dir_all(&path) {
-                    Ok(()) => {
-                        let first = PathBuf::from(&name)
-                            .components()
-                            .next()
-                            .map(|c| base.join(c.as_os_str()));
-                        this.refresh_active(first, cx);
-                    }
-                    Err(err) => this.notify(
-                        Notification::error(format!("{}: {err}", path.display())),
-                        window,
-                        cx,
-                    ),
-                }
-            })
-        };
-        self.open_input_dialog(
-            "New folder".to_string(),
-            "Name:",
-            input,
-            "Create",
-            confirm,
-            window,
-            cx,
-        );
+        let hint = format!("in {}", base.display());
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::new(Vec::new(), "", "New folder name", window, cx)
+                .hint(hint)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, base) = (view.clone(), base.clone());
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.make_dir(&base, choice.value.trim(), window, cx)
+                        });
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("New folder".to_string(), palette, window, cx);
     }
 
-    /// Shift+F6 / F2: rename the entry under the cursor in place.
+    fn make_dir(&mut self, base: &Path, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if name.is_empty() {
+            return;
+        }
+        let path = base.join(name);
+        match std::fs::create_dir_all(&path) {
+            Ok(()) => {
+                // Select the first component of a nested name.
+                let first = PathBuf::from(name)
+                    .components()
+                    .next()
+                    .map(|c| base.join(c.as_os_str()));
+                self.refresh_active(first, cx);
+            }
+            Err(err) => self.notify(
+                Notification::error(format!("{}: {err}", path.display())),
+                window,
+                cx,
+            ),
+        }
+    }
+
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let panel = self.active_panel().read(cx);
         // The file name itself, not the relative path a recursive search shows.
@@ -593,7 +568,7 @@ impl GridView {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        self.open_palette(format!("Rename {old_name}"), palette, window, cx);
+        palette::open(format!("Rename {old_name}"), palette, window, cx);
     }
 
     fn rename(
@@ -623,49 +598,6 @@ impl GridView {
                 cx,
             ),
         }
-    }
-
-    fn open_input_dialog(
-        &mut self,
-        title: String,
-        label: &'static str,
-        input: Entity<InputState>,
-        ok_text: &'static str,
-        confirm: ConfirmFn,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Enter inside the input reaches the dialog's `Confirm` action as well, so
-        // the `on_ok` handler below covers both the keyboard and the OK button.
-        let view = cx.entity();
-        let initial_focus = Cell::new(true);
-        window.open_alert_dialog(cx, move |alert, window, cx| {
-            if initial_focus.replace(false) {
-                input.update(cx, |input, cx| {
-                    input.focus(window, cx);
-                    input.select_all(window, cx);
-                });
-            }
-            let confirm = confirm.clone();
-            let input = input.clone();
-            let view = view.clone();
-            alert
-                .title(title.clone())
-                .content(move |content, _, _| {
-                    content
-                        .child(div().text_sm().child(label))
-                        .child(Input::new(&input).focus_bordered(false))
-                })
-                .ok_text(ok_text)
-                .show_cancel(true)
-                .on_ok(move |_, window, cx| {
-                    let (view, confirm) = (view.clone(), confirm.clone());
-                    window.defer(cx, move |window, cx| {
-                        view.update(cx, |this, cx| confirm(this, window, cx));
-                    });
-                    true
-                })
-        });
     }
 
     fn run_operation(&mut self, request: Request, cx: &mut Context<Self>) {
