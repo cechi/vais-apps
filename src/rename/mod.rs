@@ -8,7 +8,8 @@
 pub mod view;
 
 use std::io;
-use std::path::{Path, PathBuf};
+
+use crate::vfs::{Location, backend_for};
 
 use regex::RegexBuilder;
 
@@ -97,7 +98,7 @@ impl Problem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
-    pub from: PathBuf,
+    pub from: Location,
     pub old: String,
     pub new: String,
     pub problem: Option<Problem>,
@@ -132,7 +133,7 @@ impl Plan {
 }
 
 /// Compute the new names for `paths` (all in the same directory).
-pub fn plan(paths: &[PathBuf], rules: &Rules) -> Plan {
+pub fn plan(paths: &[Location], rules: &Rules) -> Plan {
     let mut plan = Plan::default();
     let finder = match (rules.regex, rules.find.is_empty()) {
         (_, true) => None,
@@ -149,12 +150,13 @@ pub fn plan(paths: &[PathBuf], rules: &Rules) -> Plan {
         (false, false) => Some(Finder::Text),
     };
 
+    let backend = paths.first().and_then(|p| backend_for(p).ok());
     for (i, path) in paths.iter().enumerate() {
-        let old = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let is_dir = path.is_dir();
+        let old = path.file_name().unwrap_or_default();
+        let is_dir = backend
+            .as_ref()
+            .and_then(|b| b.stat(path).ok())
+            .is_some_and(|m| m.is_dir());
         let (stem, ext) = split(&old, is_dir);
         let counter = rules.counter_start + rules.counter_step * i as i64;
         let counter = format!("{counter:0width$}", width = rules.counter_digits);
@@ -188,7 +190,7 @@ pub fn plan(paths: &[PathBuf], rules: &Rules) -> Plan {
 
     // Problems: names that are no good, clash with each other, or with
     // something on disk that is not itself being renamed away.
-    let olds: Vec<PathBuf> = plan.rows.iter().map(|r| r.from.clone()).collect();
+    let olds: Vec<Location> = plan.rows.iter().map(|r| r.from.clone()).collect();
     let news: Vec<String> = plan.rows.iter().map(|r| r.new.clone()).collect();
     for (i, row) in plan.rows.iter_mut().enumerate() {
         row.problem = if row.new.is_empty() {
@@ -202,8 +204,13 @@ pub fn plan(paths: &[PathBuf], rules: &Rules) -> Plan {
         {
             Some(Problem::Duplicate)
         } else if row.changes() {
-            let target = row.from.parent().unwrap_or(Path::new("")).join(&row.new);
-            let taken = target.symlink_metadata().is_ok() && !olds.contains(&target);
+            let target = row
+                .from
+                .parent()
+                .map(|dir| dir.join(&row.new))
+                .unwrap_or_else(|| row.from.clone());
+            let taken =
+                backend.as_ref().is_some_and(|b| b.exists(&target)) && !olds.contains(&target);
             taken.then_some(Problem::Exists)
         } else {
             None
@@ -222,13 +229,17 @@ enum Finder {
 /// moved are put back where they were, as far as possible.
 pub fn apply(rows: &[Row]) -> io::Result<()> {
     let changed: Vec<&Row> = rows.iter().filter(|r| r.changes()).collect();
-    let dir = |row: &Row| row.from.parent().map(Path::to_path_buf).unwrap_or_default();
-    let temp = |i: usize, row: &Row| dir(row).join(format!(".{}.vais-rename-{i}", row.old));
+    let Some(first) = changed.first() else {
+        return Ok(());
+    };
+    let backend = backend_for(&first.from)?;
+    let dir = |row: &Row| row.from.parent().unwrap_or_else(|| row.from.clone());
+    let temp = |i: usize, row: &Row| dir(row).join(&format!(".{}.vais-rename-{i}", row.old));
 
     let mut moved = Vec::new();
     let mut outcome = Ok(());
     for (i, row) in changed.iter().enumerate() {
-        match std::fs::rename(&row.from, temp(i, row)) {
+        match backend.rename(&row.from, &temp(i, row)) {
             Ok(()) => moved.push(i),
             Err(err) => {
                 outcome = Err(io::Error::new(err.kind(), format!("{}: {err}", row.old)));
@@ -240,7 +251,7 @@ pub fn apply(rows: &[Row]) -> io::Result<()> {
         let mut finished = Vec::new();
         for &i in &moved {
             let row = changed[i];
-            match std::fs::rename(temp(i, row), dir(row).join(&row.new)) {
+            match backend.rename(&temp(i, row), &dir(row).join(&row.new)) {
                 Ok(()) => finished.push(i),
                 Err(err) => {
                     outcome = Err(io::Error::new(err.kind(), format!("{}: {err}", row.new)));
@@ -252,14 +263,14 @@ pub fn apply(rows: &[Row]) -> io::Result<()> {
             // Undo the finished ones so that every file is back at a temp name.
             for &i in &finished {
                 let row = changed[i];
-                let _ = std::fs::rename(dir(row).join(&row.new), temp(i, row));
+                let _ = backend.rename(&dir(row).join(&row.new), &temp(i, row));
             }
         } else {
             return Ok(());
         }
     }
     for &i in &moved {
-        let _ = std::fs::rename(temp(i, changed[i]), &changed[i].from);
+        let _ = backend.rename(&temp(i, changed[i]), &changed[i].from);
     }
     outcome
 }
@@ -328,12 +339,12 @@ fn apply_case(name: &str, mode: CaseMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::{CaseMode, Problem, Rules, apply, apply_case, plan, replace_text, split};
-    use std::path::PathBuf;
+    use crate::vfs::Location;
 
-    fn paths(names: &[&str]) -> Vec<PathBuf> {
+    fn paths(names: &[&str]) -> Vec<Location> {
         names
             .iter()
-            .map(|n| PathBuf::from("/nowhere").join(n))
+            .map(|n| Location::local(std::path::PathBuf::from("/nowhere").join(n)))
             .collect()
     }
 
@@ -471,7 +482,13 @@ mod tests {
             replace: "b".into(),
             ..Rules::default()
         };
-        let mut p = plan(&[dir.join("a"), dir.join("b")], &rules);
+        let mut p = plan(
+            &[
+                Location::local(dir.join("a")),
+                Location::local(dir.join("b")),
+            ],
+            &rules,
+        );
         p.rows[1].new = "a".into();
         p.rows[1].problem = None;
         p.rows[0].problem = None;

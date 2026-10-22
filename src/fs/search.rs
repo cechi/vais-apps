@@ -1,24 +1,24 @@
 //! Recursive name search below a directory, for the panel's "Subfolders" filter.
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::filter::Matcher;
 use super::{Entry, ReadOptions, read_dir_sorted};
+use crate::vfs::Location;
 
 /// Walk `root` depth first (sorted like the panel) and collect entries whose
 /// name matches. Names become paths relative to `root`; directory symlinks are
 /// not followed. Stops at `limit` results or when `cancel` is set; the second
 /// value says whether the walk was cut short.
 pub fn search_tree(
-    root: &Path,
+    root: &Location,
     opts: ReadOptions,
     matcher: &Matcher,
     limit: usize,
     cancel: &AtomicBool,
 ) -> (Vec<Entry>, bool) {
     let mut results = Vec::new();
-    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut stack: Vec<Location> = vec![root.clone()];
     while let Some(dir) = stack.pop() {
         if cancel.load(Ordering::Relaxed) {
             return (results, true);
@@ -29,14 +29,13 @@ pub fn search_tree(
         let mut subdirs = Vec::new();
         for mut entry in entries.into_iter().filter(|e| !e.is_parent) {
             if entry.is_dir() && !entry.is_symlink() {
-                subdirs.push(entry.path.clone());
+                subdirs.push(entry.location.clone());
             }
             if matcher.matches(&entry.name) {
                 entry.name = entry
-                    .path
-                    .strip_prefix(root)
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| entry.name.clone());
+                    .location
+                    .relative_to(root)
+                    .unwrap_or_else(|| entry.name.clone());
                 entry.depth = 0;
                 results.push(entry);
                 if results.len() >= limit {
@@ -68,8 +67,9 @@ mod tests {
         fs::write(root.join("top.png"), "").unwrap();
 
         let cancel = AtomicBool::new(false);
+        let root_loc = Location::local(&root);
         let (found, truncated) = search_tree(
-            &root,
+            &root_loc,
             ReadOptions::default(),
             &Matcher::new("*.png"),
             100,
@@ -79,7 +79,7 @@ mod tests {
         let rel = |parts: &[&str]| {
             parts
                 .iter()
-                .collect::<PathBuf>()
+                .collect::<std::path::PathBuf>()
                 .to_string_lossy()
                 .into_owned()
         };
@@ -93,10 +93,14 @@ mod tests {
             ]
         );
         assert!(!truncated);
-        assert!(found.iter().all(|e| e.depth == 0 && e.path.is_absolute()));
+        assert!(
+            found
+                .iter()
+                .all(|e| e.depth == 0 && e.local_path().is_some_and(|p| p.is_absolute()))
+        );
 
         let (found, truncated) = search_tree(
-            &root,
+            &root_loc,
             ReadOptions::default(),
             &Matcher::new("png"),
             2,

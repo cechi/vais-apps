@@ -203,7 +203,8 @@ src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
 src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
-src/fs/            directory reading, natural sort, size/date formatting
+src/vfs/           Location (local path or connection + path) and the Backend trait; local.rs is the disk
+src/fs/            directory listing through the backend, natural sort, search, size/date formatting
 src/ops/           copy / move / delete with byte-level progress and cancel; manager.rs runs them
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)
 src/palette.rs     command-center style dialog body: value input + rows (F5/F6, F2, F7) or a choice list (F8, conflicts, themes)

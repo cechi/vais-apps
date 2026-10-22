@@ -5,14 +5,11 @@ pub mod format;
 pub mod search;
 pub mod sort;
 
-use std::{
-    collections::BTreeSet,
-    fs, io,
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{collections::BTreeSet, io, time::SystemTime};
 
 pub use sort::{Sort, SortDir, SortKey, extension};
+
+use crate::vfs::{Location, backend_for};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -25,7 +22,7 @@ pub enum EntryKind {
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: String,
-    pub path: PathBuf,
+    pub location: Location,
     pub kind: EntryKind,
     pub size: u64,
     pub modified: Option<SystemTime>,
@@ -51,6 +48,12 @@ impl Entry {
     pub fn is_symlink(&self) -> bool {
         matches!(self.kind, EntryKind::Symlink { .. })
     }
+
+    /// The path on the local disk, for features that only work there
+    /// (opening with another app, thumbnails, the editor).
+    pub fn local_path(&self) -> Option<&std::path::Path> {
+        self.location.as_local()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -59,62 +62,15 @@ pub struct ReadOptions {
     pub sort: Sort,
 }
 
-/// Read `path`, sort entries (directories first) and prepend ".." unless at root.
-pub fn read_dir_sorted(path: &Path, opts: ReadOptions) -> io::Result<Vec<Entry>> {
-    let read_dir = fs::read_dir(path)?;
-    let mut entries = Vec::new();
-
-    for item in read_dir {
-        let Ok(item) = item else { continue };
-        let name = item.file_name().to_string_lossy().into_owned();
-        let entry_path = item.path();
-        // `DirEntry::metadata` does not follow symlinks.
-        let meta = item.metadata();
-        if !opts.show_hidden && crate::platform::is_hidden(&name, meta.as_ref().ok()) {
-            continue;
-        }
-        let (kind, size, modified, created, mode, uid) = match meta {
-            Ok(meta) => {
-                let file_type = meta.file_type();
-                let modified = meta.modified().ok();
-                let created = meta.created().ok();
-                let (mode, uid) = unix_ids(&meta);
-                let (kind, size) = if file_type.is_symlink() {
-                    let to_dir = fs::metadata(&entry_path)
-                        .map(|t| t.is_dir())
-                        .unwrap_or(false);
-                    (EntryKind::Symlink { to_dir }, meta.len())
-                } else if file_type.is_dir() {
-                    (EntryKind::Dir, 0)
-                } else if file_type.is_file() {
-                    (EntryKind::File, meta.len())
-                } else {
-                    (EntryKind::Other, meta.len())
-                };
-                (kind, size, modified, created, mode, uid)
-            }
-            Err(_) => (EntryKind::Other, 0, None, None, None, None),
-        };
-        entries.push(Entry {
-            name,
-            path: entry_path,
-            kind,
-            size,
-            modified,
-            created,
-            mode,
-            uid,
-            is_parent: false,
-            depth: 0,
-        });
-    }
-
+/// Read `dir` through its backend, sort entries (directories first) and
+/// prepend ".." unless at a root.
+pub fn read_dir_sorted(dir: &Location, opts: ReadOptions) -> io::Result<Vec<Entry>> {
+    let backend = backend_for(dir)?;
+    let mut entries = backend.read_dir(dir, opts.show_hidden)?;
     sort::sort_entries(&mut entries, opts.sort);
-
-    if let Some(parent) = crate::platform::parent_of(path) {
+    if let Some(parent) = dir.parent() {
         entries.insert(0, parent_entry(parent));
     }
-
     Ok(entries)
 }
 
@@ -124,7 +80,7 @@ pub fn read_roots() -> Vec<Entry> {
         .into_iter()
         .map(|root| Entry {
             name: root.to_string_lossy().into_owned(),
-            path: root,
+            location: Location::Local(root),
             kind: EntryKind::Dir,
             size: 0,
             modified: None,
@@ -137,24 +93,12 @@ pub fn read_roots() -> Vec<Entry> {
         .collect()
 }
 
-/// Permission bits and owner of a Unix file; nothing elsewhere.
-#[cfg(unix)]
-fn unix_ids(meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
-    use std::os::unix::fs::MetadataExt;
-    (Some(meta.mode()), Some(meta.uid()))
-}
-
-#[cfg(not(unix))]
-fn unix_ids(_meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
-    (None, None)
-}
-
 /// Read `path` and, recursively, every directory listed in `expanded`, as one
 /// flattened list where children follow their parent with `depth + 1`.
 pub fn read_tree(
-    path: &Path,
+    path: &Location,
     opts: ReadOptions,
-    expanded: &BTreeSet<PathBuf>,
+    expanded: &BTreeSet<Location>,
 ) -> io::Result<Vec<Entry>> {
     let mut entries = read_dir_sorted(path, opts)?;
     if !expanded.is_empty() {
@@ -163,13 +107,13 @@ pub fn read_tree(
     Ok(entries)
 }
 
-fn expand_into(entries: &mut Vec<Entry>, opts: ReadOptions, expanded: &BTreeSet<PathBuf>) {
+fn expand_into(entries: &mut Vec<Entry>, opts: ReadOptions, expanded: &BTreeSet<Location>) {
     let mut i = 0;
     while i < entries.len() {
         let entry = &entries[i];
-        if !entry.is_parent && entry.is_dir() && expanded.contains(&entry.path) {
+        if !entry.is_parent && entry.is_dir() && expanded.contains(&entry.location) {
             let depth = entry.depth + 1;
-            if let Ok(children) = read_dir_sorted(&entry.path, opts) {
+            if let Ok(children) = read_dir_sorted(&entry.location, opts) {
                 let mut children: Vec<Entry> = children
                     .into_iter()
                     .filter(|c| !c.is_parent)
@@ -189,10 +133,10 @@ fn expand_into(entries: &mut Vec<Entry>, opts: ReadOptions, expanded: &BTreeSet<
 }
 
 /// The synthetic `..` row pointing at `parent`.
-pub fn parent_entry(parent: PathBuf) -> Entry {
+pub fn parent_entry(parent: Location) -> Entry {
     Entry {
         name: "..".to_string(),
-        path: parent,
+        location: parent,
         kind: EntryKind::Dir,
         size: 0,
         modified: None,
@@ -207,6 +151,7 @@ pub fn parent_entry(parent: PathBuf) -> Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn read_tree_flattens_expanded_directories() {
@@ -220,9 +165,9 @@ mod tests {
 
         let opts = ReadOptions::default();
         let mut expanded = BTreeSet::new();
-        expanded.insert(root.join("a"));
-        expanded.insert(root.join("a/inner"));
-        let entries = read_tree(&root, opts, &expanded).unwrap();
+        expanded.insert(Location::local(root.join("a")));
+        expanded.insert(Location::local(root.join("a/inner")));
+        let entries = read_tree(&Location::local(&root), opts, &expanded).unwrap();
         let rows: Vec<(String, usize)> =
             entries.iter().map(|e| (e.name.clone(), e.depth)).collect();
         assert_eq!(

@@ -1,7 +1,9 @@
 //! One grid of file panels: layout, focus between panels, divider sizes, and
 //! the file operations between the active and the target panel.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use crate::vfs::{Location, backend_for};
 use std::rc::Rc;
 
 use gpui_kit::component::IconName;
@@ -35,7 +37,7 @@ pub enum GridEvent {
     /// The file clipboard changed (the status bar shows it).
     ClipboardChanged,
     /// F2 with several entries marked: open the batch rename form for them.
-    BatchRename(Vec<PathBuf>),
+    BatchRename(Vec<Location>),
     /// F3 / F4: open the file under the cursor in an editor tab.
     OpenFile { path: PathBuf, readonly: bool },
 }
@@ -136,7 +138,7 @@ impl GridView {
 
     /// Short name of the active panel's directory, used as the tab title.
     pub fn title(&self, cx: &App) -> String {
-        crate::platform::display_name(&self.active_panel().read(cx).state.path)
+        self.active_panel().read(cx).state.path.display_name()
     }
 
     pub fn config(&self, cx: &App) -> TabConfig {
@@ -204,7 +206,7 @@ impl GridView {
     }
 
     /// Marked (or cursor) paths of the active panel, or a warning when empty.
-    fn selection(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<PathBuf>> {
+    fn selection(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Location>> {
         let paths = self.active_panel().read(cx).selected_paths();
         if paths.is_empty() {
             self.notify(Notification::warning("Nothing selected"), window, cx);
@@ -220,23 +222,14 @@ impl GridView {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
-        let dest_default = self
-            .target_panel()
-            .read(cx)
-            .path()
-            .to_string_lossy()
-            .into_owned();
+        let dest_default = self.target_panel().read(cx).path().display();
         let title = format!("{} {}", kind.verb(), ops::describe(&sources));
 
         // Rows in reading order; `panel_of[row]` maps a row back to its panel.
         let mut panel_of = Vec::new();
         let mut items = Vec::new();
         for ix in (0..self.layout.count()).filter(|&ix| ix != self.active) {
-            let path = self.panels[ix]
-                .read(cx)
-                .path()
-                .to_string_lossy()
-                .into_owned();
+            let path = self.panels[ix].read(cx).path().display();
             panel_of.push(ix);
             items.push(
                 PaletteItem::new(path)
@@ -298,12 +291,15 @@ impl GridView {
     fn confirm_transfer(
         &mut self,
         kind: OpKind,
-        sources: Vec<PathBuf>,
-        dest: PathBuf,
+        sources: Vec<Location>,
+        dest: Location,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !dest.is_dir() {
+        let is_dir = backend_for(&dest)
+            .and_then(|b| b.stat(&dest))
+            .is_ok_and(|m| m.is_dir());
+        if !is_dir {
             self.notify(
                 Notification::error(format!("{} is not a directory", dest.display())),
                 window,
@@ -311,7 +307,7 @@ impl GridView {
             );
             return;
         }
-        let dest = std::fs::canonicalize(&dest).unwrap_or(dest);
+        let dest = canonical(dest);
         let conflicts = ops::conflicts(&sources, &dest);
         let request = Request {
             kind,
@@ -327,13 +323,17 @@ impl GridView {
         let names: Vec<String> = conflicts
             .iter()
             .take(5)
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter_map(Location::file_name)
             .collect();
         let description = format!(
             "{} already exist{} in {}: {}{}",
             conflicts.len(),
             if conflicts.len() == 1 { "s" } else { "" },
-            request.dest.as_deref().unwrap_or(&PathBuf::new()).display(),
+            request
+                .dest
+                .as_ref()
+                .map(Location::display)
+                .unwrap_or_default(),
             names.join(", "),
             if conflicts.len() > names.len() {
                 ", …"
@@ -369,18 +369,15 @@ impl GridView {
     /// `drop_action` setting, asking when it says so.
     fn handle_drop(
         &mut self,
-        paths: Vec<PathBuf>,
-        dest: PathBuf,
+        paths: Vec<Location>,
+        dest: Location,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !dest.is_dir() {
-            return;
-        }
-        let dest = std::fs::canonicalize(&dest).unwrap_or(dest);
-        let sources: Vec<PathBuf> = paths
+        let dest = canonical(dest);
+        let sources: Vec<Location> = paths
             .into_iter()
-            .filter(|p| p.parent() != Some(dest.as_path()) && *p != dest && !dest.starts_with(p))
+            .filter(|p| p.parent().as_ref() != Some(&dest) && *p != dest && !dest.starts_with(p))
             .collect();
         if sources.is_empty() {
             return;
@@ -395,8 +392,8 @@ impl GridView {
     /// A two-item popup menu (Move / Copy) right where the entries were dropped.
     fn ask_drop(
         &mut self,
-        sources: Vec<PathBuf>,
-        dest: PathBuf,
+        sources: Vec<Location>,
+        dest: Location,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -447,7 +444,7 @@ impl GridView {
         let names: Vec<String> = sources
             .iter()
             .take(8)
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter_map(Location::file_name)
             .collect();
         let description = format!(
             "{}{}",
@@ -491,7 +488,7 @@ impl GridView {
     }
 
     pub fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let base = self.active_panel().read(cx).path().to_path_buf();
+        let base = self.active_panel().read(cx).path().clone();
         let hint = format!("in {}", base.display());
         let view = cx.entity();
         let palette = cx.new(|cx| {
@@ -511,18 +508,24 @@ impl GridView {
         palette::open("New folder".to_string(), palette, window, cx);
     }
 
-    fn make_dir(&mut self, base: &Path, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn make_dir(
+        &mut self,
+        base: &Location,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if name.is_empty() {
             return;
         }
         let path = base.join(name);
-        match std::fs::create_dir_all(&path) {
+        match backend_for(base).and_then(|b| b.mkdir_all(&path)) {
             Ok(()) => {
                 // Select the first component of a nested name.
-                let first = PathBuf::from(name)
-                    .components()
-                    .next()
-                    .map(|c| base.join(c.as_os_str()));
+                let first = name
+                    .split(['/', '\\'])
+                    .find(|s| !s.is_empty())
+                    .map(|c| base.join(c));
                 self.refresh_active(first, cx);
             }
             Err(err) => self.notify(
@@ -544,12 +547,26 @@ impl GridView {
             );
             return;
         };
-        if path.is_dir() {
+        let is_dir = backend_for(&path)
+            .and_then(|b| b.stat(&path))
+            .is_ok_and(|m| m.is_dir());
+        if is_dir {
             self.active_panel()
                 .update(cx, |panel, cx| panel.navigate_to(path, cx));
             return;
         }
-        cx.emit(GridEvent::OpenFile { path, readonly });
+        let Some(local) = path.as_local() else {
+            self.notify(
+                Notification::info("Remote files cannot be edited yet"),
+                window,
+                cx,
+            );
+            return;
+        };
+        cx.emit(GridEvent::OpenFile {
+            path: local.to_path_buf(),
+            readonly,
+        });
     }
 
     fn on_view_file(&mut self, _: &ViewFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -567,15 +584,13 @@ impl GridView {
         }
         let panel = self.active_panel().read(cx);
         // The file name itself, not the relative path a recursive search shows.
-        let old_name = panel
-            .current_path()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let old_name = panel.current_path().and_then(|p| p.file_name());
+        let is_dir = panel.state.current().is_some_and(|e| e.is_dir());
         let (Some(old_name), Some(from)) = (old_name, panel.current_path()) else {
             self.notify(Notification::warning("Nothing to rename"), window, cx);
             return;
         };
-        let is_dir = from.is_dir();
-        let base = from.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let base = from.parent().unwrap_or_else(|| from.clone());
         let hint = format!("in {}", base.display());
 
         let view = cx.entity();
@@ -608,7 +623,7 @@ impl GridView {
 
     fn rename(
         &mut self,
-        base: &Path,
+        base: &Location,
         old_name: &str,
         new_name: &str,
         window: &mut Window,
@@ -618,13 +633,15 @@ impl GridView {
             return;
         }
         let (from, to) = (base.join(old_name), base.join(new_name));
-        let result = if to.symlink_metadata().is_ok() {
-            Err(std::io::Error::other(
-                "a file with that name already exists",
-            ))
-        } else {
-            std::fs::rename(&from, &to)
-        };
+        let result = backend_for(base).and_then(|backend| {
+            if backend.exists(&to) {
+                Err(std::io::Error::other(
+                    "a file with that name already exists",
+                ))
+            } else {
+                backend.rename(&from, &to)
+            }
+        });
         match result {
             Ok(()) => self.refresh_active(Some(to), cx),
             Err(err) => self.notify(
@@ -642,7 +659,7 @@ impl GridView {
     }
 
     /// Reload every panel showing `dir` (after a batch rename).
-    pub fn refresh_dir(&mut self, dir: &Path, cx: &mut Context<Self>) {
+    pub fn refresh_dir(&mut self, dir: &Location, cx: &mut Context<Self>) {
         for panel in &self.panels {
             if panel.read(cx).path() == dir {
                 panel.update(cx, |p, cx| p.refresh(None, cx));
@@ -650,7 +667,7 @@ impl GridView {
         }
     }
 
-    fn refresh_active(&mut self, select: Option<PathBuf>, cx: &mut Context<Self>) {
+    fn refresh_active(&mut self, select: Option<Location>, cx: &mut Context<Self>) {
         self.active_panel()
             .update(cx, |p, cx| p.refresh(select, cx));
     }
@@ -700,12 +717,11 @@ impl GridView {
             self.notify(Notification::warning("Nothing to paste"), window, cx);
             return;
         }
-        let dest = self.active_panel().read(cx).path().to_path_buf();
-        let dest = std::fs::canonicalize(&dest).unwrap_or(dest);
-        let sources: Vec<PathBuf> = clip
+        let dest = canonical(self.active_panel().read(cx).path().clone());
+        let sources: Vec<Location> = clip
             .paths
             .iter()
-            .filter(|p| p.parent() != Some(dest.as_path()))
+            .filter(|p| p.parent().as_ref() != Some(&dest))
             .cloned()
             .collect();
         if clip.cut {
@@ -839,6 +855,15 @@ impl Render for GridView {
                     .with_priority(gpui_kit::base::POPUP_PRIORITY),
                 )
             })
+    }
+}
+
+/// Resolve symlinks of a local directory so that "already there" checks
+/// compare like with like; remote locations are used as they are.
+fn canonical(loc: Location) -> Location {
+    match loc {
+        Location::Local(path) => Location::Local(std::fs::canonicalize(&path).unwrap_or(path)),
+        other => other,
     }
 }
 

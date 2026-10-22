@@ -31,6 +31,7 @@ use crate::settings_view::{SettingsEvent, SettingsValues, SettingsView};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
+use crate::vfs::Location;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Height of the tab bar, matching the sidebar header.
@@ -125,8 +126,8 @@ pub struct Workspace {
     sidebar_open: bool,
     /// Directories the focused panel showed, newest first (the sidebar's
     /// Recent group); `last_visited` is what was noted last.
-    recent: Vec<PathBuf>,
-    last_visited: Option<PathBuf>,
+    recent: Vec<Location>,
+    last_visited: Option<Location>,
     /// Personal font family from the config, applied over every theme.
     font_family: Option<String>,
     /// Divider between the sidebar and the main column.
@@ -439,8 +440,9 @@ impl Workspace {
                             }
                             EditorEvent::Saved(path) => {
                                 if let Some(dir) = path.parent() {
+                                    let dir = Location::local(dir);
                                     for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
-                                        grid.update(cx, |grid, cx| grid.refresh_dir(dir, cx));
+                                        grid.update(cx, |grid, cx| grid.refresh_dir(&dir, cx));
                                     }
                                 }
                                 cx.notify();
@@ -580,7 +582,7 @@ impl Workspace {
     }
 
     /// Open the batch rename form for `paths` in a new tab next to the current one.
-    fn open_rename(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_rename(&mut self, paths: Vec<Location>, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.new(|cx| RenameView::new(paths, window, cx));
         let ix = self.active_tab + 1;
         self.tabs.insert(ix, Tab::rename(view));
@@ -743,7 +745,7 @@ impl Workspace {
     // ----- sidebar -------------------------------------------------------
 
     /// Navigate the active panel of the active tab to a sidebar place.
-    fn open_place(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn open_place(&mut self, path: Location, cx: &mut Context<Self>) {
         if let Some(view) = self.active_tab().grid_view() {
             let panel = view.read(cx).active_panel().clone();
             panel.update(cx, |panel, cx| panel.navigate_to(path, cx));
@@ -752,7 +754,7 @@ impl Workspace {
 
     /// The focused panel shows `path`: move it to the front of the recent
     /// list (newest first, bounded) when it is a different directory.
-    fn note_visit(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+    fn note_visit(&mut self, path: Option<Location>, cx: &mut Context<Self>) {
         let Some(path) = path else {
             return;
         };
@@ -1235,7 +1237,7 @@ impl Render for Workspace {
         let current = self
             .active_tab()
             .grid_view()
-            .map(|v| v.read(cx).active_panel().read(cx).path().to_path_buf());
+            .map(|v| v.read(cx).active_panel().read(cx).path().clone());
         self.note_visit(current.clone(), cx);
         if self.sidebar_open {
             self.sidebar.update(cx, |s, cx| s.set_current(current, cx));

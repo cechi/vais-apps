@@ -89,7 +89,8 @@ impl Thumbnailer {
         panel: WeakEntity<FilePanel>,
         cx: &mut Context<Self>,
     ) -> Option<Arc<Path>> {
-        match self.states.get(&entry.path) {
+        let source = entry.local_path()?.to_path_buf();
+        match self.states.get(&source) {
             Some(State::Ready(path)) => return Some(path.clone()),
             Some(State::Failed) => return None,
             Some(State::Pending) => {
@@ -102,15 +103,11 @@ impl Thumbnailer {
         let target = dir.join(format!("{:016x}.png", key_of(entry)));
         if target.is_file() {
             let path: Arc<Path> = Arc::from(target);
-            self.states
-                .insert(entry.path.clone(), State::Ready(path.clone()));
+            self.states.insert(source, State::Ready(path.clone()));
             return Some(path);
         }
-        self.states.insert(entry.path.clone(), State::Pending);
-        self.queue.push_back(Job {
-            source: entry.path.clone(),
-            target,
-        });
+        self.states.insert(source.clone(), State::Pending);
+        self.queue.push_back(Job { source, target });
         self.add_waiter(panel);
         self.pump(cx);
         None
@@ -164,7 +161,7 @@ impl Thumbnailer {
 /// edited image gets a fresh thumbnail.
 fn key_of(entry: &Entry) -> u64 {
     let mut hasher = DefaultHasher::new();
-    entry.path.hash(&mut hasher);
+    entry.location.display().hash(&mut hasher);
     entry.size.hash(&mut hasher);
     entry
         .modified

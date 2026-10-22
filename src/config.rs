@@ -9,6 +9,7 @@ use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
 use crate::panel::view::{Columns, ViewMode};
 use crate::settings::{DropAction, FileIcons};
+use crate::vfs::Location;
 
 pub const CONFIG_VERSION: u32 = 2;
 
@@ -65,7 +66,7 @@ pub struct Config {
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
     /// Directories the focused panel showed most recently, newest first.
-    pub recent: Vec<PathBuf>,
+    pub recent: Vec<Location>,
     /// Version 1 layout (single grid); read for migration, never written.
     #[serde(skip_serializing)]
     pub layout: Option<LayoutConfig>,
@@ -177,7 +178,7 @@ pub struct WindowConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanelConfig {
-    pub path: PathBuf,
+    pub path: Location,
     pub show_hidden: bool,
     pub sort: SortKey,
     pub sort_desc: bool,
@@ -188,7 +189,7 @@ pub struct PanelConfig {
 impl Default for PanelConfig {
     fn default() -> Self {
         Self {
-            path: home_dir(),
+            path: Location::Local(home_dir()),
             show_hidden: false,
             sort: SortKey::Name,
             sort_desc: false,
@@ -287,7 +288,7 @@ mod tests {
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.tabs.len(), 1);
         assert_eq!(back.tabs[0].layout.rows, 2);
-        assert_eq!(back.tabs[0].panels[0].path, PathBuf::from("/tmp"));
+        assert_eq!(back.tabs[0].panels[0].path, Location::local("/tmp"));
 
         let partial: Config = toml::from_str("[[tabs]]\n[tabs.layout]\nrows = 3\n").unwrap();
         assert_eq!(partial.tabs()[0].layout.rows, 3);
@@ -302,8 +303,8 @@ mod tests {
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0].layout.rows, 2);
         assert_eq!(tabs[0].layout.cols, 3);
-        assert_eq!(tabs[0].panel(0).path, PathBuf::from("/usr"));
-        assert_eq!(tabs[0].panel(5).path, home_dir());
+        assert_eq!(tabs[0].panel(0).path, Location::local("/usr"));
+        assert_eq!(tabs[0].panel(5).path, Location::Local(home_dir()));
 
         let empty = Config::default();
         assert_eq!(empty.tabs().len(), 1);

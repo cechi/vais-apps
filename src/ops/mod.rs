@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::vfs::{Location, backend_for};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpKind {
     Copy,
@@ -51,9 +53,9 @@ impl OpKind {
 #[derive(Debug, Clone)]
 pub struct Request {
     pub kind: OpKind,
-    pub sources: Vec<PathBuf>,
+    pub sources: Vec<Location>,
     /// Destination directory for copy and move.
-    pub dest: Option<PathBuf>,
+    pub dest: Option<Location>,
     /// Replace existing files at the destination; otherwise they are skipped.
     pub overwrite: bool,
 }
@@ -87,26 +89,68 @@ pub struct Report {
 }
 
 /// "3 items" or the single file name, for dialog titles.
-pub fn describe(sources: &[PathBuf]) -> String {
+pub fn describe(sources: &[Location]) -> String {
     match sources {
-        [single] => single
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| single.to_string_lossy().into_owned()),
+        [single] => single.file_name().unwrap_or_else(|| single.display()),
         many => format!("{} items", many.len()),
     }
 }
 
-/// Destination paths that already exist.
-pub fn conflicts(sources: &[PathBuf], dest: &Path) -> Vec<PathBuf> {
+/// Destination entries that already exist.
+pub fn conflicts(sources: &[Location], dest: &Location) -> Vec<Location> {
+    let Ok(backend) = backend_for(dest) else {
+        return Vec::new();
+    };
     sources
         .iter()
-        .filter_map(|src| src.file_name().map(|name| dest.join(name)))
-        .filter(|dst| dst.symlink_metadata().is_ok())
+        .filter_map(|src| src.file_name().map(|name| dest.join(&name)))
+        .filter(|dst| backend.exists(dst))
         .collect()
 }
 
 pub fn run(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
+    let mut report = Report::default();
+    // Only the local disk is served so far; remote backends come with the
+    // connections.
+    let remote = req
+        .sources
+        .iter()
+        .chain(req.dest.iter())
+        .find(|loc| !loc.is_local());
+    if let Some(loc) = remote {
+        report.errors.push(format!(
+            "{}: remote locations are not supported yet",
+            loc.display()
+        ));
+        return report;
+    }
+    let sources: Vec<PathBuf> = req
+        .sources
+        .iter()
+        .filter_map(|l| l.as_local().map(Path::to_path_buf))
+        .collect();
+    let dest: Option<PathBuf> = req
+        .dest
+        .as_ref()
+        .and_then(|l| l.as_local().map(Path::to_path_buf));
+    let local = LocalRequest {
+        kind: req.kind,
+        sources,
+        dest,
+        overwrite: req.overwrite,
+    };
+    run_local(&local, progress, cancel)
+}
+
+/// A request resolved to local paths.
+struct LocalRequest {
+    kind: OpKind,
+    sources: Vec<PathBuf>,
+    dest: Option<PathBuf>,
+    overwrite: bool,
+}
+
+fn run_local(req: &LocalRequest, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
     let mut report = Report::default();
     let (total, total_bytes) = match req.kind {
         OpKind::Copy | OpKind::Move => req.sources.iter().fold((0, 0), |(n, b), s| {
@@ -151,7 +195,7 @@ pub fn run(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Re
 
 fn transfer(
     src: &Path,
-    req: &Request,
+    req: &LocalRequest,
     remove_source: bool,
     progress: &Mutex<Progress>,
     cancel: &AtomicBool,
@@ -432,8 +476,8 @@ mod tests {
 
         let (report, progress) = run_ok(Request {
             kind: OpKind::Copy,
-            sources: vec![root.join("src")],
-            dest: Some(dest.clone()),
+            sources: vec![Location::local(root.join("src"))],
+            dest: Some(Location::local(dest.clone())),
             overwrite: false,
         });
         assert!(report.errors.is_empty(), "{:?}", report.errors);
@@ -452,20 +496,27 @@ mod tests {
         write(&root.join("src/f.txt"), "new");
         write(&root.join("dest/f.txt"), "old");
         let dest = root.join("dest");
-        assert_eq!(conflicts(&[root.join("src/f.txt")], &dest).len(), 1);
+        assert_eq!(
+            conflicts(
+                &[Location::local(root.join("src/f.txt"))],
+                &Location::local(&dest)
+            )
+            .len(),
+            1
+        );
 
         run_ok(Request {
             kind: OpKind::Copy,
-            sources: vec![root.join("src/f.txt")],
-            dest: Some(dest.clone()),
+            sources: vec![Location::local(root.join("src/f.txt"))],
+            dest: Some(Location::local(dest.clone())),
             overwrite: false,
         });
         assert_eq!(fs::read_to_string(dest.join("f.txt")).unwrap(), "old");
 
         run_ok(Request {
             kind: OpKind::Copy,
-            sources: vec![root.join("src/f.txt")],
-            dest: Some(dest.clone()),
+            sources: vec![Location::local(root.join("src/f.txt"))],
+            dest: Some(Location::local(dest.clone())),
             overwrite: true,
         });
         assert_eq!(fs::read_to_string(dest.join("f.txt")).unwrap(), "new");
@@ -480,8 +531,8 @@ mod tests {
 
         let (report, _) = run_ok(Request {
             kind: OpKind::Move,
-            sources: vec![root.join("src/dir")],
-            dest: Some(dest.clone()),
+            sources: vec![Location::local(root.join("src/dir"))],
+            dest: Some(Location::local(dest.clone())),
             overwrite: false,
         });
         assert!(report.errors.is_empty(), "{:?}", report.errors);
@@ -490,7 +541,7 @@ mod tests {
 
         let (report, _) = run_ok(Request {
             kind: OpKind::Delete { permanent: true },
-            sources: vec![dest.join("dir")],
+            sources: vec![Location::local(dest.join("dir"))],
             dest: None,
             overwrite: false,
         });
@@ -504,8 +555,11 @@ mod tests {
         write(&root.join("f.txt"), "f");
         let (report, _) = run_ok(Request {
             kind: OpKind::Copy,
-            sources: vec![root.join("f.txt"), root.join("missing.txt")],
-            dest: Some(root.clone()),
+            sources: vec![
+                Location::local(root.join("f.txt")),
+                Location::local(root.join("missing.txt")),
+            ],
+            dest: Some(Location::local(root.clone())),
             overwrite: true,
         });
         assert_eq!(report.done, 0);
@@ -525,8 +579,11 @@ mod tests {
         let report = run(
             &Request {
                 kind: OpKind::Copy,
-                sources: vec![root.join("a.txt"), root.join("b.txt")],
-                dest: Some(dest.clone()),
+                sources: vec![
+                    Location::local(root.join("a.txt")),
+                    Location::local(root.join("b.txt")),
+                ],
+                dest: Some(Location::local(dest.clone())),
                 overwrite: false,
             },
             &progress,
@@ -538,9 +595,9 @@ mod tests {
 
     #[test]
     fn describes_selection() {
-        assert_eq!(describe(&[PathBuf::from("/x/y.txt")]), "y.txt");
+        assert_eq!(describe(&[Location::local("/x/y.txt")]), "y.txt");
         assert_eq!(
-            describe(&[PathBuf::from("/a"), PathBuf::from("/b")]),
+            describe(&[Location::local("/a"), Location::local("/b")]),
             "2 items"
         );
     }
