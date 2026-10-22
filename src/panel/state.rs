@@ -1,7 +1,7 @@
 //! Pure, testable state of one file panel: entries, cursor, marks, history.
 
 use crate::vfs::Location;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::fs::filter::Matcher;
 use crate::fs::{Entry, Sort};
@@ -47,6 +47,8 @@ pub struct PanelState {
     pub loading: bool,
     /// Directories shown expanded inline (tree view).
     pub expanded: BTreeSet<Location>,
+    /// Sizes of directories counted on request (Space), by location.
+    pub dir_sizes: HashMap<Location, u64>,
 }
 
 impl PanelState {
@@ -67,6 +69,7 @@ impl PanelState {
             error: None,
             loading: false,
             expanded: BTreeSet::new(),
+            dir_sizes: HashMap::new(),
         }
     }
 
@@ -210,13 +213,37 @@ impl PanelState {
         }
     }
 
+    /// Bytes in the marked entries; a directory counts once its size was
+    /// asked for (Space).
     pub fn marked_bytes(&self) -> u64 {
         self.marked
             .iter()
             .filter_map(|&i| self.entries.get(i))
-            .filter(|e| !e.is_dir())
-            .map(|e| e.size)
+            .map(|e| self.entry_bytes(e))
             .sum()
+    }
+
+    pub fn entry_bytes(&self, entry: &Entry) -> u64 {
+        if entry.is_dir() {
+            self.dir_sizes.get(&entry.location).copied().unwrap_or(0)
+        } else {
+            entry.size
+        }
+    }
+
+    /// Mark (or unmark) every entry whose name matches `matcher`.
+    pub fn mark_matching(&mut self, matcher: &Matcher, on: bool) {
+        for (ix, entry) in self.entries.iter().enumerate() {
+            if entry.is_parent || !matcher.matches(&entry.name) {
+                continue;
+            }
+            if on {
+                self.marked.insert(ix);
+            } else {
+                self.marked.remove(&ix);
+            }
+        }
+        self.anchor = None;
     }
 
     /// Replace the full listing and rebuild the displayed rows through the filter.
@@ -261,6 +288,9 @@ impl PanelState {
         } else {
             Vec::new()
         };
+        if !same_dir {
+            self.dir_sizes.clear();
+        }
         self.path = path;
         self.entries = self.filtered_rows();
         self.anchor = None;

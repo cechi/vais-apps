@@ -235,6 +235,31 @@ pub fn open_terminal(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Human readable label for a location, for the path bar and tab titles.
+/// Free bytes on the file system holding `path`, for the panel footer.
+#[cfg(unix)]
+pub fn free_space(path: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid C string and a zeroed struct the call fills in.
+    let ok = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } == 0;
+    ok.then(|| stat.f_bavail as u64 * stat.f_frsize as u64)
+}
+
+#[cfg(windows)]
+pub fn free_space(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    use windows::core::PCWSTR;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut free = 0u64;
+    // SAFETY: a NUL-terminated wide string and valid out-pointers.
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free), None, None) }
+        .ok()
+        .map(|_| free)
+}
+
 pub fn display_name(path: &Path) -> String {
     if is_roots_path(path) {
         return "Computer".to_string();

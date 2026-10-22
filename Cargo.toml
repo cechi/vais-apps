@@ -41,6 +41,10 @@ bzip2 = "0.6"
 zstd = "0.14"
 liblzma = { version = "0.4", features = ["static"] }
 
+[target.'cfg(unix)'.dependencies]
+# statvfs for the free-space figure in the panel footer.
+libc = "0.2"
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # No system libssh2 / OpenSSL to link against on macOS and Windows runners.
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }

@@ -85,6 +85,8 @@ actions!(
         ToggleMarkAndDown,
         MarkAll,
         InvertMarks,
+        MarkByPattern,
+        UnmarkByPattern,
         CancelOrClear,
         // Panel: navigation
         Open,
@@ -237,6 +239,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("insert", ToggleMarkAndDown, p),
         KeyBinding::new("secondary-a", MarkAll, p),
         KeyBinding::new("secondary-shift-a", InvertMarks, p),
+        KeyBinding::new("secondary-m", MarkByPattern, p),
+        KeyBinding::new("secondary-u", UnmarkByPattern, p),
         KeyBinding::new("escape", CancelOrClear, p),
         // Panel: navigation
         KeyBinding::new("enter", Open, p),

@@ -791,6 +791,55 @@ impl GridView {
         }
     }
 
+    /// Mark (or unmark) by a pattern typed into a palette; the default is
+    /// `*.ext` of the file under the cursor.
+    fn start_mark_pattern(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let panel = self.active_panel().clone();
+        let default = panel
+            .read(cx)
+            .state
+            .current()
+            .filter(|e| !e.is_parent && !e.is_dir())
+            .map(|e| match crate::fs::extension(&e.name) {
+                "" => "*".to_string(),
+                ext => format!("*.{ext}"),
+            })
+            .unwrap_or_else(|| "*".to_string());
+        let title = if on {
+            "Mark entries matching"
+        } else {
+            "Unmark entries matching"
+        };
+        let len = default.len();
+        let palette = cx.new(|cx| {
+            Palette::new(Vec::new(), &default, "Pattern (* and ?)", window, cx)
+                .hint("Case-insensitive; text without wildcards matches anywhere in the name")
+                .select_range(0..len)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (panel, value) = (panel.clone(), choice.value.trim().to_string());
+                    window.defer(cx, move |_, cx| {
+                        panel.update(cx, |panel, cx| panel.mark_pattern(&value, on, cx));
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open(title.to_string(), palette, window, cx);
+    }
+
+    fn on_mark_pattern(&mut self, _: &MarkByPattern, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_mark_pattern(true, window, cx);
+    }
+
+    fn on_unmark_pattern(
+        &mut self,
+        _: &UnmarkByPattern,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_mark_pattern(false, window, cx);
+    }
+
     fn on_rename(&mut self, _: &RenameFile, window: &mut Window, cx: &mut Context<Self>) {
         self.start_rename(window, cx);
     }
@@ -872,6 +921,8 @@ impl Render for GridView {
             .on_action(cx.listener(Self::on_mkdir))
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_delete_permanently))
+            .on_action(cx.listener(Self::on_mark_pattern))
+            .on_action(cx.listener(Self::on_unmark_pattern))
             .on_action(cx.listener(Self::on_copy_to_clipboard))
             .on_action(cx.listener(Self::on_cut_to_clipboard))
             .on_action(cx.listener(Self::on_paste))

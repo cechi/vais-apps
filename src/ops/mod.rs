@@ -539,7 +539,8 @@ fn set_current_loc(progress: &Mutex<Progress>, loc: &Location) {
 }
 
 /// Entries under `loc` (itself included) and the bytes of regular files.
-fn count_generic(backend: &dyn crate::vfs::Backend, loc: &Location) -> (usize, u64) {
+/// Items and bytes below `loc` (itself included), through the backend.
+pub fn count_generic(backend: &dyn crate::vfs::Backend, loc: &Location) -> (usize, u64) {
     let Ok(meta) = backend.stat(loc) else {
         return (1, 0);
     };

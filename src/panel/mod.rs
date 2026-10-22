@@ -1284,7 +1284,45 @@ impl FilePanel {
         if self.typing(window, cx) {
             return;
         }
+        self.size_dir_at_cursor(cx);
         self.state.toggle_mark(self.state.cursor);
+        cx.notify();
+    }
+
+    /// Space on a directory also counts its size (a Commander classic),
+    /// in the background; the Size column and the footer show it.
+    fn size_dir_at_cursor(&mut self, cx: &mut Context<Self>) {
+        let Some(entry) = self.state.current() else {
+            return;
+        };
+        if entry.is_parent || !entry.is_dir() || self.state.dir_sizes.contains_key(&entry.location)
+        {
+            return;
+        }
+        let location = entry.location.clone();
+        let task = cx.background_spawn({
+            let location = location.clone();
+            async move {
+                crate::vfs::backend_for(&location)
+                    .map(|b| crate::ops::count_generic(b.as_ref(), &location).1)
+                    .unwrap_or(0)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let bytes = task.await;
+            this.update(cx, |panel, cx| {
+                panel.state.dir_sizes.insert(location, bytes);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Mark or unmark the entries matching `pattern` (glob or substring).
+    pub fn mark_pattern(&mut self, pattern: &str, on: bool, cx: &mut Context<Self>) {
+        let matcher = crate::fs::filter::Matcher::new(pattern);
+        self.state.mark_matching(&matcher, on);
         cx.notify();
     }
     fn on_toggle_mark_and_down(
@@ -1296,6 +1334,7 @@ impl FilePanel {
         if self.typing(window, cx) {
             return;
         }
+        self.size_dir_at_cursor(cx);
         self.state.toggle_mark(self.state.cursor);
         self.state.move_cursor_by(1);
         self.after_cursor_move(cx);
@@ -1598,6 +1637,11 @@ impl FilePanel {
         EntryLook {
             is_cursor,
             is_marked,
+            dir_size: if entry.is_dir() {
+                self.state.dir_sizes.get(&entry.location).copied()
+            } else {
+                None
+            },
             is_cut,
             bg,
             outline,
@@ -1919,6 +1963,8 @@ struct EntryLook {
     is_cursor: bool,
     is_marked: bool,
     is_cut: bool,
+    /// A directory's size once counted with Space.
+    dir_size: Option<u64>,
     bg: Hsla,
     outline: Hsla,
     fg: Hsla,
@@ -1929,8 +1975,10 @@ fn column_value(column: Column, entry: &Entry, look: &EntryLook, c: &Colors) -> 
     let muted = c.muted_foreground;
     match column {
         Column::Size => {
-            let text = if entry.is_parent || entry.is_dir() {
+            let text = if entry.is_parent {
                 String::new()
+            } else if entry.is_dir() {
+                look.dir_size.map(human_size).unwrap_or_default()
             } else {
                 human_size(entry.size)
             };
@@ -2099,8 +2147,15 @@ impl Render for FilePanel {
                 total
             )
         } else {
+            let free = self
+                .state
+                .path
+                .as_local()
+                .and_then(platform::free_space)
+                .map(|bytes| format!(" · {} free", human_size(bytes)))
+                .unwrap_or_default();
             format!(
-                "{} / {} selected · {}",
+                "{} / {} selected · {}{free}",
                 self.state.marked.len(),
                 self.state.item_count(),
                 human_size(self.state.marked_bytes())

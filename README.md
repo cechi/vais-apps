@@ -85,8 +85,9 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Alt+1 … Alt+9` | Layout 1x2, 2x1, 1x3, 3x1, 2x2, 2x3, 3x2, 3x3, 1x1 |
 | `↑ ↓ PgUp PgDn Home End` | Move cursor |
 | `Shift` + the above | Move cursor and mark the range |
-| `Insert` / `Space` | Toggle mark (Insert also moves down) |
+| `Insert` / `Space` | Toggle mark (Insert also moves down; on a directory the size is counted and shown) |
 | `Ctrl+A` / `Ctrl+Shift+A` | Mark all / invert marks |
+| `Ctrl+M` / `Ctrl+U` | Mark / unmark entries matching a pattern (`*.ext` of the current file is offered) |
 | `Esc` | Cancel path edit, dismiss error, or clear marks |
 | `Enter` | Enter directory (`..` goes up) |
 | `→` / `←` | Expand the directory under the cursor inline (tree view) / collapse it, or jump to the parent row |
