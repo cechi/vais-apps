@@ -41,7 +41,8 @@ def theme(name, mode, c, d16):
         "accent.foreground": c["on_primary_container"],
         "muted.background": c["surface_container_high"],
         "muted.foreground": c["on_surface_variant"],
-        "selection.background": c["secondary_container"],
+        # Text selection: the accent at about a third opacity reads on any input.
+        "selection.background": c["primary"] + ("59" if dark else "4d"),
         "list.background": c["surface"],
         "list.active.background": c["primary_container"],
         "list.active.border": c["primary"],
