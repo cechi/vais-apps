@@ -14,6 +14,7 @@ pub const PALETTE_CONTEXT: &str = "Palette";
 pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
 pub const EDITOR_CONTEXT: &str = "FileEditor";
+pub const CONNECTIONS_CONTEXT: &str = "ConnectionsForm";
 
 actions!(
     vais,
@@ -34,6 +35,9 @@ actions!(
         EditFile,
         SaveFile,
         ToggleReadOnly,
+        // Connections
+        OpenConnections,
+        CloseConnections,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -168,6 +172,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
         KeyBinding::new("secondary-b", ToggleSidebar, w),
         KeyBinding::new("secondary-,", OpenSettings, w),
+        KeyBinding::new("secondary-k", OpenConnections, w),
+        KeyBinding::new("escape", CloseConnections, Some(CONNECTIONS_CONTEXT)),
         KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("secondary-s", SaveFile, Some(EDITOR_CONTEXT)),
         KeyBinding::new("secondary-shift-e", ToggleReadOnly, Some(EDITOR_CONTEXT)),

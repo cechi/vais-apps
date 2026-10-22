@@ -5,7 +5,7 @@
 pub mod manager;
 
 use std::fs;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -109,20 +109,15 @@ pub fn conflicts(sources: &[Location], dest: &Location) -> Vec<Location> {
 }
 
 pub fn run(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
-    let mut report = Report::default();
-    // Only the local disk is served so far; remote backends come with the
-    // connections.
-    let remote = req
+    // Local-only requests keep the std::fs implementation (trash, symlinks,
+    // rename across file systems); anything remote streams through the backends.
+    if req
         .sources
         .iter()
         .chain(req.dest.iter())
-        .find(|loc| !loc.is_local());
-    if let Some(loc) = remote {
-        report.errors.push(format!(
-            "{}: remote locations are not supported yet",
-            loc.display()
-        ));
-        return report;
+        .any(|loc| !loc.is_local())
+    {
+        return run_generic(req, progress, cancel);
     }
     let sources: Vec<PathBuf> = req
         .sources
@@ -285,7 +280,6 @@ fn copy_file(
     progress: &Mutex<Progress>,
     cancel: &AtomicBool,
 ) -> io::Result<()> {
-    use std::io::{Read, Write};
     let mut reader = fs::File::open(src)?;
     let permissions = reader.metadata()?.permissions();
     let mut writer = fs::File::create(dst)?;
@@ -436,6 +430,195 @@ fn remove_any(path: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(path)
     }
+}
+
+// ----- backend-agnostic transfers --------------------------------------------
+
+/// Copy, move or delete through the `Backend` trait: used whenever a
+/// remote location is involved. Progress counts entries and bytes like the
+/// local path; there is no trash, so deletions are always permanent.
+fn run_generic(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
+    let mut report = Report::default();
+
+    let (total, total_bytes) = match req.kind {
+        OpKind::Copy | OpKind::Move => req.sources.iter().fold((0, 0), |(n, b), s| {
+            let (items, bytes) = backend_for(s)
+                .map(|backend| count_generic(backend.as_ref(), s))
+                .unwrap_or((1, 0));
+            (n + items, b + bytes)
+        }),
+        OpKind::Delete { .. } => (req.sources.len(), 0),
+    };
+    if let Ok(mut p) = progress.lock() {
+        p.total = total;
+        p.total_bytes = total_bytes;
+        p.done = 0;
+        p.bytes = 0;
+    }
+
+    for src in &req.sources {
+        if cancel.load(Ordering::Relaxed) {
+            report.cancelled = true;
+            break;
+        }
+        let result = transfer_generic(src, req, progress, cancel);
+        match result {
+            Ok(()) => report.done += 1,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {
+                report.cancelled = true;
+                break;
+            }
+            Err(err) => report.errors.push(format!("{}: {err}", src.display())),
+        }
+    }
+    report
+}
+
+fn transfer_generic(
+    src: &Location,
+    req: &Request,
+    progress: &Mutex<Progress>,
+    cancel: &AtomicBool,
+) -> io::Result<()> {
+    let sb = backend_for(src)?;
+    if let OpKind::Delete { .. } = req.kind {
+        set_current_loc(progress, src);
+        sb.remove(src)?;
+        bump(progress);
+        return Ok(());
+    }
+    let dest = req
+        .dest
+        .as_ref()
+        .ok_or_else(|| io::Error::other("no destination"))?;
+    let name = src
+        .file_name()
+        .ok_or_else(|| io::Error::other("source has no file name"))?;
+    let dst = dest.join(&name);
+    if dst == *src {
+        return Err(io::Error::other("source and destination are the same"));
+    }
+    if dst.starts_with(src) {
+        return Err(io::Error::other("cannot copy a directory into itself"));
+    }
+    let db = backend_for(&dst)?;
+    if req.kind == OpKind::Move && src.conn() == dst.conn() {
+        // A rename on the same storage is instant.
+        let (items, bytes) = count_generic(sb.as_ref(), src);
+        if db.exists(&dst) {
+            if !req.overwrite {
+                bump_by(progress, items, bytes);
+                return Ok(());
+            }
+            db.remove(&dst)?;
+        }
+        if sb.rename(src, &dst).is_ok() {
+            bump_by(progress, items, bytes);
+            return Ok(());
+        }
+    }
+    copy_generic(
+        sb.as_ref(),
+        src,
+        db.as_ref(),
+        &dst,
+        req.overwrite,
+        progress,
+        cancel,
+    )?;
+    if req.kind == OpKind::Move {
+        sb.remove(src)?;
+    }
+    Ok(())
+}
+
+fn set_current_loc(progress: &Mutex<Progress>, loc: &Location) {
+    if let Ok(mut p) = progress.lock() {
+        p.current = loc.file_name().unwrap_or_default();
+    }
+}
+
+/// Entries under `loc` (itself included) and the bytes of regular files.
+fn count_generic(backend: &dyn crate::vfs::Backend, loc: &Location) -> (usize, u64) {
+    let Ok(meta) = backend.stat(loc) else {
+        return (1, 0);
+    };
+    if meta.kind != crate::fs::EntryKind::Dir {
+        return (1, meta.size);
+    }
+    let (items, bytes) = backend
+        .read_dir(loc, true)
+        .map(|entries| {
+            entries.iter().fold((0, 0), |(n, b), e| {
+                let (items, bytes) = count_generic(backend, &e.location);
+                (n + items, b + bytes)
+            })
+        })
+        .unwrap_or((0, 0));
+    (1 + items, bytes)
+}
+
+fn copy_generic(
+    sb: &dyn crate::vfs::Backend,
+    src: &Location,
+    db: &dyn crate::vfs::Backend,
+    dst: &Location,
+    overwrite: bool,
+    progress: &Mutex<Progress>,
+    cancel: &AtomicBool,
+) -> io::Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(cancelled());
+    }
+    set_current_loc(progress, src);
+    let meta = sb.stat(src)?;
+    if meta.is_dir() {
+        db.mkdir_all(dst)?;
+        bump(progress);
+        for child in sb.read_dir(src, true)? {
+            copy_generic(
+                sb,
+                &child.location,
+                db,
+                &dst.join(&child.name),
+                overwrite,
+                progress,
+                cancel,
+            )?;
+        }
+        return Ok(());
+    }
+    if let Ok(existing) = db.stat(dst) {
+        if !overwrite {
+            bump_by(progress, 1, meta.size);
+            return Ok(());
+        }
+        if existing.is_dir() {
+            return Err(io::Error::other(format!(
+                "{} exists and is a directory",
+                dst.display()
+            )));
+        }
+    }
+    let mut reader = sb.open_read(src)?;
+    let mut writer = db.open_write(dst)?;
+    let mut buffer = vec![0u8; COPY_BUFFER];
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            drop(writer);
+            let _ = db.remove(dst);
+            return Err(cancelled());
+        }
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..n])?;
+        add_bytes(progress, n as u64);
+    }
+    writer.flush()?;
+    bump(progress);
+    Ok(())
 }
 
 #[cfg(test)]

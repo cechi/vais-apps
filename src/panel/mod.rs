@@ -346,6 +346,28 @@ impl FilePanel {
             cx.notify();
             return;
         }
+        // A remote directory needs its connection first; the grid reloads the
+        // panel once the connection reports a change.
+        if let Some(conn) = path.conn().cloned() {
+            use crate::connections::Status;
+            match crate::connections::ensure(&conn, cx) {
+                Status::Connected => {}
+                Status::Failed(err) => {
+                    self.state.loading = false;
+                    self.state.path = path;
+                    self.state.error = Some(format!("{conn}: {err}"));
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    self.state.loading = true;
+                    self.state.path = path;
+                    self.state.error = None;
+                    cx.notify();
+                    return;
+                }
+            }
+        }
         self.state.loading = true;
         let opts = ReadOptions {
             show_hidden: self.state.show_hidden,
@@ -731,6 +753,9 @@ impl FilePanel {
             }
         }
         let last = crumbs.len().saturating_sub(1);
+        // A local path starts with "/" which needs no separator after it; a
+        // connection name does.
+        let separator_after_first = !path.is_local();
         let (hover, fg, muted) = (c.list_hover, c.foreground, c.muted_foreground);
 
         h_flex()
@@ -760,7 +785,7 @@ impl FilePanel {
                                 }
                             }))
                             .child(label);
-                        let separator = (!is_last && i > 0)
+                        let separator = (!is_last && (i > 0 || separator_after_first))
                             .then(|| div().flex_none().text_color(muted).child("›"));
                         std::iter::once(crumb.into_any_element())
                             .chain(separator.map(|s| s.into_any_element()))
@@ -1909,11 +1934,12 @@ impl Render for FilePanel {
         let filter_bar = self.render_filter_bar(&colors, cx);
         let footer_text = if self.state.loading || self.searching {
             if self.searching {
-                "Searching…"
+                "Searching…".to_string()
+            } else if let Some(conn) = self.state.path.conn() {
+                format!("Connecting to {conn}…")
             } else {
-                "Loading…"
+                "Loading…".to_string()
             }
-            .to_string()
         } else if let Some(err) = &self.state.error {
             err.clone()
         } else if self.state.filter.is_some() {

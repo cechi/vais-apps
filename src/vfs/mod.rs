@@ -4,6 +4,7 @@
 //! trait so panels and operations never talk to `std::fs` directly.
 
 pub mod local;
+pub mod sftp;
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -230,10 +231,10 @@ impl<'de> Deserialize<'de> for Location {
 
 /// What a backend knows about one entry.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Meta {
     pub kind: EntryKind,
     pub size: u64,
+    #[allow(dead_code)] // shown by conflict dialogs later
     pub modified: Option<SystemTime>,
 }
 
@@ -248,7 +249,6 @@ impl Meta {
 
 /// A storage: the local disk or one remote connection. All calls block and
 /// are meant for the background executor.
-#[allow(dead_code)] // streams and removal are used by the remote transfers (next steps)
 pub trait Backend: Send + Sync {
     /// The entries of a directory, unsorted and without `..`.
     fn read_dir(&self, dir: &Location, show_hidden: bool) -> io::Result<Vec<Entry>>;
@@ -266,14 +266,12 @@ pub trait Backend: Send + Sync {
     }
 }
 
-/// The backend that serves `loc`. Remote locations have none until their
-/// connection exists (a later step).
+/// The backend that serves `loc`: the disk, or the open connection.
 pub fn backend_for(loc: &Location) -> io::Result<Arc<dyn Backend>> {
     match loc {
         Location::Local(_) => Ok(local::shared()),
-        Location::Remote { conn, .. } => Err(io::Error::other(format!(
-            "connection {conn} is not available"
-        ))),
+        Location::Remote { conn, .. } => crate::connections::backend(conn)
+            .ok_or_else(|| io::Error::other(format!("{conn}: not connected"))),
     }
 }
 

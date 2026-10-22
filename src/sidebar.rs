@@ -15,6 +15,8 @@ use crate::vfs::Location;
 pub enum SidebarEvent {
     /// Navigate the active panel to this directory.
     Open(Location),
+    /// Open the connection manager.
+    ManageConnections,
 }
 
 #[derive(Clone)]
@@ -33,6 +35,7 @@ pub struct Sidebar {
     places: Vec<Place>,
     volumes: Vec<Place>,
     recent: Vec<Place>,
+    connections: Vec<Place>,
     /// Directory of the active panel, highlighted when it is a listed place.
     current: Option<Location>,
 }
@@ -45,6 +48,7 @@ impl Sidebar {
             places: Vec::new(),
             volumes: Vec::new(),
             recent: Vec::new(),
+            connections: Vec::new(),
             current: None,
         };
         this.refresh();
@@ -89,6 +93,37 @@ impl Sidebar {
                     icon: IconName::Folder,
                     detail: parent.filter(|p| !p.is_empty()),
                 }
+            })
+            .collect();
+        cx.notify();
+    }
+
+    /// The saved connections with their state (shown as the detail).
+    pub fn set_connections(
+        &mut self,
+        connections: &[(
+            crate::connections::ConnectionConfig,
+            crate::connections::Status,
+        )],
+        cx: &mut Context<Self>,
+    ) {
+        use crate::connections::Status;
+        self.connections = connections
+            .iter()
+            .map(|(config, status)| Place {
+                name: if config.name.is_empty() {
+                    config.id.clone()
+                } else {
+                    config.name.clone()
+                },
+                path: config.home(),
+                icon: IconName::Globe,
+                detail: Some(match status {
+                    Status::Disconnected => format!("{}@{}", config.user, config.host),
+                    Status::Connecting => "connecting…".to_string(),
+                    Status::Connected => "connected".to_string(),
+                    Status::Failed(err) => format!("failed: {err}"),
+                }),
             })
             .collect();
         cx.notify();
@@ -206,6 +241,7 @@ impl Render for Sidebar {
         let places = self.places.clone();
         let volumes = self.volumes.clone();
         let recent = self.recent.clone();
+        let connections = self.connections.clone();
 
         v_flex()
             .size_full()
@@ -250,8 +286,29 @@ impl Render for Sidebar {
                     .when(!volumes.is_empty(), |d| {
                         d.child(self.render_section("Volumes", &volumes, places.len(), &c, cx))
                     })
-                    .when(!recent.is_empty(), |d| {
+                    .child({
                         let offset = places.len() + volumes.len();
+                        self.render_section("Connections", &connections, offset, &c, cx)
+                    })
+                    .child(
+                        h_flex()
+                            .id("sidebar-manage-connections")
+                            .w_full()
+                            .h(rems(1.75))
+                            .px_3()
+                            .gap_2()
+                            .cursor_pointer()
+                            .text_sm()
+                            .text_color(c.muted_foreground)
+                            .hover(|s| s.bg(c.hover))
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ManageConnections)),
+                            )
+                            .child(Icon::new(IconName::Plus).size_4().flex_none())
+                            .child("Manage connections…"),
+                    )
+                    .when(!recent.is_empty(), |d| {
+                        let offset = places.len() + volumes.len() + connections.len();
                         d.child(self.render_section("Recent", &recent, offset, &c, cx))
                     }),
             )

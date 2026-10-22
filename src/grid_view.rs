@@ -440,6 +440,8 @@ impl GridView {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
+        // Remote storages have no trash.
+        let permanent = permanent || sources.iter().any(|s| !s.is_local());
         let kind = OpKind::Delete { permanent };
         let names: Vec<String> = sources
             .iter()
@@ -656,6 +658,15 @@ impl GridView {
         self.ops.update(cx, |m, cx| {
             m.start(request, cx);
         });
+    }
+
+    /// Reload every panel on connection `conn` (it connected or dropped).
+    pub fn refresh_conn(&mut self, conn: &crate::vfs::ConnId, cx: &mut Context<Self>) {
+        for panel in &self.panels {
+            if panel.read(cx).path().conn() == Some(conn) {
+                panel.update(cx, |p, cx| p.refresh(None, cx));
+            }
+        }
     }
 
     /// Reload every panel showing `dir` (after a batch rename).

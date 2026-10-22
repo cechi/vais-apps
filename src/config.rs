@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 
+use crate::connections::ConnectionConfig;
 use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
 use crate::panel::view::{Columns, ViewMode};
@@ -67,6 +68,8 @@ pub struct Config {
     pub tabs: Vec<TabConfig>,
     /// Directories the focused panel showed most recently, newest first.
     pub recent: Vec<Location>,
+    /// Saved remote connections.
+    pub connections: Vec<ConnectionConfig>,
     /// Version 1 layout (single grid); read for migration, never written.
     #[serde(skip_serializing)]
     pub layout: Option<LayoutConfig>,
@@ -89,6 +92,7 @@ impl Default for Config {
             active_tab: 0,
             tabs: Vec::new(),
             recent: Vec::new(),
+            connections: Vec::new(),
             layout: None,
             panels: Vec::new(),
         }
