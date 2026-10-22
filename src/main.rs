@@ -66,8 +66,11 @@ fn main() {
         };
 
         let theme = config.theme.clone();
+        let font_family = config.font_family.clone();
         open_window(options, cx, move |window, cx| {
+            theme::load_bundled(cx);
             theme::apply(&theme, Some(window), cx);
+            theme::apply_font(font_family.as_deref(), cx);
             let workspace = cx.new(|cx| Workspace::new(config, window, cx));
             workspace.update(cx, |ws, cx| ws.focus_active(window, cx));
             workspace

@@ -58,6 +58,9 @@ pub struct Config {
     pub drop_action: DropAction,
     /// File icons from the desktop theme or the built-in generic ones.
     pub file_icons: FileIcons,
+    /// UI and monospace font family applied over the theme; `None` keeps the
+    /// theme's (or the kit's) font.
+    pub font_family: Option<String>,
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
@@ -80,6 +83,7 @@ impl Default for Config {
             sidebar_open: false,
             drop_action: DropAction::Ask,
             file_icons: FileIcons::System,
+            font_family: None,
             window: None,
             active_tab: 0,
             tabs: Vec::new(),

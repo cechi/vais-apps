@@ -183,12 +183,16 @@ function key bar shift right while it is open; the status bar keeps the full wid
 
 ## Themes
 
-Besides the built-in light and dark themes, any [gpui-kit theme file](https://gpui-kit.com/component/theme)
-(JSON, a `themes` array with `name`, `mode`, `colors`, optional fonts and radius) placed in
-`~/.config/vais-commander/themes/` is loaded and watched, so edits apply while the app runs.
-`Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"` in the config
-(`light`, `dark` and `system` are the built-ins). Themes are personal and not part of this
-repository.
+Four themes are built in: the kit's Default Light / Dark and **Cechi Light / Dark**, a
+Material-ish pair generated from a [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell)
+palette (`scripts/cechi-theme.py` regenerates `assets/themes/cechi.json`; the Cechi themes
+also carry syntax colours for the editor). Any other [gpui-kit theme file](https://gpui-kit.com/component/theme)
+(JSON, a `themes` array with `name`, `mode`, `colors`, optional `highlight`, fonts and radius)
+placed in `~/.config/vais-commander/themes/` is loaded and watched, so edits apply while
+the app runs. `Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"`
+in the config (`light`, `dark` and `system` select the kit defaults). Fonts are personal
+rather than part of a theme: `font_family = "MesloLGS Nerd Font"` in the config applies
+that family to the UI and the editor whatever the theme.
 
 ## Layout of the code
 

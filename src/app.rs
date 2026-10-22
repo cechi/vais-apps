@@ -127,6 +127,8 @@ pub struct Workspace {
     /// Recent group); `last_visited` is what was noted last.
     recent: Vec<PathBuf>,
     last_visited: Option<PathBuf>,
+    /// Personal font family from the config, applied over every theme.
+    font_family: Option<String>,
     /// Divider between the sidebar and the main column.
     side_split: Entity<ResizableState>,
     /// Finished operations to announce on the next render (needs the window).
@@ -216,6 +218,7 @@ impl Workspace {
             sidebar_open: config.sidebar_open,
             recent: config.recent.clone(),
             last_visited: None,
+            font_family: config.font_family.clone(),
             side_split: cx.new(|_| ResizableState::default()),
             ops,
             ops_panel,
@@ -348,6 +351,7 @@ impl Workspace {
             theme.font_size = font;
             theme.mono_font_size = mono;
         });
+        theme::apply_font(self.font_family.as_deref(), cx);
     }
 
     fn step_scale(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
@@ -802,6 +806,7 @@ impl Workspace {
                 .count(),
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             recent: self.recent.clone(),
+            font_family: self.font_family.clone(),
             ..Default::default()
         };
         if let Err(err) = config.save() {
