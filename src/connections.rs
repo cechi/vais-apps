@@ -20,19 +20,29 @@ use crate::vfs::{Backend, ConnId, Location};
 pub enum Protocol {
     #[default]
     Sftp,
+    Ftp,
 }
 
 impl Protocol {
+    pub const ALL: [Protocol; 2] = [Protocol::Sftp, Protocol::Ftp];
+
     pub fn label(self) -> &'static str {
         match self {
             Protocol::Sftp => "SFTP",
+            Protocol::Ftp => "FTP",
         }
     }
 
     pub fn default_port(self) -> u16 {
         match self {
             Protocol::Sftp => 22,
+            Protocol::Ftp => 21,
         }
+    }
+
+    /// FTP knows only passwords (or anonymous access).
+    pub fn uses_keys(self) -> bool {
+        matches!(self, Protocol::Sftp)
     }
 }
 
@@ -326,15 +336,28 @@ impl ConnectionManager {
         let conn = conn.clone();
         let (password, keyring_tried) = match password {
             Some(p) => (Some(p), keyring_tried),
-            None if config.auth == AuthMethod::Password || keyring_tried => {
+            None if config.auth == AuthMethod::Password
+                || !config.protocol.uses_keys()
+                || keyring_tried =>
+            {
                 (stored_password(&config), true)
             }
             None => (None, false),
         };
+        log::debug!(
+            "connecting {}: password {}, keyring tried {keyring_tried}",
+            conn,
+            if password.is_some() { "given" } else { "none" }
+        );
         let task = cx.background_spawn({
             let config = config.clone();
             let password = password.clone();
-            async move { crate::vfs::sftp::connect(&config, password.as_deref()) }
+            async move {
+                match config.protocol {
+                    Protocol::Sftp => crate::vfs::sftp::connect(&config, password.as_deref()),
+                    Protocol::Ftp => crate::vfs::ftp::connect(&config, password.as_deref()),
+                }
+            }
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -358,6 +381,7 @@ impl ConnectionManager {
                         }
                     }
                     Err(ConnectError::Other(err)) => {
+                        log::warn!("{conn}: {err}");
                         this.status.insert(conn.clone(), Status::Failed(err));
                         cx.emit(ConnectionEvent::Changed(conn));
                     }

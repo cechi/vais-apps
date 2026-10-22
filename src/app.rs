@@ -595,7 +595,8 @@ impl Workspace {
             return;
         };
         let manager = self.connections.clone();
-        let remember = config.auth == crate::connections::AuthMethod::Password;
+        let remember =
+            config.auth == crate::connections::AuthMethod::Password || !config.protocol.uses_keys();
         let palette = cx.new(|cx| {
             let (manager_ok, manager_cancel, conn_ok, conn_cancel) =
                 (manager.clone(), manager, conn.clone(), conn);

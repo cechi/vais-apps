@@ -172,7 +172,7 @@ Reload re-reads the file, and closing a tab with unsaved changes asks whether to
 Files over 8 MiB, binary files and files that are not valid UTF-8 are not edited: the
 first two open with the default application, the last stays read-only.
 
-## Connections (SFTP)
+## Connections (SFTP, FTP)
 
 Remote directories are browsed like local ones. Saved connections live in the config as
 `[[connections]]` (id, name, host, port, user, directory, authentication, optional key
@@ -191,7 +191,9 @@ even between connections) through streamed transfers with the usual progress; re
 new folders and deleting work remotely (no trash: deletions there are permanent). The
 editor reads and writes remote files through the connection, thumbnails are generated
 from them, and "open with the default app" downloads a copy into the cache directory
-first; only the terminal needs a local directory. Protocol support so far: SFTP (libssh2).
+first; only the terminal needs a local directory. Protocols: SFTP (libssh2) and plain
+FTP (passive mode; an empty user means anonymous, otherwise a password which is kept in
+the keyring; each transfer opens its own data session). FTPS is not supported yet.
 
 ## Sidebar
 
@@ -225,7 +227,7 @@ src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
 src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
-src/vfs/           Location (local path or connection + path) and the Backend trait; local.rs is the disk, sftp.rs libssh2
+src/vfs/           Location (local path or connection + path) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab
 src/fs/            directory listing through the backend, natural sort, search, size/date formatting

@@ -3,6 +3,7 @@
 //! first backend; remote connections (SFTP, FTP) plug in behind the same
 //! trait so panels and operations never talk to `std::fs` directly.
 
+pub mod ftp;
 pub mod local;
 pub mod sftp;
 

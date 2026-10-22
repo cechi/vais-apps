@@ -30,6 +30,7 @@ resvg = "0.46"
 usvg = "0.46"
 ssh2 = "0.9"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+suppaftp = { version = "12", default-features = false }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # No system libssh2 / OpenSSL to link against on macOS and Windows runners.

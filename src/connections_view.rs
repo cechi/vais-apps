@@ -38,6 +38,7 @@ pub struct ConnectionsView {
     path: Entity<InputState>,
     key: Entity<InputState>,
     password: Entity<InputState>,
+    protocol: Protocol,
     auth: AuthMethod,
     remember: bool,
     dirty: bool,
@@ -94,6 +95,7 @@ impl ConnectionsView {
             path,
             key,
             password,
+            protocol: Protocol::Sftp,
             auth: AuthMethod::Auto,
             remember: false,
             dirty: false,
@@ -148,6 +150,7 @@ impl ConnectionsView {
             cx,
         );
         self.set_text(&self.password, String::new(), window, cx);
+        self.protocol = config.protocol;
         self.auth = config.auth;
         self.remember = false;
         self.dirty = false;
@@ -169,11 +172,11 @@ impl ConnectionsView {
             return Err("host is required".into());
         }
         let port = match text(&self.port).as_str() {
-            "" => Protocol::Sftp.default_port(),
+            "" => self.protocol.default_port(),
             p => p.parse().map_err(|_| "port must be a number".to_string())?,
         };
         let user = text(&self.user);
-        if user.is_empty() {
+        if user.is_empty() && self.protocol.uses_keys() {
             return Err("user is required".into());
         }
         let path = match text(&self.path).as_str() {
@@ -182,7 +185,12 @@ impl ConnectionsView {
         };
         let key_text = text(&self.key);
         let key = (!key_text.is_empty()).then(|| PathBuf::from(expand_home(&key_text)));
-        if self.auth == AuthMethod::Key && key.is_none() {
+        let auth = if self.protocol.uses_keys() {
+            self.auth
+        } else {
+            AuthMethod::Password
+        };
+        if auth == AuthMethod::Key && key.is_none() {
             return Err("a key file is required".into());
         }
         let existing = self.selected.and_then(|ix| self.items.get(ix));
@@ -196,12 +204,12 @@ impl ConnectionsView {
         Ok(ConnectionConfig {
             id,
             name: if name.is_empty() { host.clone() } else { name },
-            protocol: Protocol::Sftp,
+            protocol: self.protocol,
             host,
             port,
             user,
             path,
-            auth: self.auth,
+            auth,
             key,
         })
     }
@@ -350,6 +358,29 @@ impl Render for ConnectionsView {
             })
             .collect();
 
+        let protocol_buttons = Protocol::ALL.iter().map(|&protocol| {
+            let button = Button::new(("protocol", protocol as usize))
+                .small()
+                .label(protocol.label());
+            let button = if protocol == self.protocol {
+                button.primary()
+            } else {
+                button.ghost()
+            };
+            button.on_click(cx.listener(move |this, _, window, cx| {
+                if this.protocol != protocol {
+                    this.protocol = protocol;
+                    this.dirty = true;
+                    // A fresh form keeps the protocol's usual port.
+                    let port = this.port.read(cx).value().trim().to_string();
+                    if port.is_empty() || port == "21" || port == "22" {
+                        this.set_text(&this.port, protocol.default_port().to_string(), window, cx);
+                    }
+                    cx.notify();
+                }
+            }))
+        });
+        let uses_keys = self.protocol.uses_keys();
         let auth_buttons = AuthMethod::ALL.iter().map(|&method| {
             let button = Button::new(("auth", method as usize))
                 .small()
@@ -464,12 +495,7 @@ impl Render for ConnectionsView {
                                 v_flex()
                                     .gap_1()
                                     .child(div().text_xs().text_color(muted).child("Protocol"))
-                                    .child(
-                                        Button::new("protocol-sftp")
-                                            .small()
-                                            .primary()
-                                            .label(Protocol::Sftp.label()),
-                                    ),
+                                    .child(h_flex().gap_1().children(protocol_buttons)),
                             ),
                     )
                     .child(
@@ -481,13 +507,15 @@ impl Render for ConnectionsView {
                             .child(Self::field("User", &self.user, muted).w(rems(10.))),
                     )
                     .child(Self::field("Directory", &self.path, muted))
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(div().text_xs().text_color(muted).child("Authentication"))
-                            .child(h_flex().gap_1().children(auth_buttons)),
-                    )
-                    .when(self.auth != AuthMethod::Password, |form| {
+                    .when(uses_keys, |form| {
+                        form.child(
+                            v_flex()
+                                .gap_1()
+                                .child(div().text_xs().text_color(muted).child("Authentication"))
+                                .child(h_flex().gap_1().children(auth_buttons)),
+                        )
+                    })
+                    .when(uses_keys && self.auth != AuthMethod::Password, |form| {
                         form.child(Self::field("Private key (optional)", &self.key, muted))
                     })
                     .child(
@@ -511,7 +539,11 @@ impl Render for ConnectionsView {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child("Without a stored password you are asked when connecting. Agent / keys tries the SSH agent and ~/.ssh keys first."),
+                            .child(if uses_keys {
+                                "Without a stored password you are asked when connecting. Agent / keys tries the SSH agent and ~/.ssh keys first."
+                            } else {
+                                "Plain FTP, passive mode. Leave the user empty for anonymous access; otherwise you are asked for the password unless it is stored."
+                            }),
                     )
                     .when_some(self.error.clone(), |form, error| {
                         form.child(div().text_sm().text_color(danger).child(error))
