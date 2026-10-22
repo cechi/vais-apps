@@ -122,6 +122,10 @@ pub struct Workspace {
     main_split: Entity<ResizableState>,
     sidebar: Entity<Sidebar>,
     sidebar_open: bool,
+    /// Directories the focused panel showed, newest first (the sidebar's
+    /// Recent group); `last_visited` is what was noted last.
+    recent: Vec<PathBuf>,
+    last_visited: Option<PathBuf>,
     /// Divider between the sidebar and the main column.
     side_split: Entity<ResizableState>,
     /// Finished operations to announce on the next render (needs the window).
@@ -197,6 +201,7 @@ impl Workspace {
         );
 
         let sidebar = cx.new(|cx| Sidebar::new(cx));
+        sidebar.update(cx, |s, cx| s.set_recent(&config.recent, cx));
         subscriptions.push(
             cx.subscribe(&sidebar, |this, _sidebar, event, cx| match event {
                 SidebarEvent::Open(path) => this.open_place(path.clone(), cx),
@@ -208,6 +213,8 @@ impl Workspace {
             active_tab: 0,
             sidebar,
             sidebar_open: config.sidebar_open,
+            recent: config.recent.clone(),
+            last_visited: None,
             side_split: cx.new(|_| ResizableState::default()),
             ops,
             ops_panel,
@@ -604,6 +611,24 @@ impl Workspace {
         }
     }
 
+    /// The focused panel shows `path`: move it to the front of the recent
+    /// list (newest first, bounded) when it is a different directory.
+    fn note_visit(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(path) = path else {
+            return;
+        };
+        if self.last_visited.as_ref() == Some(&path) {
+            return;
+        }
+        self.last_visited = Some(path.clone());
+        self.recent.retain(|p| *p != path);
+        self.recent.insert(0, path);
+        self.recent.truncate(crate::sidebar::RECENT_LIMIT);
+        let recent = self.recent.clone();
+        self.sidebar.update(cx, |s, cx| s.set_recent(&recent, cx));
+        self.schedule_save(cx);
+    }
+
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_open = !self.sidebar_open;
         if self.sidebar_open {
@@ -641,6 +666,7 @@ impl Workspace {
                 .filter(|t| t.config(cx).is_some())
                 .count(),
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
+            recent: self.recent.clone(),
             ..Default::default()
         };
         if let Err(err) = config.save() {
@@ -1064,11 +1090,12 @@ impl Render for Workspace {
             );
 
         let content = self.active_tab().render();
+        let current = self
+            .active_tab()
+            .grid_view()
+            .map(|v| v.read(cx).active_panel().read(cx).path().to_path_buf());
+        self.note_visit(current.clone(), cx);
         if self.sidebar_open {
-            let current = self
-                .active_tab()
-                .grid_view()
-                .map(|v| v.read(cx).active_panel().read(cx).path().to_path_buf());
             self.sidebar.update(cx, |s, cx| s.set_current(current, cx));
         }
         let shift = window.modifiers().shift;

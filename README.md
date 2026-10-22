@@ -150,8 +150,9 @@ falls back to defaults with a logged warning (`RUST_LOG=warn`).
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
 home and the standard user folders (XDG user dirs, else `~/Desktop` & co.), the root and
 mounted volumes (`/mnt`, `/media`, `/run/media`, `/home`, macOS `/Volumes`, Windows drives).
-Clicking a place navigates the active panel; the place matching the panel's directory is
-highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and
+Below them a **Recent** group lists the last 10 directories the focused panel showed
+(newest first, remembered across restarts). Clicking a place navigates the active panel;
+the place matching the panel's directory is highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and
 function key bar shift right while it is open; the status bar keeps the full width.
 
 ## Themes

@@ -60,6 +60,8 @@ pub struct Config {
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
+    /// Directories the focused panel showed most recently, newest first.
+    pub recent: Vec<PathBuf>,
     /// Version 1 layout (single grid); read for migration, never written.
     #[serde(skip_serializing)]
     pub layout: Option<LayoutConfig>,
@@ -80,6 +82,7 @@ impl Default for Config {
             window: None,
             active_tab: 0,
             tabs: Vec::new(),
+            recent: Vec::new(),
             layout: None,
             panels: Vec::new(),
         }

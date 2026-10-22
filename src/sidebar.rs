@@ -23,11 +23,17 @@ pub struct Place {
     pub name: String,
     pub path: PathBuf,
     pub icon: IconName,
+    /// Muted text after the name (the parent of a recent directory).
+    pub detail: Option<String>,
 }
+
+/// How many recently visited directories the sidebar lists.
+pub const RECENT_LIMIT: usize = 10;
 
 pub struct Sidebar {
     places: Vec<Place>,
     volumes: Vec<Place>,
+    recent: Vec<Place>,
     /// Directory of the active panel, highlighted when it is a listed place.
     current: Option<PathBuf>,
 }
@@ -39,6 +45,7 @@ impl Sidebar {
         let mut this = Self {
             places: Vec::new(),
             volumes: Vec::new(),
+            recent: Vec::new(),
             current: None,
         };
         this.refresh();
@@ -49,7 +56,12 @@ impl Sidebar {
     pub fn refresh(&mut self) {
         self.places = platform::user_places()
             .into_iter()
-            .map(|(name, path, icon)| Place { name, path, icon })
+            .map(|(name, path, icon)| Place {
+                name,
+                path,
+                icon,
+                detail: None,
+            })
             .collect();
         self.volumes = platform::volumes()
             .into_iter()
@@ -57,8 +69,27 @@ impl Sidebar {
                 name,
                 path,
                 icon: IconName::HardDrive,
+                detail: None,
             })
             .collect();
+    }
+
+    /// The recently visited directories, newest first.
+    pub fn set_recent(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let home = crate::config::home_dir();
+        self.recent = paths
+            .iter()
+            .map(|path| {
+                let parent = path.parent().map(|p| abbreviate(p, &home));
+                Place {
+                    name: platform::display_name(path),
+                    path: path.clone(),
+                    icon: IconName::Folder,
+                    detail: parent.filter(|p| !p.is_empty()),
+                }
+            })
+            .collect();
+        cx.notify();
     }
 
     pub fn set_current(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
@@ -116,12 +147,36 @@ impl Sidebar {
                     )
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .flex_none()
+                            .max_w_full()
                             .truncate()
                             .child(place.name.clone()),
                     )
+                    .when_some(place.detail.clone(), |row, detail| {
+                        row.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(if selected {
+                                    c.accent_foreground
+                                } else {
+                                    c.muted_foreground
+                                })
+                                .child(detail),
+                        )
+                    })
             }))
+    }
+}
+
+/// `path` with the home directory shortened to `~`.
+fn abbreviate(path: &std::path::Path, home: &std::path::Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
     }
 }
 
@@ -148,6 +203,7 @@ impl Render for Sidebar {
         );
         let places = self.places.clone();
         let volumes = self.volumes.clone();
+        let recent = self.recent.clone();
 
         v_flex()
             .size_full()
@@ -191,6 +247,10 @@ impl Render for Sidebar {
                     .child(self.render_section("Favorites", &places, 0, &c, cx))
                     .when(!volumes.is_empty(), |d| {
                         d.child(self.render_section("Volumes", &volumes, places.len(), &c, cx))
+                    })
+                    .when(!recent.is_empty(), |d| {
+                        let offset = places.len() + volumes.len();
+                        d.child(self.render_section("Recent", &recent, offset, &c, cx))
                     }),
             )
     }
