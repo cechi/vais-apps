@@ -28,7 +28,7 @@ use crate::config::PanelConfig;
 use crate::fs::format::{format_mode, format_time, human_size, owner_name};
 use crate::fs::search::search_tree;
 use crate::fs::{
-    Entry, ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
+    Entry, EntryKind, ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
 };
 use crate::keymap::*;
 use crate::platform;
@@ -477,7 +477,24 @@ impl FilePanel {
         } else if entry.is_dir() {
             let path = entry.location.clone();
             self.navigate(path, None, cx);
+        } else if entry.kind == EntryKind::File && crate::vfs::archive::kind_of(&entry.name).is_some() {
+            // An archive opens as a directory; Shift+Enter hands it to the app.
+            let path = Location::archive(entry.location.clone(), "/");
+            self.navigate(path, None, cx);
         } else {
+            self.open_with_app(cx);
+        }
+    }
+
+    /// Open the file under the cursor with the default application.
+    fn open_with_app(&mut self, cx: &mut Context<Self>) {
+        let Some(entry) = self.state.current() else {
+            return;
+        };
+        if entry.is_parent || entry.is_dir() {
+            return;
+        }
+        {
             // Remote files are fetched into the cache first, off the UI thread.
             let (name, location) = (entry.name.clone(), entry.location.clone());
             let task = cx.background_spawn(async move {
@@ -502,7 +519,13 @@ impl FilePanel {
         let Some(parent) = self.state.path.parent() else {
             return;
         };
-        let select = Some(self.state.path.clone());
+        let select = Some(
+            self.state
+                .path
+                .archive_file()
+                .cloned()
+                .unwrap_or_else(|| self.state.path.clone()),
+        );
         self.navigate(parent, select, cx);
     }
 
@@ -783,39 +806,13 @@ impl FilePanel {
     /// The path as clickable segments; a click in the space after the last
     /// segment switches to the text editor (same as Ctrl+L).
     fn render_breadcrumbs(&self, active: bool, c: &Colors, cx: &mut Context<Self>) -> AnyElement {
-        use std::path::Component;
 
         let path = &self.state.path;
-        let mut crumbs: Vec<(String, Location)> = Vec::new();
-        match path {
-            Location::Local(local) if platform::is_roots_path(local) => {
-                crumbs.push((platform::display_name(local), path.clone()));
-            }
-            Location::Local(local) => {
-                let mut acc = PathBuf::new();
-                for component in local.components() {
-                    acc.push(component.as_os_str());
-                    let label = match component {
-                        Component::RootDir => "/".to_string(),
-                        other => other.as_os_str().to_string_lossy().into_owned(),
-                    };
-                    crumbs.push((label, Location::Local(acc.clone())));
-                }
-            }
-            Location::Remote { conn, path: remote } => {
-                // The connection first, then each directory.
-                let mut acc = Location::remote(conn.0.clone(), "/");
-                crumbs.push((conn.to_string(), acc.clone()));
-                for segment in remote.split('/').filter(|s| !s.is_empty()) {
-                    acc = acc.join(segment);
-                    crumbs.push((segment.to_string(), acc.clone()));
-                }
-            }
-        }
+        let crumbs = crumbs_for(path);
         let last = crumbs.len().saturating_sub(1);
         // A local path starts with "/" which needs no separator after it; a
         // connection name does.
-        let separator_after_first = !path.is_local();
+        let separator_after_first = crumbs.first().is_some_and(|(label, _)| label != "/");
         let (hover, fg, muted) = (c.list_hover, c.foreground, c.muted_foreground);
 
         h_flex()
@@ -1301,6 +1298,10 @@ impl FilePanel {
             cx.emit(PanelEvent::CancelRequested);
         }
     }
+    fn on_open_with_app(&mut self, _: &OpenWithApp, _: &mut Window, cx: &mut Context<Self>) {
+        self.open_with_app(cx);
+    }
+
     fn on_open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
         if self.typing(window, cx) {
             return;
@@ -1932,6 +1933,51 @@ fn column_value(column: Column, entry: &Entry, look: &EntryLook, c: &Colors) -> 
 }
 
 /// Expand `~` and turn user input into a location (`conn:/path` is remote).
+/// The path as segments for the breadcrumb bar, each with where it leads.
+fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
+    use std::path::Component;
+
+    let mut crumbs: Vec<(String, Location)> = Vec::new();
+    match path {
+        Location::Local(local) if platform::is_roots_path(local) => {
+            crumbs.push((platform::display_name(local), path.clone()));
+        }
+        Location::Local(local) => {
+            let mut acc = PathBuf::new();
+            for component in local.components() {
+                acc.push(component.as_os_str());
+                let label = match component {
+                    Component::RootDir => "/".to_string(),
+                    other => other.as_os_str().to_string_lossy().into_owned(),
+                };
+                crumbs.push((label, Location::Local(acc.clone())));
+            }
+        }
+        Location::Remote { conn, path: remote } => {
+            // The connection first, then each directory.
+            let mut acc = Location::remote(conn.0.clone(), "/");
+            crumbs.push((conn.to_string(), acc.clone()));
+            for segment in remote.split('/').filter(|s| !s.is_empty()) {
+                acc = acc.join(segment);
+                crumbs.push((segment.to_string(), acc.clone()));
+            }
+        }
+        Location::Archive { archive, path: inner } => {
+            // The archive file's own crumbs, the last one leading into it.
+            crumbs = crumbs_for(archive);
+            let mut acc = Location::archive((**archive).clone(), "/");
+            if let Some(last) = crumbs.last_mut() {
+                last.1 = acc.clone();
+            }
+            for segment in inner.split('/').filter(|s| !s.is_empty()) {
+                acc = acc.join(segment);
+                crumbs.push((segment.to_string(), acc.clone()));
+            }
+        }
+    }
+    crumbs
+}
+
 pub fn expand_path(raw: &str) -> Location {
     if raw == "~" {
         Location::Local(crate::config::home_dir())
@@ -2100,6 +2146,7 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_invert_marks))
             .on_action(cx.listener(Self::on_cancel_or_clear))
             .on_action(cx.listener(Self::on_open))
+            .on_action(cx.listener(Self::on_open_with_app))
             .on_action(cx.listener(Self::on_go_up))
             .on_action(cx.listener(Self::on_go_back))
             .on_action(cx.listener(Self::on_go_forward))

@@ -428,7 +428,9 @@ impl Workspace {
                             this.open_rename(paths.clone(), window, cx)
                         }
                         GridEvent::OpenFile { location, readonly } => {
-                            this.open_file(location.clone(), *readonly, window, cx)
+                            // Archives are read-only, whatever key asked.
+                            let readonly = *readonly || location.is_archive();
+                            this.open_file(location.clone(), readonly, window, cx)
                         }
                     },
                 ));
@@ -890,7 +892,9 @@ impl Workspace {
         }
         self.tabs.remove(ix);
         self.resubscribe(window, cx);
-        let next = if ix < self.active_tab || self.active_tab >= self.tabs.len() {
+        // Closing the active tab goes to the one on its left: an editor or
+        // form opened from a grid sits right after it, so this returns there.
+        let next = if ix <= self.active_tab {
             self.active_tab.saturating_sub(1)
         } else {
             self.active_tab

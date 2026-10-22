@@ -81,6 +81,7 @@ actions!(
         CancelOrClear,
         // Panel: navigation
         Open,
+        OpenWithApp,
         GoUp,
         GoBack,
         GoForward,
@@ -226,6 +227,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("escape", CancelOrClear, p),
         // Panel: navigation
         KeyBinding::new("enter", Open, p),
+        KeyBinding::new("shift-enter", OpenWithApp, p),
         KeyBinding::new("backspace", GoUp, p),
         KeyBinding::new("alt-left", GoBack, p),
         KeyBinding::new("alt-right", GoForward, p),

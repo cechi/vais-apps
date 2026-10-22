@@ -10,8 +10,8 @@ fixed panes it shows a configurable grid of panels (1x2, 2x1, 1x3, 3x1, 2x2, 2x3
 ![VAIS Commander: sidebar, tabs, a 1x2 grid with an expanded tree and marked files](docs/screenshot.png)
 
 Status: navigation, marking, tabs, layouts, persistence, the file operations (copy, move,
-rename, batch rename, new folder, delete to trash), views, a text editor (F3 / F4) and
-SFTP / FTP connections work. Panels on local directories follow changes made by other
+rename, batch rename, new folder, delete to trash), views, a text editor (F3 / F4),
+SFTP / FTP connections and browsing archives work. Panels on local directories follow changes made by other
 programs (a download finishing, a build writing files) without a manual reload.
 
 ## Install
@@ -96,6 +96,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload (local panels also reload on their own when the directory changes) |
+| `Shift+Enter` | Open the file with its default application (Enter does too, except for archives) |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
@@ -200,6 +201,17 @@ first; only the terminal needs a local directory. Protocols: SFTP (libssh2) and 
 FTP (passive mode; an empty user means anonymous, otherwise a password which is kept in
 the keyring; each transfer opens its own data session). FTPS is not supported yet.
 
+## Archives
+
+Enter on a zip (also jar, apk, whl…), tar, tar.gz / tgz, tar.bz2, tar.xz or tar.zst
+file opens it like a directory: browse, expand, copy files out (F5, Ctrl+C, drag), view
+them with F3 and show thumbnails. The path reads `archive.zip!/dir/file`; Backspace from
+the root goes back to the archive file. Archives are read-only: delete, rename, new
+folder and copying into one are refused. Zip entries are extracted on first use, a tar
+is unpacked when opened; both go under `~/.cache/vais-commander/archives` (cleaned of
+entries unused for a week). Archives on a connection are fetched first. `Shift+Enter`
+hands the archive to the default application instead.
+
 ## Sidebar
 
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
@@ -232,7 +244,7 @@ src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
 src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
-src/vfs/           Location (local path or connection + path) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp
+src/vfs/           Location (local path, connection + path, or path in an archive) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab
 src/ssh_config.rs  reader for ~/.ssh/config (aliases, HostName, Port, User, IdentityFile, Include)

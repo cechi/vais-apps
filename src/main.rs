@@ -43,6 +43,8 @@ fn main() {
         icons::init(cx);
         connections::init(config.connections.clone(), cx);
         watch::init(cx);
+        cx.background_spawn(async { vfs::archive::prune_cache() })
+            .detach();
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
         gpui_kit::component::theme::Theme::set_scrollbar_mode(

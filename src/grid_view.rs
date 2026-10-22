@@ -29,6 +29,8 @@ struct DropMenu {
     _subscription: Subscription,
 }
 
+const READ_ONLY_ARCHIVE: &str = "Archives are read-only";
+
 pub enum GridEvent {
     /// Something worth persisting (or showing in the tab title) changed.
     Changed,
@@ -294,6 +296,18 @@ impl GridView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if dest.is_archive() {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
+        if kind == OpKind::Move && sources.iter().any(Location::is_archive) {
+            self.notify(
+                Notification::error("Cannot move out of an archive: copy instead"),
+                window,
+                cx,
+            );
+            return;
+        }
         let is_dir = backend_for(&dest)
             .and_then(|b| b.stat(&dest))
             .is_ok_and(|m| m.is_dir());
@@ -438,6 +452,10 @@ impl GridView {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
+        if sources.iter().any(Location::is_archive) {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
         // Remote storages have no trash.
         let permanent = permanent || sources.iter().any(|s| !s.is_local());
         let kind = OpKind::Delete { permanent };
@@ -518,6 +536,10 @@ impl GridView {
         if name.is_empty() {
             return;
         }
+        if base.is_archive() {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
         let path = base.join(name);
         match backend_for(base).and_then(|b| b.mkdir_all(&path)) {
             Ok(()) => {
@@ -570,6 +592,10 @@ impl GridView {
 
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let marked = self.active_panel().read(cx).selected_paths();
+        if marked.iter().any(Location::is_archive) {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
         if marked.len() > 1 {
             cx.emit(GridEvent::BatchRename(marked));
             return;
@@ -769,6 +795,10 @@ impl GridView {
         self.start_rename(window, cx);
     }
     fn on_mkdir(&mut self, _: &MakeDir, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_panel().read(cx).path().is_archive() {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
         self.start_mkdir(window, cx);
     }
     fn on_delete(&mut self, _: &DeleteFiles, window: &mut Window, cx: &mut Context<Self>) {

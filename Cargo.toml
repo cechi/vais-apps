@@ -34,6 +34,12 @@ suppaftp = { version = "12", default-features = false }
 # Directory watching (auto refresh); futures only for its channel and select.
 notify = "8"
 futures = "0.3"
+zip = { version = "9", default-features = false, features = ["deflate", "bzip2", "zstd", "lzma", "chrono"] }
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.6"
+zstd = "0.14"
+liblzma = { version = "0.4", features = ["static"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # No system libssh2 / OpenSSL to link against on macOS and Windows runners.
