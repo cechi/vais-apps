@@ -56,6 +56,10 @@ pub struct Config {
     pub ui_scale: f32,
     /// Whether the places sidebar is shown.
     pub sidebar_open: bool,
+    /// Whether the command line under the panels is shown.
+    pub command_line: bool,
+    /// Commands run from the command line, oldest first.
+    pub command_history: Vec<String>,
     /// What dragging entries onto a directory does: ask, move or copy.
     pub drop_action: DropAction,
     /// File icons from the desktop theme or the built-in generic ones.
@@ -85,6 +89,8 @@ impl Default for Config {
             theme: ThemeChoice::default(),
             ui_scale: 1.0,
             sidebar_open: false,
+            command_line: true,
+            command_history: Vec::new(),
             drop_action: DropAction::Ask,
             file_icons: FileIcons::System,
             font_family: None,

@@ -24,6 +24,7 @@ pub enum SettingsEvent {
     ChooseTheme,
     Scale(f32),
     Sidebar(bool),
+    CommandLine(bool),
     DropAction(DropAction),
     FileIcons(FileIcons),
     Close,
@@ -35,6 +36,7 @@ pub struct SettingsValues {
     pub theme: ThemeChoice,
     pub scale: f32,
     pub sidebar_open: bool,
+    pub command_line: bool,
     pub drop_action: DropAction,
     pub file_icons: FileIcons,
 }
@@ -297,6 +299,19 @@ impl Render for SettingsView {
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.values.sidebar_open = *checked;
                                 cx.emit(SettingsEvent::Sidebar(*checked));
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        "Command line",
+                        "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)",
+                        muted,
+                        Checkbox::new("settings-command-line")
+                            .checked(self.values.command_line)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.values.command_line = *checked;
+                                cx.emit(SettingsEvent::CommandLine(*checked));
                                 cx.notify();
                             }))
                             .into_any_element(),

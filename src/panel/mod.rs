@@ -581,6 +581,42 @@ impl FilePanel {
         cx.notify();
     }
 
+    /// Typing in the list starts filtering by what is typed (quick search).
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let m = &keystroke.modifiers;
+        if m.control || m.alt || m.platform || m.function {
+            return;
+        }
+        let Some(text) = keystroke.key_char.as_deref() else {
+            return;
+        };
+        let mut chars = text.chars();
+        let (Some(c), None) = (chars.next(), chars.next()) else {
+            return;
+        };
+        if c.is_whitespace() || c.is_control() || !self.focus_handle.is_focused(window) {
+            return;
+        }
+        self.quick_search(text, window, cx);
+        cx.stop_propagation();
+    }
+
+    fn quick_search(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.filter.is_none() {
+            self.state.filter = Some(Filter::default());
+        }
+        let value = text.to_string();
+        let len = value.len();
+        self.filter_input.update(cx, |input, cx| {
+            input.set_value(value, window, cx);
+            input.focus(window, cx);
+            input.set_selected_range(len..len, cx);
+        });
+        self.on_filter_changed(cx);
+        cx.notify();
+    }
+
     /// Esc / the close button: hide the bar and show the plain listing again.
     fn close_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let was_recursive = self.recursive_search_active();
@@ -2128,6 +2164,7 @@ impl Render for FilePanel {
             .id(("panel", self.index))
             .key_context(PANEL_CONTEXT)
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::on_cursor_up))
             .on_action(cx.listener(Self::on_cursor_down))
             .on_action(cx.listener(Self::on_cursor_page_up))

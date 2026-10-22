@@ -1,5 +1,6 @@
 //! The workspace: tabs (each with its own content), theme and persistence.
 
+use std::path::Path;
 use std::time::Duration;
 
 use crate::theme;
@@ -15,6 +16,7 @@ use gpui_kit::component::{IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::command_line::{CommandLine, CommandLineEvent};
 use crate::config::{CONFIG_VERSION, Config, TabConfig, ThemeChoice, WindowConfig};
 use crate::connections::{ConnectionEvent, ConnectionManager, Status};
 use crate::connections_view::{ConnectionsEvent, ConnectionsView};
@@ -125,6 +127,8 @@ pub struct Workspace {
     main_split: Entity<ResizableState>,
     sidebar: Entity<Sidebar>,
     sidebar_open: bool,
+    command_line: Entity<CommandLine>,
+    command_line_open: bool,
     connections: Entity<ConnectionManager>,
     /// Directories the focused panel showed, newest first (the sidebar's
     /// Recent group); `last_visited` is what was noted last.
@@ -238,11 +242,24 @@ impl Workspace {
             }
         }));
 
+        let command_line =
+            cx.new(|cx| CommandLine::new(config.command_history.clone(), window, cx));
+        subscriptions.push(cx.subscribe_in(
+            &command_line,
+            window,
+            |this, _line, event, window, cx| match event {
+                CommandLineEvent::Run(command) => this.run_command(command.clone(), window, cx),
+                CommandLineEvent::Cancelled => this.focus_active_panel(window, cx),
+            },
+        ));
+
         let mut this = Self {
             tabs: Vec::new(),
             active_tab: 0,
             sidebar,
             sidebar_open: config.sidebar_open,
+            command_line,
+            command_line_open: config.command_line,
             connections,
             recent: config.recent.clone(),
             last_visited: None,
@@ -500,6 +517,7 @@ impl Workspace {
             theme: self.theme.clone(),
             scale: self.scale,
             sidebar_open: self.sidebar_open,
+            command_line: self.command_line_open,
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
         }
@@ -680,6 +698,13 @@ impl Workspace {
             SettingsEvent::Sidebar(open) => {
                 if self.sidebar_open != *open {
                     self.toggle_sidebar(cx);
+                }
+            }
+            SettingsEvent::CommandLine(open) => {
+                if self.command_line_open != *open {
+                    self.command_line_open = *open;
+                    self.schedule_save(cx);
+                    cx.notify();
                 }
             }
             SettingsEvent::DropAction(action) => {
@@ -1015,6 +1040,8 @@ impl Workspace {
             recent: self.recent.clone(),
             font_family: self.font_family.clone(),
             connections: self.connections.read(cx).configs().to_vec(),
+            command_line: self.command_line_open,
+            command_history: self.command_line.read(cx).history().to_vec(),
             ..Default::default()
         };
         if let Err(err) = config.save() {
@@ -1035,6 +1062,178 @@ impl Workspace {
             h: bounds.size.height.as_f32(),
             maximized,
         });
+    }
+
+    // ----- command line --------------------------------------------------
+
+    fn notify(&self, note: Notification, window: &mut Window, cx: &mut App) {
+        window.push_notification(note, cx);
+    }
+
+    fn focus_active_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(grid) = self.active_tab().grid_view().cloned() {
+            grid.update(cx, |grid, cx| grid.focus_active(window, cx));
+        }
+    }
+
+    fn on_focus_command_line(
+        &mut self,
+        _: &FocusCommandLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_tab().grid_view().is_none() {
+            return;
+        }
+        if !self.command_line_open {
+            self.command_line_open = true;
+            self.schedule_save(cx);
+            cx.notify();
+        }
+        self.command_line
+            .update(cx, |line, cx| line.focus(window, cx));
+    }
+
+    /// The entry under the cursor of the active panel, as its name or path.
+    fn insert_into_command_line(&mut self, full_path: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(grid) = self.active_tab().grid_view() else {
+            return;
+        };
+        let panel = grid.read(cx).active_panel().read(cx);
+        let Some(location) = panel.current_path() else {
+            return;
+        };
+        let text = if full_path {
+            match location.as_local() {
+                Some(local) => local.to_string_lossy().into_owned(),
+                None => location.display(),
+            }
+        } else {
+            location.file_name().unwrap_or_else(|| location.display())
+        };
+        if !self.command_line_open {
+            self.command_line_open = true;
+            self.schedule_save(cx);
+            cx.notify();
+        }
+        self.command_line
+            .update(cx, |line, cx| line.insert(&text, window, cx));
+    }
+
+    fn on_insert_name(&mut self, _: &InsertNameToCommandLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.insert_into_command_line(false, window, cx);
+    }
+
+    fn on_insert_path(&mut self, _: &InsertPathToCommandLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.insert_into_command_line(true, window, cx);
+    }
+
+    /// Run `command` in the active panel's directory. `cd` moves the panel;
+    /// anything else goes to the shell, and its output (if any) opens in a
+    /// read-only tab.
+    fn run_command(&mut self, command: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(grid) = self.active_tab().grid_view().cloned() else {
+            return;
+        };
+        let current = grid.read(cx).active_panel().read(cx).path().clone();
+        self.focus_active_panel(window, cx);
+
+        if command == "cd" || command.starts_with("cd ") {
+            let arg = command[2..].trim().trim_matches('"');
+            let target = if arg.is_empty() {
+                Location::Local(crate::config::home_dir())
+            } else if arg.starts_with('~') || arg.starts_with('/') || arg.contains(":/") {
+                crate::panel::expand_path(arg)
+            } else {
+                current.join(arg)
+            };
+            let target = match target.as_local() {
+                Some(local) => match std::fs::canonicalize(local) {
+                    Ok(path) if path.is_dir() => Location::Local(path),
+                    _ => {
+                        self.notify(
+                            Notification::error(format!("cd: {}: not a directory", arg)),
+                            window,
+                            cx,
+                        );
+                        return;
+                    }
+                },
+                None => target,
+            };
+            grid.update(cx, |grid, cx| {
+                grid.active_panel()
+                    .update(cx, |panel, cx| panel.navigate_to(target, cx));
+            });
+            return;
+        }
+
+        let Some(dir) = current.as_local().map(Path::to_path_buf) else {
+            self.notify(
+                Notification::error("The command line needs a local directory"),
+                window,
+                cx,
+            );
+            return;
+        };
+        let task = cx.background_spawn({
+            let command = command.clone();
+            async move { run_shell(&command, &dir) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.command_finished(command, result, window, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn command_finished(
+        &mut self,
+        command: String,
+        result: Result<(i32, String), String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Err(err) => self.notify(Notification::error(format!("{command}: {err}")), window, cx),
+            Ok((code, output)) if output.trim().is_empty() => {
+                let text = format!("{command}: exit {code}");
+                let note = if code == 0 {
+                    Notification::success(text)
+                } else {
+                    Notification::error(text)
+                };
+                self.notify(note, window, cx);
+            }
+            Ok((code, output)) => {
+                // The output goes to a file in the cache so the editor tab
+                // can show (and reload) it.
+                let word: String = command
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("command")
+                    .chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                    .take(16)
+                    .collect();
+                let name = format!("{word}-{}", chrono::Local::now().format("%H%M%S"));
+                let dir = directories::ProjectDirs::from("", "", "vais-commander")
+                    .map(|d| d.cache_dir().join("output"));
+                let Some(dir) = dir else {
+                    return;
+                };
+                let text = format!("$ {command}\n{output}\n[exit {code}]\n");
+                let path = dir.join(format!("{name}.txt"));
+                if let Err(err) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
+                    self.notify(Notification::error(format!("{command}: {err}")), window, cx);
+                    return;
+                }
+                self.open_file(Location::Local(path), true, window, cx);
+            }
+        }
     }
 
     // ----- action handlers ----------------------------------------------
@@ -1447,10 +1646,22 @@ impl Render for Workspace {
             .map(|v| v.read(cx).active_panel().read(cx).path().clone());
         self.note_visit(current.clone(), cx);
         if self.sidebar_open {
-            self.sidebar.update(cx, |s, cx| s.set_current(current, cx));
+            self.sidebar.update(cx, |s, cx| s.set_current(current.clone(), cx));
         }
         let shift = window.modifiers().shift;
         let key_bar = self.render_key_bar(shift, cx);
+        let show_command_line = self.command_line_open && self.active_tab().grid_view().is_some();
+        if show_command_line {
+            let prompt = current
+                .as_ref()
+                .map(|loc| match loc.as_local() {
+                    Some(local) => abbreviate_home(local),
+                    None => loc.display(),
+                })
+                .unwrap_or_default();
+            self.command_line
+                .update(cx, |line, cx| line.set_prompt(prompt, cx));
+        }
 
         let main_column = v_flex()
             .size_full()
@@ -1477,6 +1688,7 @@ impl Render for Workspace {
                         ),
                 ),
             )
+            .when(show_command_line, |d| d.child(self.command_line.clone()))
             .child(key_bar);
 
         let sidebar_toggle = Button::new("sidebar-toggle")
@@ -1503,6 +1715,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_zoom_reset))
             .on_action(cx.listener(Self::on_toggle_ops_panel))
             .on_action(cx.listener(Self::on_toggle_sidebar))
+            .on_action(cx.listener(Self::on_focus_command_line))
+            .on_action(cx.listener(Self::on_insert_name))
+            .on_action(cx.listener(Self::on_insert_path))
             .on_action(cx.listener(Self::on_open_settings))
             .on_action(cx.listener(Self::on_open_connections))
             .on_action(cx.listener(Self::on_quit))
@@ -1556,4 +1771,43 @@ fn clamp_scale(scale: f32) -> f32 {
     } else {
         1.0
     }
+}
+
+/// `~` for the home directory, as the sidebar shows it.
+fn abbreviate_home(path: &Path) -> String {
+    let home = crate::config::home_dir();
+    match path.strip_prefix(&home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
+}
+
+/// Run `command` through the user's shell in `dir`; the exit code and the
+/// combined output.
+fn run_shell(command: &str, dir: &Path) -> Result<(i32, String), String> {
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", command]);
+        c
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
+        let mut c = std::process::Command::new(shell);
+        c.args(["-c", command]);
+        c
+    };
+    let output = cmd
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let err = String::from_utf8_lossy(&output.stderr);
+    if !err.trim().is_empty() {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&err);
+    }
+    Ok((output.status.code().unwrap_or(-1), text))
 }

@@ -1,5 +1,6 @@
 mod app;
 mod clipboard;
+mod command_line;
 mod config;
 mod connections;
 mod connections_view;

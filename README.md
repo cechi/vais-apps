@@ -97,6 +97,9 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload (local panels also reload on their own when the directory changes) |
 | `Shift+Enter` | Open the file with its default application (Enter does too, except for archives) |
+| typing | Quick search: filters the listing by what is typed (Esc clears) |
+| `Ctrl+E` | Focus the command line |
+| `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
@@ -201,6 +204,16 @@ first; only the terminal needs a local directory. Protocols: SFTP (libssh2) and 
 FTP (passive mode; an empty user means anonymous, otherwise a password which is kept in
 the keyring; each transfer opens its own data session). FTPS is not supported yet.
 
+## Command line
+
+Under the panels sits a shell prompt for the active panel's directory (hide it in
+Settings). `Ctrl+E` focuses it, `Ctrl+Enter` appends the name under the cursor,
+`Ctrl+Shift+Enter` its full path, `Up` / `Down` walk the history (kept in the config),
+`Esc` goes back to the panel. Enter runs the line through `$SHELL -c` (`cmd /C` on
+Windows) in that directory: a command with output opens it in a read-only tab, one without
+just reports its exit code. `cd dir` moves the panel instead. Interactive programs need a
+real terminal (F9).
+
 ## Archives
 
 Enter on a zip (also jar, apk, whl…), tar, tar.gz / tgz, tar.bz2, tar.xz or tar.zst
@@ -254,6 +267,7 @@ src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, ca
 src/palette.rs     command-center style dialog body: value input + rows (F5/F6, F2, F7) or a choice list (F8, conflicts, themes)
 src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
+src/command_line.rs  the shell prompt under the panels (history, Ctrl+Enter insertion)
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
 src/editor_view.rs  the file editor tab (view / edit)

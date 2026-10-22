@@ -10,6 +10,7 @@ pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
+pub const COMMAND_LINE_CONTEXT: &str = "CommandLine";
 pub const PALETTE_CONTEXT: &str = "Palette";
 pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
@@ -29,6 +30,12 @@ actions!(
         ToggleOperationsPanel,
         ToggleSidebar,
         OpenSettings,
+        FocusCommandLine,
+        InsertNameToCommandLine,
+        InsertPathToCommandLine,
+        CommandHistoryPrev,
+        CommandHistoryNext,
+        CommandLineCancel,
         CloseSettings,
         // Files in the editor tab
         ViewFile,
@@ -173,6 +180,12 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
         KeyBinding::new("secondary-b", ToggleSidebar, w),
         KeyBinding::new("secondary-,", OpenSettings, w),
+        KeyBinding::new("secondary-e", FocusCommandLine, w),
+        KeyBinding::new("secondary-enter", InsertNameToCommandLine, p),
+        KeyBinding::new("secondary-shift-enter", InsertPathToCommandLine, p),
+        KeyBinding::new("up", CommandHistoryPrev, Some(COMMAND_LINE_CONTEXT)),
+        KeyBinding::new("down", CommandHistoryNext, Some(COMMAND_LINE_CONTEXT)),
+        KeyBinding::new("escape", CommandLineCancel, Some(COMMAND_LINE_CONTEXT)),
         KeyBinding::new("secondary-k", OpenConnections, w),
         KeyBinding::new("escape", CloseConnections, Some(CONNECTIONS_CONTEXT)),
         KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
