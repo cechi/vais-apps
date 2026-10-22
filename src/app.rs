@@ -738,7 +738,17 @@ impl Workspace {
                 .on_drop(cx.listener(move |this, drag: &DragTab, _window, cx| {
                     this.move_tab(drag.index, ix, cx);
                 }))
-                .child(div().min_w_0().truncate().child(title))
+                // Fonts reserve more room above capitals (accents) than below
+                // the baseline, so a centred line box leaves the title looking
+                // high. Nudge it down a little; the offset scales with the font.
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .relative()
+                        .top(rems(0.05))
+                        .child(title),
+                )
                 .when(closable, |d| {
                     d.child(
                         div()
