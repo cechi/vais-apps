@@ -5,6 +5,7 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use gpui_kit::component::IconName;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::input::{Input, InputState};
@@ -19,6 +20,7 @@ use crate::layout::grid::{GridState, OnResize, render_grid};
 use crate::layout::{Dir, Layout, MAX_PANELS};
 use crate::ops::manager::{ManagerEvent, OperationsManager};
 use crate::ops::{self, OpKind, Request};
+use crate::palette::{Palette, PaletteItem};
 use crate::panel::{FilePanel, PanelEvent};
 use crate::settings::{self, DropAction};
 
@@ -48,6 +50,8 @@ pub struct GridView {
     pending_sizes: Option<(Vec<f32>, Vec<Vec<f32>>)>,
     ops: Entity<OperationsManager>,
     drop_menu: Option<DropMenu>,
+    /// The panel the destination palette currently points at.
+    highlight: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -101,6 +105,7 @@ impl GridView {
             pending_sizes: cfg.layout.fractions(),
             ops,
             drop_menu: None,
+            highlight: None,
             _subscriptions: subscriptions,
         }
     }
@@ -208,7 +213,9 @@ impl GridView {
         Some(paths)
     }
 
-    /// F5 / F6: ask for the destination (prefilled with the target panel), then run.
+    /// F5 / F6: ask for the destination, then run. The chooser lists the
+    /// other panels (prefilled with the target panel) and lets the user type
+    /// any path instead.
     pub fn start_transfer(&mut self, kind: OpKind, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sources) = self.selection(window, cx) else {
             return;
@@ -221,27 +228,83 @@ impl GridView {
             .into_owned();
         let title = format!("{} {}", kind.verb(), ops::describe(&sources));
 
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value(dest_default)
-                .placeholder("Destination directory")
+        // Rows in reading order; `panel_of[row]` maps a row back to its panel.
+        let mut panel_of = Vec::new();
+        let mut items = Vec::new();
+        for ix in (0..self.layout.count()).filter(|&ix| ix != self.active) {
+            let path = self.panels[ix]
+                .read(cx)
+                .path()
+                .to_string_lossy()
+                .into_owned();
+            panel_of.push(ix);
+            items.push(PaletteItem {
+                label: path.clone().into(),
+                detail: format!("Panel {}", ix + 1).into(),
+                value: path,
+                icon: Some(IconName::Folder),
+            });
+        }
+
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            let (confirm_view, select_view, cancel_view) = (view.clone(), view.clone(), view);
+            let panel_of = Rc::new(panel_of);
+            Palette::new(items, &dest_default, "Destination directory", window, cx)
+                .on_select(move |row, _window, cx| {
+                    let target = row.and_then(|row| panel_of.get(row).copied());
+                    select_view.update(cx, |this, cx| this.set_highlight(target, cx));
+                })
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, sources) = (confirm_view.clone(), sources.clone());
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.set_highlight(None, cx);
+                            let dest = crate::panel::expand_path(&choice.value);
+                            this.confirm_transfer(kind, sources, dest, window, cx);
+                        });
+                    });
+                })
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    cancel_view.update(cx, |this, cx| this.set_highlight(None, cx));
+                })
         });
-        let confirm: ConfirmFn = {
-            let input = input.clone();
-            Rc::new(move |this, window, cx| {
-                let dest = crate::panel::expand_path(input.read(cx).value().as_ref());
-                this.confirm_transfer(kind, sources.clone(), dest, window, cx);
-            })
-        };
-        self.open_input_dialog(
-            title,
-            "Destination:",
-            input,
-            kind.verb(),
-            confirm,
-            window,
-            cx,
-        );
+        let initial = palette.read(cx).selected().and_then(|row| {
+            (0..self.layout.count())
+                .filter(|&ix| ix != self.active)
+                .nth(row)
+        });
+        self.set_highlight(initial, cx);
+
+        let initial_focus = Cell::new(true);
+        window.open_dialog(cx, move |dialog, window, cx| {
+            if initial_focus.replace(false) {
+                palette.update(cx, |palette, cx| palette.focus(window, cx));
+            }
+            let palette = palette.clone();
+            dialog
+                .title(title.clone())
+                .w(px(640.))
+                .margin_top(px(64.))
+                .close_button(false)
+                .content(move |content, _, _| content.child(palette.clone()))
+        });
+    }
+
+    /// Mark `target` as the panel the destination palette points at.
+    fn set_highlight(&mut self, target: Option<usize>, cx: &mut Context<Self>) {
+        if self.highlight == target {
+            return;
+        }
+        if let Some(old) = self.highlight.take() {
+            self.panels[old].update(cx, |p, cx| p.set_highlighted(false, cx));
+        }
+        if let Some(new) = target {
+            self.panels[new].update(cx, |p, cx| p.set_highlighted(true, cx));
+        }
+        self.highlight = target;
     }
 
     fn confirm_transfer(

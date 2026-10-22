@@ -2,12 +2,14 @@
 
 use gpui_kit::*;
 
+use crate::fs::SortKey;
 use crate::layout::Layout;
 
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
+pub const PALETTE_CONTEXT: &str = "Palette";
 
 actions!(
     vais,
@@ -74,6 +76,11 @@ actions!(
         OpenFilter,
         CloseFilter,
         ToggleFilterRecursive,
+        // Palette (the command-center style chooser)
+        PaletteUp,
+        PaletteDown,
+        PaletteConfirm,
+        PaletteCancel,
     ]
 );
 
@@ -90,6 +97,13 @@ pub struct ActivateTab {
 pub struct SetLayout {
     pub rows: u8,
     pub cols: u8,
+}
+
+/// Sort the panel by `key`; the same key again flips the direction.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = vais, no_json)]
+pub struct SortBy {
+    pub key: SortKey,
 }
 
 /// Default key bindings.
@@ -172,12 +186,29 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-l", EditPath, p),
         KeyBinding::new(hidden_key, ToggleHidden, p),
         KeyBinding::new("secondary-r", Reload, p),
+        // Commander style: Ctrl+F3 name, Ctrl+F4 type, Ctrl+F5 time, Ctrl+F6 size.
+        KeyBinding::new("ctrl-f3", SortBy { key: SortKey::Name }, p),
+        KeyBinding::new("ctrl-f4", SortBy { key: SortKey::Type }, p),
+        KeyBinding::new(
+            "ctrl-f5",
+            SortBy {
+                key: SortKey::Modified,
+            },
+            p,
+        ),
+        KeyBinding::new("ctrl-f6", SortBy { key: SortKey::Size }, p),
         KeyBinding::new("secondary-shift-c", CopyPath, p),
         KeyBinding::new("f9", OpenTerminal, p),
         KeyBinding::new("right", ExpandEntry, p),
         KeyBinding::new("secondary-f", OpenFilter, p),
         KeyBinding::new("secondary-shift-f", ToggleFilterRecursive, p),
         KeyBinding::new("escape", CloseFilter, Some(PANEL_FILTER_CONTEXT)),
+        // Palette: the single-line input lets Up/Down through; Enter and Esc
+        // are handled here before they reach the hosting dialog.
+        KeyBinding::new("up", PaletteUp, Some(PALETTE_CONTEXT)),
+        KeyBinding::new("down", PaletteDown, Some(PALETTE_CONTEXT)),
+        KeyBinding::new("enter", PaletteConfirm, Some(PALETTE_CONTEXT)),
+        KeyBinding::new("escape", PaletteCancel, Some(PALETTE_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),
     ];
     if mac {

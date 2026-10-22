@@ -22,7 +22,9 @@ use gpui_kit::*;
 use crate::config::PanelConfig;
 use crate::fs::format::{format_time, human_size};
 use crate::fs::search::search_tree;
-use crate::fs::{ReadOptions, Sort, SortDir, parent_entry, read_roots, read_tree};
+use crate::fs::{
+    ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
+};
 use crate::keymap::*;
 use crate::platform;
 use crate::ui::{h_flex, v_flex};
@@ -30,6 +32,7 @@ use state::{Filter, PanelState};
 
 /// Row height in rems, so the list follows the UI scale.
 pub const ROW_HEIGHT_REMS: f32 = 1.5;
+const EXT_WIDTH_REMS: f32 = 4.0;
 const SIZE_WIDTH_REMS: f32 = 5.0;
 const MODIFIED_WIDTH_REMS: f32 = 8.5;
 
@@ -115,6 +118,8 @@ pub struct FilePanel {
     /// Set by the row handler: the press landed on the row that already had the cursor.
     press_on_cursor: bool,
     marquee: Option<Marquee>,
+    /// The destination palette points at this panel.
+    highlighted: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -206,10 +211,20 @@ impl FilePanel {
             pending_press: None,
             press_on_cursor: false,
             marquee: None,
+            highlighted: false,
             _subscriptions: subscriptions,
         };
         this.load(cfg.path, None, cx);
         this
+    }
+
+    /// Draw the accent border even without focus (the destination palette
+    /// points at this panel).
+    pub fn set_highlighted(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.highlighted != on {
+            self.highlighted = on;
+            cx.notify();
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
@@ -1077,6 +1092,15 @@ impl FilePanel {
     fn on_reload(&mut self, _: &Reload, _: &mut Window, cx: &mut Context<Self>) {
         self.reload(cx);
     }
+    fn on_sort_by(&mut self, action: &SortBy, _: &mut Window, cx: &mut Context<Self>) {
+        self.sort_by(action.key, cx);
+    }
+    /// Sort by `key` (the same key again flips the direction) and re-read.
+    fn sort_by(&mut self, key: SortKey, cx: &mut Context<Self>) {
+        self.state.sort = self.state.sort.toggled(key);
+        self.refresh(None, cx);
+        cx.emit(PanelEvent::Changed);
+    }
     /// Copy the selected paths (or the directory) to the clipboard, one per line.
     fn on_copy_path(&mut self, _: &CopyPath, _: &mut Window, cx: &mut Context<Self>) {
         let mut paths = self.selected_paths();
@@ -1139,8 +1163,9 @@ impl FilePanel {
     }
 
     /// Right-click menu for the empty part of the panel.
-    fn panel_menu(menu: PopupMenu, focus: FocusHandle) -> PopupMenu {
-        menu.action_context(focus)
+    fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort) -> PopupMenu {
+        let menu = menu
+            .action_context(focus)
             .menu("New folder…", Box::new(MakeDir))
             .menu("Open terminal here", Box::new(OpenTerminal))
             .menu("Copy directory path", Box::new(CopyPath))
@@ -1152,6 +1177,16 @@ impl FilePanel {
             .menu("Edit path…", Box::new(EditPath))
             .menu("Toggle hidden files", Box::new(ToggleHidden))
             .menu("Reload", Box::new(Reload))
+            .separator();
+        SortKey::ALL
+            .iter()
+            .fold(menu, |menu, &key| {
+                menu.menu_with_check(
+                    sort_label(sort, key),
+                    sort.key == key,
+                    Box::new(SortBy { key }),
+                )
+            })
             .separator()
             .menu("Go up", Box::new(GoUp))
             .menu("Back", Box::new(GoBack))
@@ -1159,6 +1194,53 @@ impl FilePanel {
     }
 
     // ----- rendering -----------------------------------------------------
+
+    /// A column header: click sorts by that column, a second click flips the
+    /// direction. The active column is highlighted and shows an arrow.
+    fn render_column_head(
+        &self,
+        key: SortKey,
+        width: Option<f32>,
+        right: bool,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let sort = self.state.sort;
+        let active = sort.key == key;
+        let mut cell = h_flex()
+            .id(("column-head", key as usize))
+            .h_full()
+            .items_center()
+            .gap_0p5()
+            .cursor_pointer()
+            .hover(|s| s.text_color(c.foreground))
+            .on_click(cx.listener(move |this, _, _, cx| this.sort_by(key, cx)));
+        cell = match width {
+            Some(w) => cell.w(rems(w)).flex_none(),
+            None => cell.flex_1().min_w_0(),
+        };
+        if right {
+            cell = cell.justify_end();
+        }
+        if active {
+            cell = cell.text_color(c.foreground);
+        }
+        let arrow = active.then(|| {
+            Icon::new(match sort.dir {
+                SortDir::Asc => IconName::ChevronUp,
+                SortDir::Desc => IconName::ChevronDown,
+            })
+            .size_3()
+            .flex_none()
+        });
+        // Right-aligned columns put the arrow before the label so the label
+        // stays flush with the numbers below it.
+        if right {
+            cell.children(arrow).child(key.label()).into_any_element()
+        } else {
+            cell.child(key.label()).children(arrow).into_any_element()
+        }
+    }
 
     fn render_row(
         &self,
@@ -1211,17 +1293,30 @@ impl FilePanel {
             Icon::new(IconName::File).text_color(c.muted_foreground)
         };
 
+        // The name column keeps the full name; the extension is repeated in
+        // the type column so files can be scanned by kind.
+        let ext = if entry.is_dir() || entry.is_parent {
+            ""
+        } else {
+            extension(&entry.name)
+        };
         let name = if entry.is_symlink() {
             format!("{} →", entry.name)
         } else {
             entry.name.clone()
         };
-        let size = if entry.is_parent {
+        let size = if entry.is_parent || entry.is_dir() {
+            String::new()
+        } else {
+            human_size(entry.size)
+        };
+        // Type column: `<DIR>` for directories, the extension for files.
+        let kind = if entry.is_parent {
             String::new()
         } else if entry.is_dir() {
             "<DIR>".to_string()
         } else {
-            human_size(entry.size)
+            ext.to_string()
         };
         let modified = entry.modified.map(format_time).unwrap_or_default();
         let drag_paths: Vec<PathBuf> = if is_marked {
@@ -1345,6 +1440,18 @@ impl FilePanel {
             )
             .child(
                 div()
+                    .w(rems(EXT_WIDTH_REMS))
+                    .flex_none()
+                    .truncate()
+                    .text_color(if is_marked || entry.is_dir() {
+                        fg
+                    } else {
+                        c.muted_foreground
+                    })
+                    .child(kind),
+            )
+            .child(
+                div()
                     .w(rems(MODIFIED_WIDTH_REMS))
                     .flex_none()
                     .text_color(c.muted_foreground)
@@ -1453,12 +1560,13 @@ impl Render for FilePanel {
         };
         let muted_foreground = colors.muted_foreground;
 
+        let row_colors = colors.clone();
         let list = uniform_list(
             ("files", self.index),
             count,
             cx.processor(move |this, range: Range<usize>, _window, cx| {
                 range
-                    .map(|ix| this.render_row(ix, active, &colors, cx))
+                    .map(|ix| this.render_row(ix, active, &row_colors, cx))
                     .collect::<Vec<_>>()
             }),
         )
@@ -1495,6 +1603,7 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_edit_path))
             .on_action(cx.listener(Self::on_toggle_hidden))
             .on_action(cx.listener(Self::on_reload))
+            .on_action(cx.listener(Self::on_sort_by))
             .on_action(cx.listener(Self::on_copy_path))
             .on_action(cx.listener(Self::on_open_terminal))
             .on_action(cx.listener(Self::on_expand))
@@ -1516,7 +1625,11 @@ impl Render for FilePanel {
                     .min_h_0()
                     .overflow_hidden()
                     .border_1()
-                    .border_color(if active { accent } else { transparent_black() })
+                    .border_color(if active || self.highlighted {
+                        accent
+                    } else {
+                        transparent_black()
+                    })
                     .child(
                         h_flex()
                             .h(rems(1.875))
@@ -1582,20 +1695,28 @@ impl Render for FilePanel {
                             .text_color(muted_foreground)
                             .child(div().w(rems(1.)).flex_none())
                             .child(div().size_4().flex_none())
-                            .child(div().flex_1().child("Name"))
-                            .child(
-                                div()
-                                    .w(rems(SIZE_WIDTH_REMS))
-                                    .flex_none()
-                                    .text_right()
-                                    .child("Size"),
-                            )
-                            .child(
-                                div()
-                                    .w(rems(MODIFIED_WIDTH_REMS))
-                                    .flex_none()
-                                    .child("Modified"),
-                            ),
+                            .child(self.render_column_head(SortKey::Name, None, false, &colors, cx))
+                            .child(self.render_column_head(
+                                SortKey::Size,
+                                Some(SIZE_WIDTH_REMS),
+                                true,
+                                &colors,
+                                cx,
+                            ))
+                            .child(self.render_column_head(
+                                SortKey::Type,
+                                Some(EXT_WIDTH_REMS),
+                                false,
+                                &colors,
+                                cx,
+                            ))
+                            .child(self.render_column_head(
+                                SortKey::Modified,
+                                Some(MODIFIED_WIDTH_REMS),
+                                false,
+                                &colors,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -1643,7 +1764,8 @@ impl Render for FilePanel {
                             }))
                             .context_menu({
                                 let focus = self.focus_handle.clone();
-                                move |menu, _, _| Self::panel_menu(menu, focus.clone())
+                                let sort = self.state.sort;
+                                move |menu, _, _| Self::panel_menu(menu, focus.clone(), sort)
                             }),
                     )
                     .child(
@@ -1659,5 +1781,19 @@ impl Render for FilePanel {
                             .child(div().flex_1().min_w_0().truncate().child(footer_text)),
                     ),
             )
+    }
+}
+
+/// Menu label like "Sort by size ▾" for the current key.
+fn sort_label(sort: Sort, key: SortKey) -> String {
+    let label = key.label().to_lowercase();
+    if sort.key == key {
+        let dir = match sort.dir {
+            SortDir::Asc => "ascending",
+            SortDir::Desc => "descending",
+        };
+        format!("Sort by {label} ({dir})")
+    } else {
+        format!("Sort by {label}")
     }
 }

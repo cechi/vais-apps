@@ -6,6 +6,7 @@ mod keymap;
 mod layout;
 mod ops;
 mod ops_panel;
+mod palette;
 mod panel;
 mod platform;
 mod settings;

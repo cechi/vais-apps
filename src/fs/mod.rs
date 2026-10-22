@@ -12,7 +12,7 @@ use std::{
     time::SystemTime,
 };
 
-pub use sort::{Sort, SortDir, SortKey};
+pub use sort::{Sort, SortDir, SortKey, extension};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {

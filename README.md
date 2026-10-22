@@ -95,9 +95,10 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload |
+| `Ctrl+F3` / `Ctrl+F4` / `Ctrl+F5` / `Ctrl+F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
-| `F5` / `F6` | Copy / move the marked (or cursor) entries to the other panel; the destination is editable |
+| `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
 | `F2` / `Shift+F6` | Rename the entry under the cursor |
 | `F7` | New folder |
 | `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently |
@@ -172,6 +173,7 @@ src/panel/         FilePanel entity (rendering, actions) and PanelState (cursor,
 src/fs/            directory reading, natural sort, size/date formatting
 src/ops/           copy / move / delete with byte-level progress and cancel; manager.rs runs them
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)
+src/palette.rs     command-center style chooser: an input plus a list that fills it (used for F5/F6 destinations)
 src/keymap.rs      actions and default bindings
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
