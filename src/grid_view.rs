@@ -659,6 +659,21 @@ impl GridView {
         }
     }
 
+    /// Reload the panels showing (or expanding) one of `dirs`, which changed
+    /// on disk.
+    pub fn refresh_changed(&mut self, dirs: &[Location], cx: &mut Context<Self>) {
+        for panel in &self.panels {
+            let shown = {
+                let p = panel.read(cx);
+                dirs.iter()
+                    .any(|d| d == p.path() || p.state.expanded.contains(d))
+            };
+            if shown {
+                panel.update(cx, |p, cx| p.refresh_from_disk(cx));
+            }
+        }
+    }
+
     /// Reload every panel showing `dir` (after a batch rename).
     pub fn refresh_dir(&mut self, dir: &Location, cx: &mut Context<Self>) {
         for panel in &self.panels {

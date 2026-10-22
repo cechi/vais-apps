@@ -230,6 +230,13 @@ impl Workspace {
                 ConnectionEvent::NeedsPassword(conn) => this.ask_password(conn.clone(), window, cx),
             },
         ));
+        let watcher = crate::watch::watcher(cx);
+        subscriptions.push(cx.subscribe(&watcher, |this, _watcher, event, cx| {
+            let crate::watch::WatchEvent::Changed(dirs) = event;
+            for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
+                grid.update(cx, |grid, cx| grid.refresh_changed(dirs, cx));
+            }
+        }));
 
         let mut this = Self {
             tabs: Vec::new(),

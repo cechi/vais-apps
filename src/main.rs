@@ -24,6 +24,7 @@ mod theme;
 mod thumbs;
 mod ui;
 mod vfs;
+mod watch;
 
 use gpui_kit::*;
 
@@ -41,6 +42,7 @@ fn main() {
         thumbs::init(cx);
         icons::init(cx);
         connections::init(config.connections.clone(), cx);
+        watch::init(cx);
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
         gpui_kit::component::theme::Theme::set_scrollbar_mode(

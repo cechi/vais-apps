@@ -9,9 +9,10 @@ fixed panes it shows a configurable grid of panels (1x2, 2x1, 1x3, 3x1, 2x2, 2x3
 
 ![VAIS Commander: sidebar, tabs, a 1x2 grid with an expanded tree and marked files](docs/screenshot.png)
 
-Status: navigation, marking, tabs, layouts, persistence and the basic file operations
-(copy, move, rename, new folder, delete to trash) work. F3 view and F4 edit are not
-implemented yet.
+Status: navigation, marking, tabs, layouts, persistence, the file operations (copy, move,
+rename, batch rename, new folder, delete to trash), views, a text editor (F3 / F4) and
+SFTP / FTP connections work. Panels on local directories follow changes made by other
+programs (a download finishing, a build writing files) without a manual reload.
 
 ## Install
 
@@ -94,7 +95,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+L` | Edit the path (`~` expands); `Enter` to go, `Esc` to cancel. The path bar is also a breadcrumb: click a segment to go there, click the space after it to edit |
 | `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
-| `Ctrl+R` | Reload |
+| `Ctrl+R` | Reload (local panels also reload on their own when the directory changes) |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
@@ -248,4 +249,5 @@ src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)
+src/watch.rs       directory watching (notify): panels on local directories reload when they change
 ```

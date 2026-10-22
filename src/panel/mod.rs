@@ -4,7 +4,7 @@ pub mod state;
 pub mod view;
 
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::vfs::Location;
 use std::sync::Arc;
@@ -125,6 +125,9 @@ pub struct FilePanel {
     searching: bool,
     generation: u64,
     load_task: Option<Task<()>>,
+    /// Directory watch: the local directories this panel currently shows.
+    watch: crate::watch::Handle,
+    watched: Vec<PathBuf>,
     /// Last left mouse press in the body: where a rubber band would start, and
     /// whether it landed on a marked row (then the row's file drag must win).
     pending_press: Option<(Point<Pixels>, Modifiers, bool)>,
@@ -144,6 +147,14 @@ pub struct FilePanel {
 }
 
 impl EventEmitter<PanelEvent> for FilePanel {}
+
+impl Drop for FilePanel {
+    fn drop(&mut self) {
+        for dir in &self.watched {
+            self.watch.unwatch(dir);
+        }
+    }
+}
 
 impl Focusable for FilePanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -228,6 +239,8 @@ impl FilePanel {
             searching: false,
             generation: 0,
             load_task: None,
+            watch: crate::watch::handle(cx),
+            watched: Vec::new(),
             pending_press: None,
             press_on_cursor: false,
             marquee: None,
@@ -341,6 +354,7 @@ impl FilePanel {
             }
             self.state.loading = false;
             self.state.set_entries(path, read_roots(), select.as_ref());
+            self.sync_watch();
             self.scroll_to_cursor();
             cx.emit(PanelEvent::Changed);
             cx.notify();
@@ -395,11 +409,48 @@ impl FilePanel {
                         panel.state.error = Some(format!("{}: {err}", path.display()));
                     }
                 }
+                panel.sync_watch();
                 cx.notify();
             })
             .ok();
         }));
         cx.notify();
+    }
+
+    /// Watch the directory shown (and the expanded subdirectories) so the
+    /// listing follows changes made elsewhere. Remote locations are not
+    /// watched.
+    fn sync_watch(&mut self) {
+        let mut wanted: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = self.state.path.as_local() {
+            wanted.push(dir.to_path_buf());
+        }
+        wanted.extend(
+            self.state
+                .expanded
+                .iter()
+                .filter_map(|loc| loc.as_local().map(Path::to_path_buf)),
+        );
+        for old in &self.watched {
+            if !wanted.contains(old) {
+                self.watch.unwatch(old);
+            }
+        }
+        for new in &wanted {
+            if !self.watched.contains(new) {
+                self.watch.watch(new);
+            }
+        }
+        self.watched = wanted;
+    }
+
+    /// Reload because the directory changed on disk. Not while a recursive
+    /// search shows results: it would restart the whole search.
+    pub fn refresh_from_disk(&mut self, cx: &mut Context<Self>) {
+        if self.recursive_search_active() || self.state.loading {
+            return;
+        }
+        self.refresh(None, cx);
     }
 
     /// Go to `path` (recorded in the history), as if entered from the path bar.
