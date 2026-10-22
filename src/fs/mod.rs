@@ -29,6 +29,11 @@ pub struct Entry {
     pub kind: EntryKind,
     pub size: u64,
     pub modified: Option<SystemTime>,
+    pub created: Option<SystemTime>,
+    /// Unix permission bits (`st_mode`), when known.
+    pub mode: Option<u32>,
+    /// Unix owner id, when known.
+    pub uid: Option<u32>,
     /// The synthetic ".." entry.
     pub is_parent: bool,
     /// Nesting level when shown inside an expanded directory (0 = top level).
@@ -68,24 +73,27 @@ pub fn read_dir_sorted(path: &Path, opts: ReadOptions) -> io::Result<Vec<Entry>>
         if !opts.show_hidden && crate::platform::is_hidden(&name, meta.as_ref().ok()) {
             continue;
         }
-        let (kind, size, modified) = match meta {
+        let (kind, size, modified, created, mode, uid) = match meta {
             Ok(meta) => {
                 let file_type = meta.file_type();
                 let modified = meta.modified().ok();
-                if file_type.is_symlink() {
+                let created = meta.created().ok();
+                let (mode, uid) = unix_ids(&meta);
+                let (kind, size) = if file_type.is_symlink() {
                     let to_dir = fs::metadata(&entry_path)
                         .map(|t| t.is_dir())
                         .unwrap_or(false);
-                    (EntryKind::Symlink { to_dir }, meta.len(), modified)
+                    (EntryKind::Symlink { to_dir }, meta.len())
                 } else if file_type.is_dir() {
-                    (EntryKind::Dir, 0, modified)
+                    (EntryKind::Dir, 0)
                 } else if file_type.is_file() {
-                    (EntryKind::File, meta.len(), modified)
+                    (EntryKind::File, meta.len())
                 } else {
-                    (EntryKind::Other, meta.len(), modified)
-                }
+                    (EntryKind::Other, meta.len())
+                };
+                (kind, size, modified, created, mode, uid)
             }
-            Err(_) => (EntryKind::Other, 0, None),
+            Err(_) => (EntryKind::Other, 0, None, None, None, None),
         };
         entries.push(Entry {
             name,
@@ -93,6 +101,9 @@ pub fn read_dir_sorted(path: &Path, opts: ReadOptions) -> io::Result<Vec<Entry>>
             kind,
             size,
             modified,
+            created,
+            mode,
+            uid,
             is_parent: false,
             depth: 0,
         });
@@ -117,10 +128,25 @@ pub fn read_roots() -> Vec<Entry> {
             kind: EntryKind::Dir,
             size: 0,
             modified: None,
+            created: None,
+            mode: None,
+            uid: None,
             is_parent: false,
             depth: 0,
         })
         .collect()
+}
+
+/// Permission bits and owner of a Unix file; nothing elsewhere.
+#[cfg(unix)]
+fn unix_ids(meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
+    use std::os::unix::fs::MetadataExt;
+    (Some(meta.mode()), Some(meta.uid()))
+}
+
+#[cfg(not(unix))]
+fn unix_ids(_meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
+    (None, None)
 }
 
 /// Read `path` and, recursively, every directory listed in `expanded`, as one
@@ -170,6 +196,9 @@ pub fn parent_entry(parent: PathBuf) -> Entry {
         kind: EntryKind::Dir,
         size: 0,
         modified: None,
+        created: None,
+        mode: None,
+        uid: None,
         is_parent: true,
         depth: 0,
     }

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
+use crate::panel::view::{Columns, ViewMode};
 use crate::settings::{DropAction, FileIcons};
 
 pub const CONFIG_VERSION: u32 = 2;
@@ -176,6 +177,8 @@ pub struct PanelConfig {
     pub show_hidden: bool,
     pub sort: SortKey,
     pub sort_desc: bool,
+    pub view: ViewMode,
+    pub columns: Columns,
 }
 
 impl Default for PanelConfig {
@@ -185,6 +188,8 @@ impl Default for PanelConfig {
             show_hidden: false,
             sort: SortKey::Name,
             sort_desc: false,
+            view: ViewMode::Full,
+            columns: Columns::default(),
         }
     }
 }

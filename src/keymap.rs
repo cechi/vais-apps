@@ -4,6 +4,7 @@ use gpui_kit::*;
 
 use crate::fs::SortKey;
 use crate::layout::Layout;
+use crate::panel::view::{Column, ViewMode};
 
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
@@ -116,6 +117,20 @@ pub struct SortBy {
     pub key: SortKey,
 }
 
+/// Switch the panel's view (full list, brief, thumbnails).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = vais, no_json)]
+pub struct SetView {
+    pub mode: ViewMode,
+}
+
+/// Show or hide a column of the full view.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = vais, no_json)]
+pub struct ToggleColumn {
+    pub column: Column,
+}
+
 /// Default key bindings.
 ///
 /// `secondary` is Cmd on macOS and Ctrl elsewhere, so the application-level
@@ -201,17 +216,39 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-l", EditPath, p),
         KeyBinding::new(hidden_key, ToggleHidden, p),
         KeyBinding::new("secondary-r", Reload, p),
-        // Commander style: Ctrl+F3 name, Ctrl+F4 type, Ctrl+F5 time, Ctrl+F6 size.
-        KeyBinding::new("ctrl-f3", SortBy { key: SortKey::Name }, p),
-        KeyBinding::new("ctrl-f4", SortBy { key: SortKey::Type }, p),
+        // Views: Ctrl+F1 brief, Ctrl+F2 full (Commander style), Ctrl+F3 thumbnails.
         KeyBinding::new(
-            "ctrl-f5",
+            "ctrl-f1",
+            SetView {
+                mode: ViewMode::Brief,
+            },
+            p,
+        ),
+        KeyBinding::new(
+            "ctrl-f2",
+            SetView {
+                mode: ViewMode::Full,
+            },
+            p,
+        ),
+        KeyBinding::new(
+            "ctrl-f3",
+            SetView {
+                mode: ViewMode::Thumbnails,
+            },
+            p,
+        ),
+        // Sorting: Ctrl+Shift+F3 name, F4 type, F5 time, F6 size.
+        KeyBinding::new("ctrl-shift-f3", SortBy { key: SortKey::Name }, p),
+        KeyBinding::new("ctrl-shift-f4", SortBy { key: SortKey::Type }, p),
+        KeyBinding::new(
+            "ctrl-shift-f5",
             SortBy {
                 key: SortKey::Modified,
             },
             p,
         ),
-        KeyBinding::new("ctrl-f6", SortBy { key: SortKey::Size }, p),
+        KeyBinding::new("ctrl-shift-f6", SortBy { key: SortKey::Size }, p),
         KeyBinding::new("secondary-shift-c", CopyPath, p),
         KeyBinding::new("f9", OpenTerminal, p),
         KeyBinding::new("right", ExpandEntry, p),

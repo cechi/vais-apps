@@ -1,6 +1,7 @@
 //! One file panel: a directory listing with cursor, marks and a path bar.
 
 pub mod state;
+pub mod view;
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::{
@@ -21,22 +23,26 @@ use gpui_kit::*;
 
 use crate::clipboard::FileClipboard;
 use crate::config::PanelConfig;
-use crate::fs::format::{format_time, human_size};
+use crate::fs::format::{format_mode, format_time, human_size, owner_name};
 use crate::fs::search::search_tree;
 use crate::fs::{
-    ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
+    Entry, ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
 };
 use crate::keymap::*;
 use crate::platform;
 use crate::settings::FileIcons;
 use crate::ui::{h_flex, v_flex};
 use state::{Filter, PanelState};
+use view::{Column, Columns, ViewMode};
 
 /// Row height in rems, so the list follows the UI scale.
 pub const ROW_HEIGHT_REMS: f32 = 1.5;
-const EXT_WIDTH_REMS: f32 = 4.0;
-const SIZE_WIDTH_REMS: f32 = 5.0;
-const MODIFIED_WIDTH_REMS: f32 = 8.5;
+/// Width of a name cell in the brief view.
+const BRIEF_CELL_REMS: f32 = 14.0;
+/// Size of a thumbnail cell (square image above a one-line label).
+const THUMB_CELL_REMS: f32 = 8.0;
+const THUMB_IMAGE_REMS: f32 = 6.0;
+const THUMB_ROW_REMS: f32 = 7.75;
 
 /// Payload of the rubber band selection drag: which panel owns it. Drag-move
 /// events reach every panel, so the others must ignore it.
@@ -122,6 +128,13 @@ pub struct FilePanel {
     marquee: Option<Marquee>,
     /// The destination palette points at this panel.
     highlighted: bool,
+    view: ViewMode,
+    columns: Columns,
+    /// Entries per line in a grid view (1 in the full view); measured from
+    /// the body width at the last render.
+    per_row: usize,
+    /// Scroll to the cursor at the next render (after a view change).
+    pending_scroll: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -214,6 +227,10 @@ impl FilePanel {
             press_on_cursor: false,
             marquee: None,
             highlighted: false,
+            view: cfg.view,
+            columns: cfg.columns,
+            per_row: 1,
+            pending_scroll: false,
             _subscriptions: subscriptions,
         };
         this.load(cfg.path, None, cx);
@@ -268,7 +285,36 @@ impl FilePanel {
             show_hidden: self.state.show_hidden,
             sort: self.state.sort.key,
             sort_desc: self.state.sort.dir == SortDir::Desc,
+            view: self.view,
+            columns: self.columns,
         }
+    }
+
+    /// Switch the view. The tree (expanded directories) only exists in the
+    /// full view, so leaving it collapses everything.
+    pub fn set_view(&mut self, mode: ViewMode, cx: &mut Context<Self>) {
+        if self.view == mode {
+            return;
+        }
+        let leaving_full = self.view == ViewMode::Full;
+        self.view = mode;
+        if leaving_full && !self.state.expanded.is_empty() {
+            self.state.expanded.clear();
+            self.reload(cx);
+        }
+        self.pending_scroll = true;
+        cx.emit(PanelEvent::Changed);
+        cx.notify();
+    }
+
+    fn on_set_view(&mut self, action: &SetView, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_view(action.mode, cx);
+    }
+
+    fn on_toggle_column(&mut self, action: &ToggleColumn, _: &mut Window, cx: &mut Context<Self>) {
+        self.columns.toggle(action.column);
+        cx.emit(PanelEvent::Changed);
+        cx.notify();
     }
 
     // ----- loading -------------------------------------------------------
@@ -713,8 +759,42 @@ impl FilePanel {
 
     // ----- rubber band selection ------------------------------------------
 
+    fn row_height_rems(&self) -> f32 {
+        match self.view {
+            ViewMode::Full | ViewMode::Brief => ROW_HEIGHT_REMS,
+            ViewMode::Thumbnails => THUMB_ROW_REMS,
+        }
+    }
+
     fn row_height(&self, window: &Window) -> Pixels {
-        window.rem_size() * ROW_HEIGHT_REMS
+        window.rem_size() * self.row_height_rems()
+    }
+
+    /// Width of one cell in a grid view; `None` means a full-width row.
+    fn cell_width_rems(&self) -> Option<f32> {
+        match self.view {
+            ViewMode::Full => None,
+            ViewMode::Brief => Some(BRIEF_CELL_REMS),
+            ViewMode::Thumbnails => Some(THUMB_CELL_REMS),
+        }
+    }
+
+    /// How many entries fit in one line at the body's current width.
+    fn cells_per_row(&self, window: &Window) -> usize {
+        let Some(cell) = self.cell_width_rems() else {
+            return 1;
+        };
+        let width = self.scroll.0.borrow().base_handle.bounds().size.width;
+        let cell_px = window.rem_size() * cell;
+        if width <= px(0.) || cell_px <= px(0.) {
+            1
+        } else {
+            ((width / cell_px).floor() as usize).max(1)
+        }
+    }
+
+    fn line_count(&self) -> usize {
+        self.state.len().div_ceil(self.per_row.max(1))
     }
 
     /// Geometry of the list: its bounds and the current scroll offset.
@@ -723,14 +803,26 @@ impl FilePanel {
         (state.base_handle.bounds(), state.base_handle.offset())
     }
 
-    /// Index of the row at window position `y`, if any.
-    fn row_at(&self, y: Pixels, window: &Window) -> Option<usize> {
+    /// Index of the entry at window position `pos`, if any.
+    fn index_at(&self, pos: Point<Pixels>, window: &Window) -> Option<usize> {
         let (bounds, offset) = self.list_geometry();
         let row_h = self.row_height(window);
-        if y < bounds.origin.y || row_h <= px(0.) {
+        if pos.y < bounds.origin.y || row_h <= px(0.) {
             return None;
         }
-        let ix = ((y - bounds.origin.y - offset.y) / row_h).floor() as usize;
+        let line = ((pos.y - bounds.origin.y - offset.y) / row_h).floor() as usize;
+        let col = match self.cell_width_rems() {
+            None => 0,
+            Some(w) => {
+                let cell = window.rem_size() * w;
+                let col = ((pos.x - bounds.origin.x) / cell).floor();
+                if col < 0.0 || col as usize >= self.per_row {
+                    return None;
+                }
+                col as usize
+            }
+        };
+        let ix = line * self.per_row.max(1) + col;
         (ix < self.state.len()).then_some(ix)
     }
 
@@ -743,7 +835,7 @@ impl FilePanel {
         cx: &mut Context<Self>,
     ) {
         self.focus_handle.focus(window, cx);
-        let row = self.row_at(ev.position.y, window);
+        let row = self.index_at(ev.position, window);
         // Marked rows and the cursor row are dragged as files, not rubber-banded.
         let on_marked = row.is_some_and(|ix| self.state.marked.contains(&ix))
             || (row.is_some() && self.press_on_cursor);
@@ -802,33 +894,52 @@ impl FilePanel {
         }
         let offset = new_offset;
 
-        let Some(marquee) = self.marquee.as_mut() else {
-            return;
+        let (start, base) = {
+            let Some(marquee) = self.marquee.as_mut() else {
+                return;
+            };
+            marquee.current = position;
+            (marquee.start, marquee.base.clone())
         };
-        marquee.current = position;
-        let (top, bottom) = if marquee.start.y <= position.y {
-            (marquee.start.y, position.y)
+        let (top, bottom) = if start.y <= position.y {
+            (start.y, position.y)
         } else {
-            (position.y, marquee.start.y)
+            (position.y, start.y)
         };
-        // Rows whose vertical span intersects the rectangle.
+        let (left, right) = if start.x <= position.x {
+            (start.x, position.x)
+        } else {
+            (position.x, start.x)
+        };
+        // Lines whose vertical span intersects the rectangle, and in a grid
+        // the columns whose horizontal span does.
         let list_top = bounds.origin.y + offset.y;
-        let first = ((top - list_top) / row_h).floor().max(0.0) as usize;
-        let last = ((bottom - list_top) / row_h).floor().max(0.0) as usize;
-        let len = self.state.len();
-        let rows = if first < len && len > 0 {
-            first..=last.min(len - 1)
-        } else {
-            1..=0
+        let first_line = ((top - list_top) / row_h).floor().max(0.0) as usize;
+        let last_line = ((bottom - list_top) / row_h).floor().max(0.0) as usize;
+        let per_row = self.per_row.max(1);
+        let cols = match self.cell_width_rems() {
+            None => 0..=0,
+            Some(w) => {
+                let cell = window.rem_size() * w;
+                let first = ((left - bounds.origin.x) / cell).floor().max(0.0) as usize;
+                let last = ((right - bounds.origin.x) / cell).floor().max(0.0) as usize;
+                first.min(per_row - 1)..=last.min(per_row - 1)
+            }
         };
-        let base = marquee.base.clone();
-        self.state.mark_rows(rows, &base);
-        if let Some(ix) = self.row_at(
+        let len = self.state.len();
+        let indices = (first_line..=last_line)
+            .flat_map(|line| cols.clone().map(move |col| line * per_row + col))
+            .filter(|&ix| ix < len);
+        self.state.mark_rows(indices, &base);
+        let clamped = Point::new(
+            position
+                .x
+                .clamp(bounds.origin.x, bounds.bottom_right().x - px(1.)),
             position
                 .y
                 .clamp(bounds.origin.y, bounds.bottom_right().y - px(1.)),
-            window,
-        ) {
+        );
+        if let Some(ix) = self.index_at(clamped, window) {
             self.state.cursor = ix;
         }
         cx.notify();
@@ -877,6 +988,11 @@ impl FilePanel {
         if self.typing(window, cx) {
             return;
         }
+        if self.view.is_grid() {
+            self.state.move_cursor_by(1);
+            self.after_cursor_move(cx);
+            return;
+        }
         let ix = self.state.cursor;
         if !self.state.is_expanded(ix) {
             self.toggle_expand(ix, cx);
@@ -886,6 +1002,11 @@ impl FilePanel {
     /// Collapse the expanded directory under the cursor, or jump to the parent row.
     fn on_collapse(&mut self, _: &CollapseEntry, window: &mut Window, cx: &mut Context<Self>) {
         if self.typing(window, cx) {
+            return;
+        }
+        if self.view.is_grid() {
+            self.state.move_cursor_by(-1);
+            self.after_cursor_move(cx);
             return;
         }
         let ix = self.state.cursor;
@@ -931,15 +1052,22 @@ impl FilePanel {
 
     // ----- cursor helpers ------------------------------------------------
 
+    /// Entries one page up or down: the visible lines times the entries per line.
     fn page_size(&self, window: &Window) -> isize {
         let height = self.scroll.0.borrow().base_handle.bounds().size.height;
-        let row = window.rem_size() * ROW_HEIGHT_REMS;
-        ((height / row).floor() as isize).max(1)
+        let row = self.row_height(window);
+        let lines = ((height / row).floor() as isize).max(1);
+        lines * self.per_row.max(1) as isize
+    }
+
+    /// Entries one line up or down (one in the full view).
+    fn line_step(&self) -> isize {
+        self.per_row.max(1) as isize
     }
 
     fn scroll_to_cursor(&self) {
-        self.scroll
-            .scroll_to_item(self.state.cursor, ScrollStrategy::Nearest);
+        let line = self.state.cursor / self.per_row.max(1);
+        self.scroll.scroll_to_item(line, ScrollStrategy::Nearest);
     }
 
     fn after_cursor_move(&mut self, cx: &mut Context<Self>) {
@@ -950,11 +1078,11 @@ impl FilePanel {
     // ----- action handlers ----------------------------------------------
 
     fn on_cursor_up(&mut self, _: &CursorUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.state.move_cursor_by(-1);
+        self.state.move_cursor_by(-self.line_step());
         self.after_cursor_move(cx);
     }
     fn on_cursor_down(&mut self, _: &CursorDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.state.move_cursor_by(1);
+        self.state.move_cursor_by(self.line_step());
         self.after_cursor_move(cx);
     }
     fn on_cursor_page_up(&mut self, _: &CursorPageUp, window: &mut Window, cx: &mut Context<Self>) {
@@ -979,11 +1107,11 @@ impl FilePanel {
         self.after_cursor_move(cx);
     }
     fn on_extend_up(&mut self, _: &ExtendUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.state.extend_by(-1);
+        self.state.extend_by(-self.line_step());
         self.after_cursor_move(cx);
     }
     fn on_extend_down(&mut self, _: &ExtendDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.state.extend_by(1);
+        self.state.extend_by(self.line_step());
         self.after_cursor_move(cx);
     }
     fn on_extend_page_up(&mut self, _: &ExtendPageUp, window: &mut Window, cx: &mut Context<Self>) {
@@ -1169,7 +1297,7 @@ impl FilePanel {
     }
 
     /// Right-click menu for the empty part of the panel.
-    fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort) -> PopupMenu {
+    fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort, view: ViewMode) -> PopupMenu {
         let menu = menu
             .action_context(focus)
             .menu("Paste", Box::new(PasteFromClipboard))
@@ -1186,9 +1314,16 @@ impl FilePanel {
             .menu("Toggle hidden files", Box::new(ToggleHidden))
             .menu("Reload", Box::new(Reload))
             .separator();
+        let menu = ViewMode::ALL.iter().fold(menu, |menu, &mode| {
+            menu.menu_with_check(
+                format!("{} view", mode.label()),
+                mode == view,
+                Box::new(SetView { mode }),
+            )
+        });
         SortKey::ALL
             .iter()
-            .fold(menu, |menu, &key| {
+            .fold(menu.separator(), |menu, &key| {
                 menu.menu_with_check(
                     sort_label(sort, key),
                     sort.key == key,
@@ -1201,28 +1336,53 @@ impl FilePanel {
             .menu("Forward", Box::new(GoForward))
     }
 
+    /// Right-click menu of the column header: which columns to show.
+    fn columns_menu(menu: PopupMenu, focus: FocusHandle, columns: Columns) -> PopupMenu {
+        Column::ALL.iter().filter(|c| c.available()).fold(
+            menu.action_context(focus),
+            |menu, &column| {
+                menu.menu_with_check(
+                    column.label(),
+                    columns.get(column),
+                    Box::new(ToggleColumn { column }),
+                )
+            },
+        )
+    }
+
     // ----- rendering -----------------------------------------------------
 
-    /// A column header: click sorts by that column, a second click flips the
-    /// direction. The active column is highlighted and shows an arrow.
+    /// A column header: click sorts by that column (when it can), a second
+    /// click flips the direction. The active column is highlighted and shows
+    /// an arrow. `None` is the name column, which fills the rest.
     fn render_column_head(
         &self,
-        key: SortKey,
-        width: Option<f32>,
-        right: bool,
+        column: Option<Column>,
         c: &Colors,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sort = self.state.sort;
-        let active = sort.key == key;
+        let (label, key, width, right) = match column {
+            None => ("Name", Some(SortKey::Name), None, false),
+            Some(col) => (
+                col.label(),
+                col.sort_key(),
+                Some(col.width_rems()),
+                col.right_aligned(),
+            ),
+        };
+        let active = key.is_some() && key == Some(sort.key);
+        let id = column.map(|c| c as usize + 1).unwrap_or(0);
         let mut cell = h_flex()
-            .id(("column-head", key as usize))
+            .id(("column-head", id))
             .h_full()
             .items_center()
             .gap_0p5()
-            .cursor_pointer()
-            .hover(|s| s.text_color(c.foreground))
-            .on_click(cx.listener(move |this, _, _, cx| this.sort_by(key, cx)));
+            .when_some(key, |cell, key| {
+                cell.cursor_pointer()
+                    .hover(|s| s.text_color(c.foreground))
+                    .on_click(cx.listener(move |this, _, _, cx| this.sort_by(key, cx)))
+            });
         cell = match width {
             Some(w) => cell.w(rems(w)).flex_none(),
             None => cell.flex_1().min_w_0(),
@@ -1244,29 +1404,27 @@ impl FilePanel {
         // Right-aligned columns put the arrow before the label so the label
         // stays flush with the numbers below it.
         if right {
-            cell.children(arrow).child(key.label()).into_any_element()
+            cell.children(arrow).child(label).into_any_element()
         } else {
-            cell.child(key.label()).children(arrow).into_any_element()
+            cell.child(label).children(arrow).into_any_element()
         }
     }
 
-    fn render_row(
+    /// Colours of an entry's row or cell: the cursor gets a strong tint and a
+    /// 1px outline in the accent colour, marked entries a yellow tint and
+    /// yellow text; rows alternate a faint stripe; cut entries are dimmed.
+    fn entry_look(
         &self,
         ix: usize,
+        entry: &Entry,
         active: bool,
+        zebra: bool,
         c: &Colors,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(entry) = self.state.entries.get(ix) else {
-            return div().h(rems(ROW_HEIGHT_REMS)).into_any_element();
-        };
+        cx: &App,
+    ) -> EntryLook {
         let is_cursor = ix == self.state.cursor;
         let is_marked = self.state.marked.contains(&ix);
-        // Cut entries wait for a paste: show them dimmed.
         let is_cut = cx.global::<FileClipboard>().is_cut(&entry.path);
-
-        // The cursor row gets a strong tint and a 1px outline in the accent
-        // colour; marked rows get a yellow tint, yellow text and a yellow bar.
         let (bg, outline) = if is_cursor && active {
             (c.primary.alpha(0.28), c.list_active_border)
         } else if is_cursor {
@@ -1276,21 +1434,26 @@ impl FilePanel {
             )
         } else if is_marked {
             (c.yellow.alpha(0.16), transparent_black())
-        } else if ix % 2 == 1 {
+        } else if zebra && ix % 2 == 1 {
             (c.list_even, transparent_black())
         } else {
             (transparent_black(), transparent_black())
         };
         let fg = if is_marked { c.yellow } else { c.foreground };
         let fg = if is_cut { fg.alpha(0.5) } else { fg };
-        let bar = if is_marked {
-            c.yellow
-        } else {
-            transparent_black()
-        };
+        EntryLook {
+            is_cursor,
+            is_marked,
+            is_cut,
+            bg,
+            outline,
+            fg,
+        }
+    }
 
-        // Files get the desktop's icon when wanted and available; directories
-        // and `..` always use the generic ones so folders look the same.
+    /// The entry's icon, filling its parent: the desktop's icon for files
+    /// when wanted and available, else a generic one (folders always).
+    fn entry_icon(&self, entry: &Entry, look: &EntryLook, c: &Colors, cx: &App) -> AnyElement {
         let system_icon = if entry.is_parent
             || entry.is_dir()
             || crate::settings::get(cx).file_icons != FileIcons::System
@@ -1299,15 +1462,16 @@ impl FilePanel {
         } else {
             crate::icons::file_icon(cx, &entry.name)
         };
-        let icon: AnyElement = match system_icon {
+        match system_icon {
             Some(source) => img(source)
                 .size_full()
-                .when(is_cut, |i| i.opacity(0.5))
+                .object_fit(ObjectFit::Contain)
+                .when(look.is_cut, |i| i.opacity(0.5))
                 .into_any_element(),
             None => {
                 let icon = if entry.is_parent {
                     Icon::new(IconName::ArrowUp).text_color(c.muted_foreground)
-                } else if is_marked {
+                } else if look.is_marked {
                     Icon::new(if entry.is_dir() {
                         IconName::Folder
                     } else {
@@ -1319,44 +1483,203 @@ impl FilePanel {
                 } else {
                     Icon::new(IconName::File).text_color(c.muted_foreground)
                 };
-                icon.size_4()
-                    .when(is_cut, |i| i.opacity(0.5))
+                icon.size_full()
+                    .when(look.is_cut, |i| i.opacity(0.5))
                     .into_any_element()
             }
-        };
+        }
+    }
 
-        // The name column keeps the full name; the extension is repeated in
-        // the type column so files can be scanned by kind.
-        let ext = if entry.is_dir() || entry.is_parent {
-            ""
+    /// Mouse behaviour shared by rows and cells: click / Shift / Ctrl
+    /// selection, right-click, dragging marked entries, dropping onto
+    /// directories, and the entry's context menu.
+    fn wire_entry(
+        &self,
+        el: Stateful<Div>,
+        ix: usize,
+        entry: &Entry,
+        look: &EntryLook,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let drag_paths: Vec<PathBuf> = if look.is_marked {
+            self.selected_paths()
         } else {
-            extension(&entry.name)
+            vec![entry.path.clone()]
+        };
+        let drop_bg = c.primary.alpha(0.35);
+        el.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                this.focus_handle.focus(window, cx);
+                this.press_on_cursor = ix == this.state.cursor;
+                if ev.modifiers.shift {
+                    // Shift+click marks the range from the cursor to this entry.
+                    this.state.extend_to(ix);
+                } else if ev.modifiers.control || ev.modifiers.platform {
+                    // Ctrl/Cmd+click toggles the mark and moves the cursor.
+                    this.state.toggle_mark(ix);
+                    this.state.move_cursor_to(ix);
+                } else {
+                    this.state.move_cursor_to(ix);
+                    if ev.click_count >= 2 {
+                        this.open(window, cx);
+                    }
+                }
+                cx.notify();
+            }),
+        )
+        // Right-click acts on the clicked entry: move the cursor there first.
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                this.focus_handle.focus(window, cx);
+                if !this.state.marked.contains(&ix) {
+                    this.state.move_cursor_to(ix);
+                }
+                cx.notify();
+            }),
+        )
+        // Dragging a marked entry drags all marked entries, the cursor entry
+        // drags itself; others bubble to the body and start a rubber band.
+        .when(look.is_marked || look.is_cursor, |d| {
+            let drag = DragEntries { paths: drag_paths };
+            d.on_drag(drag, |drag, _offset, _window, cx| {
+                let label = crate::ops::describe(&drag.paths);
+                cx.new(|_| DragPreview { label })
+            })
+        })
+        // Directories (and `..`) accept drops into them.
+        .when(entry.is_dir(), |d| {
+            let dest = entry.path.clone();
+            d.drag_over::<DragEntries>(move |style, _, _, _| style.bg(drop_bg))
+                .on_drop(cx.listener(move |_this, drag: &DragEntries, _window, cx| {
+                    cx.stop_propagation();
+                    cx.emit(PanelEvent::Dropped {
+                        paths: drag.paths.clone(),
+                        dest: dest.clone(),
+                    });
+                }))
+        })
+        .context_menu({
+            let focus = self.focus_handle.clone();
+            let (is_parent, is_dir) = (entry.is_parent, entry.is_dir());
+            move |menu, _, _| Self::entry_menu(menu, focus.clone(), is_parent, is_dir)
+        })
+        .into_any_element()
+    }
+
+    /// One line of the list: a full row, or a line of grid cells.
+    fn render_line(
+        &self,
+        line: usize,
+        active: bool,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if !self.view.is_grid() {
+            return self.render_row(line, active, c, cx);
+        }
+        let per_row = self.per_row.max(1);
+        let start = line * per_row;
+        let end = ((line + 1) * per_row).min(self.state.len());
+        h_flex()
+            .w_full()
+            .h(rems(self.row_height_rems()))
+            .items_start()
+            .children((start..end).map(|ix| self.render_cell(ix, active, c, cx)))
+            .into_any_element()
+    }
+
+    /// A cell of the brief or thumbnail view.
+    fn render_cell(
+        &self,
+        ix: usize,
+        active: bool,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(entry) = self.state.entries.get(ix) else {
+            return div().into_any_element();
+        };
+        let look = self.entry_look(ix, entry, active, false, c, cx);
+        let icon = self.entry_icon(entry, &look, c, cx);
+        let name = if entry.is_symlink() {
+            format!("{} →", entry.name)
+        } else {
+            entry.name.clone()
+        };
+        let cell = match self.view {
+            ViewMode::Thumbnails => v_flex()
+                .id(("cell", ix))
+                .w(rems(THUMB_CELL_REMS))
+                .h(rems(THUMB_ROW_REMS))
+                .flex_none()
+                .p_1()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .size(rems(THUMB_IMAGE_REMS))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(rems(3.)).child(icon)),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .text_xs()
+                        .text_center()
+                        .truncate()
+                        .child(name),
+                ),
+            _ => h_flex()
+                .id(("cell", ix))
+                .w(rems(BRIEF_CELL_REMS))
+                .h(rems(ROW_HEIGHT_REMS))
+                .flex_none()
+                .px_1()
+                .gap_1()
+                .text_sm()
+                .child(div().size_4().flex_none().child(icon))
+                .child(div().flex_1().min_w_0().truncate().child(name)),
+        };
+        let cell = cell
+            .bg(look.bg)
+            .text_color(look.fg)
+            .whitespace_nowrap()
+            .border_1()
+            .border_color(look.outline)
+            .rounded_sm()
+            .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD));
+        self.wire_entry(cell, ix, entry, &look, c, cx)
+    }
+
+    /// A row of the full view.
+    fn render_row(
+        &self,
+        ix: usize,
+        active: bool,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(entry) = self.state.entries.get(ix) else {
+            return div().h(rems(ROW_HEIGHT_REMS)).into_any_element();
+        };
+        let look = self.entry_look(ix, entry, active, true, c, cx);
+        let icon = self.entry_icon(entry, &look, c, cx);
+        let bar = if look.is_marked {
+            c.yellow
+        } else {
+            transparent_black()
         };
         let name = if entry.is_symlink() {
             format!("{} →", entry.name)
         } else {
             entry.name.clone()
         };
-        let size = if entry.is_parent || entry.is_dir() {
-            String::new()
-        } else {
-            human_size(entry.size)
-        };
-        // Type column: `<DIR>` for directories, the extension for files.
-        let kind = if entry.is_parent {
-            String::new()
-        } else if entry.is_dir() {
-            "<DIR>".to_string()
-        } else {
-            ext.to_string()
-        };
-        let modified = entry.modified.map(format_time).unwrap_or_default();
-        let drag_paths: Vec<PathBuf> = if is_marked {
-            self.selected_paths()
-        } else {
-            vec![entry.path.clone()]
-        };
-        let drop_bg = c.primary.alpha(0.35);
 
         // Directories get a chevron that expands them inline; other rows keep the space.
         let chevron: AnyElement = if !entry.is_parent && entry.is_dir() {
@@ -1391,110 +1714,90 @@ impl FilePanel {
             div().flex_none().w(rems(1.)).into_any_element()
         };
 
-        h_flex()
+        let row = h_flex()
             .id(("row", ix))
             .h(rems(ROW_HEIGHT_REMS))
             .w_full()
             .pl_1()
             .pr_2()
             .gap_2()
-            .bg(bg)
-            .text_color(fg)
+            .bg(look.bg)
+            .text_color(look.fg)
             .text_sm()
             .whitespace_nowrap()
             .border_1()
-            .border_color(outline)
-            .when(is_marked, |d| d.font_weight(FontWeight::BOLD))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                    this.focus_handle.focus(window, cx);
-                    this.press_on_cursor = ix == this.state.cursor;
-                    if ev.modifiers.shift {
-                        // Shift+click marks the range from the cursor to this row.
-                        this.state.extend_to(ix);
-                    } else if ev.modifiers.control || ev.modifiers.platform {
-                        // Ctrl/Cmd+click toggles the mark and moves the cursor.
-                        this.state.toggle_mark(ix);
-                        this.state.move_cursor_to(ix);
-                    } else {
-                        this.state.move_cursor_to(ix);
-                        if ev.click_count >= 2 {
-                            this.open(window, cx);
-                        }
-                    }
-                    cx.notify();
-                }),
-            )
-            // Right-click acts on the clicked row: move the cursor there first.
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                    this.focus_handle.focus(window, cx);
-                    if !this.state.marked.contains(&ix) {
-                        this.state.move_cursor_to(ix);
-                    }
-                    cx.notify();
-                }),
-            )
-            // Dragging a marked row drags all marked entries, the cursor row drags
-            // itself; other rows bubble to the body and start a rubber band.
-            .when(is_marked || is_cursor, |d| {
-                let drag = DragEntries { paths: drag_paths };
-                d.on_drag(drag, |drag, _offset, _window, cx| {
-                    let label = crate::ops::describe(&drag.paths);
-                    cx.new(|_| DragPreview { label })
-                })
-            })
-            // Directories (and `..`) accept drops into them.
-            .when(entry.is_dir(), |d| {
-                let dest = entry.path.clone();
-                d.drag_over::<DragEntries>(move |style, _, _, _| style.bg(drop_bg))
-                    .on_drop(cx.listener(move |_this, drag: &DragEntries, _window, cx| {
-                        cx.stop_propagation();
-                        cx.emit(PanelEvent::Dropped {
-                            paths: drag.paths.clone(),
-                            dest: dest.clone(),
-                        });
-                    }))
-            })
+            .border_color(look.outline)
+            .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
             .child(div().flex_none().w(px(3.)).h_full().bg(bar))
             .child(div().flex_none().w(rems(entry.depth as f32)))
             .child(chevron)
             .child(div().size_4().flex_none().child(icon))
             .child(div().flex_1().min_w_0().truncate().child(name))
-            .child(
+            .children(self.columns.shown().map(|column| {
+                let (text, color) = column_value(column, entry, &look, c);
                 div()
-                    .w(rems(SIZE_WIDTH_REMS))
-                    .flex_none()
-                    .text_right()
-                    .child(size),
-            )
-            .child(
-                div()
-                    .w(rems(EXT_WIDTH_REMS))
+                    .w(rems(column.width_rems()))
                     .flex_none()
                     .truncate()
-                    .text_color(if is_marked || entry.is_dir() {
-                        fg
-                    } else {
-                        c.muted_foreground
-                    })
-                    .child(kind),
-            )
-            .child(
-                div()
-                    .w(rems(MODIFIED_WIDTH_REMS))
-                    .flex_none()
-                    .text_color(c.muted_foreground)
-                    .child(modified),
-            )
-            .context_menu({
-                let focus = self.focus_handle.clone();
-                let (is_parent, is_dir) = (entry.is_parent, entry.is_dir());
-                move |menu, _, _| Self::entry_menu(menu, focus.clone(), is_parent, is_dir)
-            })
-            .into_any_element()
+                    .when(column.right_aligned(), |d| d.text_right())
+                    .text_color(color)
+                    .child(text)
+            }));
+        self.wire_entry(row, ix, entry, &look, c, cx)
+    }
+}
+
+/// Per-entry colours shared by rows and cells.
+struct EntryLook {
+    is_cursor: bool,
+    is_marked: bool,
+    is_cut: bool,
+    bg: Hsla,
+    outline: Hsla,
+    fg: Hsla,
+}
+
+/// Text and colour of a column for `entry`.
+fn column_value(column: Column, entry: &Entry, look: &EntryLook, c: &Colors) -> (String, Hsla) {
+    let muted = c.muted_foreground;
+    match column {
+        Column::Size => {
+            let text = if entry.is_parent || entry.is_dir() {
+                String::new()
+            } else {
+                human_size(entry.size)
+            };
+            (text, look.fg)
+        }
+        // `<DIR>` for directories, the extension for files (the name keeps it too).
+        Column::Kind => {
+            if entry.is_parent {
+                (String::new(), muted)
+            } else if entry.is_dir() {
+                ("<DIR>".to_string(), look.fg)
+            } else {
+                let color = if look.is_marked { look.fg } else { muted };
+                (extension(&entry.name).to_string(), color)
+            }
+        }
+        Column::Modified => (entry.modified.map(format_time).unwrap_or_default(), muted),
+        Column::Created => (entry.created.map(format_time).unwrap_or_default(), muted),
+        Column::Permissions => (
+            entry
+                .mode
+                .filter(|_| !entry.is_parent)
+                .map(|mode| format_mode(mode, &entry.kind))
+                .unwrap_or_default(),
+            muted,
+        ),
+        Column::Owner => (
+            entry
+                .uid
+                .filter(|_| !entry.is_parent)
+                .map(owner_name)
+                .unwrap_or_default(),
+            muted,
+        ),
     }
 }
 
@@ -1541,7 +1844,12 @@ impl Render for FilePanel {
         let marquee_color = colors.primary;
         // A press on a marked row belongs to the file drag, not the rubber band.
         let marquee_allowed = !matches!(self.pending_press, Some((_, _, true)));
-        let count = self.state.len();
+        // Grid geometry follows the body width measured at the last frame.
+        self.per_row = self.cells_per_row(window);
+        if std::mem::take(&mut self.pending_scroll) {
+            self.scroll_to_cursor();
+        }
+        let count = self.line_count();
 
         let header: AnyElement = if self.editing_path {
             Input::new(&self.path_input)
@@ -1598,7 +1906,7 @@ impl Render for FilePanel {
             count,
             cx.processor(move |this, range: Range<usize>, _window, cx| {
                 range
-                    .map(|ix| this.render_row(ix, active, &row_colors, cx))
+                    .map(|line| this.render_line(line, active, &row_colors, cx))
                     .collect::<Vec<_>>()
             }),
         )
@@ -1606,6 +1914,38 @@ impl Render for FilePanel {
         .flex_1()
         .min_h_0()
         .w_full();
+
+        // The column header belongs to the full view only.
+        let column_header = if self.view == ViewMode::Full {
+            let heads: Vec<AnyElement> = std::iter::once(None)
+                .chain(self.columns.shown().map(Some))
+                .map(|column| self.render_column_head(column, &colors, cx))
+                .collect();
+            Some(
+                h_flex()
+                    .id(("column-header", self.index))
+                    .h(rems(1.375))
+                    .flex_none()
+                    .px_2()
+                    .gap_2()
+                    .bg(list_head)
+                    .border_b_1()
+                    .border_color(border)
+                    .text_xs()
+                    .whitespace_nowrap()
+                    .text_color(muted_foreground)
+                    .child(div().w(rems(1.)).flex_none())
+                    .child(div().size_4().flex_none())
+                    .children(heads)
+                    .context_menu({
+                        let focus = self.focus_handle.clone();
+                        let columns = self.columns;
+                        move |menu, _, _| Self::columns_menu(menu, focus.clone(), columns)
+                    }),
+            )
+        } else {
+            None
+        };
 
         v_flex()
             .id(("panel", self.index))
@@ -1642,6 +1982,8 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_collapse))
             .on_action(cx.listener(Self::on_open_filter))
             .on_action(cx.listener(Self::on_toggle_filter_recursive))
+            .on_action(cx.listener(Self::on_set_view))
+            .on_action(cx.listener(Self::on_toggle_column))
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -1710,46 +2052,32 @@ impl Render for FilePanel {
                                             this.open_filter(window, cx);
                                         }
                                     })),
+                            )
+                            .child(
+                                Button::new(("view", self.index))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(self.view.icon())
+                                    .dropdown_menu({
+                                        let focus = self.focus_handle.clone();
+                                        let current = self.view;
+                                        move |menu, _, _| {
+                                            ViewMode::ALL.iter().fold(
+                                                menu.action_context(focus.clone()),
+                                                |menu, &mode| {
+                                                    menu.menu_with_check(
+                                                        mode.label(),
+                                                        mode == current,
+                                                        Box::new(SetView { mode }),
+                                                    )
+                                                },
+                                            )
+                                        }
+                                    }),
                             ),
                     )
                     .children(filter_bar)
-                    .child(
-                        h_flex()
-                            .h(rems(1.375))
-                            .flex_none()
-                            .px_2()
-                            .gap_2()
-                            .bg(list_head)
-                            .border_b_1()
-                            .border_color(border)
-                            .text_xs()
-                            .whitespace_nowrap()
-                            .text_color(muted_foreground)
-                            .child(div().w(rems(1.)).flex_none())
-                            .child(div().size_4().flex_none())
-                            .child(self.render_column_head(SortKey::Name, None, false, &colors, cx))
-                            .child(self.render_column_head(
-                                SortKey::Size,
-                                Some(SIZE_WIDTH_REMS),
-                                true,
-                                &colors,
-                                cx,
-                            ))
-                            .child(self.render_column_head(
-                                SortKey::Type,
-                                Some(EXT_WIDTH_REMS),
-                                false,
-                                &colors,
-                                cx,
-                            ))
-                            .child(self.render_column_head(
-                                SortKey::Modified,
-                                Some(MODIFIED_WIDTH_REMS),
-                                false,
-                                &colors,
-                                cx,
-                            )),
-                    )
+                    .children(column_header)
                     .child(
                         div()
                             .id(("panel-body", self.index))
@@ -1797,7 +2125,8 @@ impl Render for FilePanel {
                             .context_menu({
                                 let focus = self.focus_handle.clone();
                                 let sort = self.state.sort;
-                                move |menu, _, _| Self::panel_menu(menu, focus.clone(), sort)
+                                let view = self.view;
+                                move |menu, _, _| Self::panel_menu(menu, focus.clone(), sort, view)
                             }),
                     )
                     .child(

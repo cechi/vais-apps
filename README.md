@@ -95,7 +95,8 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+F` | Filter bar (also the magnifier after the path): type to filter the listing live, case-insensitive; `*` / `?` turn the query into a glob (`*.png`). "Subfolders" (`Ctrl+Shift+F`) searches the whole subtree in the background (results show their relative path, up to 5000). `Enter` returns to the list with the filter kept, `Esc` closes it |
 | `Ctrl+H` | Toggle hidden files |
 | `Ctrl+R` | Reload |
-| `Ctrl+F3` / `Ctrl+F4` / `Ctrl+F5` / `Ctrl+F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
+| `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
+| `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
@@ -145,6 +146,19 @@ its layout, divider positions as fractions and each panel's path, hidden-files t
 sort. A version 1 file (single layout) is migrated into one tab. A missing or invalid file
 falls back to defaults with a logged warning (`RUST_LOG=warn`).
 
+## Views
+
+Each panel has its own view, saved with the tab:
+
+- **Full** (`Ctrl+F2`): one entry per row with columns. Right-click the column header to
+  choose the columns: Size, Type, Modified, Created, Permissions and Owner (the last two
+  on Unix). Clicking a sortable header sorts by it. Directories expand inline here.
+- **Brief** (`Ctrl+F1`): names only, as many columns as fit. `←` / `→` move the cursor
+  sideways, `↑` / `↓` by a line; marking, drag & drop and the rubber band work as usual.
+- **Thumbnails** (`Ctrl+F3`): a grid with image previews (png, jpg, gif, webp, bmp,
+  tiff, ico, qoi, svg) and large icons for everything else. Previews are generated in the
+  background and cached under the user cache directory (`~/.cache/vais-commander/thumbs`).
+
 ## Sidebar
 
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
@@ -172,7 +186,7 @@ src/app.rs         Workspace: tabs, tab bar, theme, persistence
 src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
-src/panel/         FilePanel entity (rendering, actions) and PanelState (cursor, marks)
+src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
 src/fs/            directory reading, natural sort, size/date formatting
 src/ops/           copy / move / delete with byte-level progress and cancel; manager.rs runs them
 src/ops_panel.rs   the operations panel (rows with progress, speed sparkline, cancel)

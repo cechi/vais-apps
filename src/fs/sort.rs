@@ -13,14 +13,16 @@ pub enum SortKey {
     /// File extension (directories always come first anyway).
     Type,
     Modified,
+    Created,
 }
 
 impl SortKey {
-    pub const ALL: [SortKey; 4] = [
+    pub const ALL: [SortKey; 5] = [
         SortKey::Name,
         SortKey::Size,
         SortKey::Type,
         SortKey::Modified,
+        SortKey::Created,
     ];
 
     pub fn label(self) -> &'static str {
@@ -29,6 +31,7 @@ impl SortKey {
             SortKey::Size => "Size",
             SortKey::Type => "Type",
             SortKey::Modified => "Modified",
+            SortKey::Created => "Created",
         }
     }
 }
@@ -140,6 +143,7 @@ pub fn sort_entries(entries: &mut [Entry], sort: Sort) {
                     SortKey::Size => a.size.cmp(&b.size),
                     SortKey::Type => natural_cmp(extension(&a.name), extension(&b.name)),
                     SortKey::Modified => a.modified.cmp(&b.modified),
+                    SortKey::Created => a.created.cmp(&b.created),
                 };
                 match sort.dir {
                     SortDir::Asc => primary,
@@ -163,6 +167,9 @@ mod tests {
             kind,
             size,
             modified: None,
+            created: None,
+            mode: None,
+            uid: None,
             is_parent: false,
             depth: 0,
         }
