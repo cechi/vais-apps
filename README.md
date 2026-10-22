@@ -99,6 +99,8 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+R` | Reload (local panels also reload on their own when the directory changes) |
 | `Shift+Enter` | Open the file with its default application (Enter does too, except for archives) |
 | typing | Quick search: filters the listing by what is typed (Esc clears) |
+| `Ctrl+Shift+P` | Command palette: every action by name, with its key |
+| `Ctrl+D` | Add the current directory to the sidebar's Favorites, or remove it |
 | `Ctrl+E` | Focus the command line |
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
@@ -231,6 +233,7 @@ hands the archive to the default application instead.
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
 home and the standard user folders (XDG user dirs, else `~/Desktop` & co.), the root and
 mounted volumes (`/mnt`, `/media`, `/run/media`, `/home`, macOS `/Volumes`, Windows drives).
+`Ctrl+D` adds the current directory to the Favorites group (and removes it again).
 Below them a **Recent** group lists the last 10 directories the focused panel showed
 (newest first, remembered across restarts). Clicking a place navigates the active panel;
 the place matching the panel's directory is highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and

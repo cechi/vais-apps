@@ -33,6 +33,8 @@ pub const RECENT_LIMIT: usize = 10;
 
 pub struct Sidebar {
     places: Vec<Place>,
+    /// Bookmarked directories (Ctrl+D), listed after the user folders.
+    favorites: Vec<Place>,
     volumes: Vec<Place>,
     recent: Vec<Place>,
     connections: Vec<Place>,
@@ -46,6 +48,7 @@ impl Sidebar {
     pub fn new(_cx: &mut Context<Self>) -> Self {
         let mut this = Self {
             places: Vec::new(),
+            favorites: Vec::new(),
             volumes: Vec::new(),
             recent: Vec::new(),
             connections: Vec::new(),
@@ -75,6 +78,27 @@ impl Sidebar {
                 detail: None,
             })
             .collect();
+    }
+
+    /// The bookmarked directories, in the order they were added.
+    pub fn set_favorites(&mut self, paths: &[Location], cx: &mut Context<Self>) {
+        let home = crate::config::home_dir();
+        self.favorites = paths
+            .iter()
+            .map(|path| {
+                let parent = path.parent().map(|p| match p.as_local() {
+                    Some(local) => abbreviate(local, &home),
+                    None => p.display(),
+                });
+                Place {
+                    name: path.display_name(),
+                    path: path.clone(),
+                    icon: IconName::Star,
+                    detail: parent.filter(|p| !p.is_empty()),
+                }
+            })
+            .collect();
+        cx.notify();
     }
 
     /// The recently visited directories, newest first.
@@ -238,7 +262,12 @@ impl Render for Sidebar {
             theme.sidebar_foreground,
             theme.sidebar_border,
         );
-        let places = self.places.clone();
+        let places: Vec<Place> = self
+            .places
+            .iter()
+            .chain(self.favorites.iter())
+            .cloned()
+            .collect();
         let volumes = self.volumes.clone();
         let recent = self.recent.clone();
         let connections = self.connections.clone();

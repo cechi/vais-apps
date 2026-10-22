@@ -30,6 +30,8 @@ actions!(
         ToggleOperationsPanel,
         ToggleSidebar,
         OpenSettings,
+        CommandPalette,
+        ToggleFavorite,
         FocusCommandLine,
         InsertNameToCommandLine,
         InsertPathToCommandLine,
@@ -182,6 +184,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
         KeyBinding::new("secondary-b", ToggleSidebar, w),
         KeyBinding::new("secondary-,", OpenSettings, w),
+        KeyBinding::new("secondary-shift-p", CommandPalette, w),
+        KeyBinding::new("secondary-d", ToggleFavorite, w),
         KeyBinding::new("secondary-e", FocusCommandLine, w),
         KeyBinding::new("secondary-enter", InsertNameToCommandLine, p),
         KeyBinding::new("secondary-shift-enter", InsertPathToCommandLine, p),
@@ -332,5 +336,151 @@ mod tests {
     #[test]
     fn all_bindings_parse() {
         assert!(super::bindings().len() > 30);
+    }
+}
+
+/// One row of the command palette: an action usable from a file panel and
+/// its key binding.
+pub struct Command {
+    pub label: String,
+    pub keys: String,
+    pub action: Box<dyn Action>,
+}
+
+/// The actions the command palette lists: every binding that applies while
+/// a panel has the focus, first binding of each action wins.
+pub fn commands() -> Vec<Command> {
+    let contexts: Vec<KeyContext> = [WORKSPACE_CONTEXT, GRID_CONTEXT, PANEL_CONTEXT]
+        .iter()
+        .filter_map(|c| KeyContext::parse(c).ok())
+        .collect();
+    let mut out: Vec<Command> = Vec::new();
+    for binding in bindings() {
+        // As in dispatch, a binding applies when its predicate holds for
+        // some node of the focus path (the path up to that node).
+        let applies = binding.predicate().is_none_or(|predicate| {
+            (1..=contexts.len()).any(|end| predicate.eval(&contexts[..end]))
+        });
+        if !applies {
+            continue;
+        }
+        let action = binding.action();
+        let label = command_label(action);
+        if out.iter().any(|c| c.label == label) {
+            continue;
+        }
+        let keys = binding
+            .keystrokes()
+            .iter()
+            .map(|k| pretty_keys(&k.to_string()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push(Command {
+            label,
+            keys,
+            action: action.boxed_clone(),
+        });
+    }
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out
+}
+
+/// `vais::CopyFiles` → `Copy Files`; an action with data adds it:
+/// `SortBy { key: Name }` → `Sort By: Name`.
+fn command_label(action: &dyn Action) -> String {
+    let name = action.name().rsplit("::").next().unwrap_or("");
+    let mut label = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            label.push(' ');
+        }
+        label.push(c);
+    }
+    if let Some(detail) = action_detail(action) {
+        label.push_str(": ");
+        label.push_str(&detail);
+    }
+    label
+}
+
+/// The data of the actions that carry some, for the palette label.
+fn action_detail(action: &dyn Action) -> Option<String> {
+    let any = action.as_any();
+    if let Some(a) = any.downcast_ref::<SortBy>() {
+        Some(format!("{:?}", a.key))
+    } else if let Some(a) = any.downcast_ref::<SetView>() {
+        Some(format!("{:?}", a.mode))
+    } else if let Some(a) = any.downcast_ref::<ToggleColumn>() {
+        Some(format!("{:?}", a.column))
+    } else if let Some(a) = any.downcast_ref::<ActivateTab>() {
+        Some((a.index + 1).to_string())
+    } else if let Some(a) = any.downcast_ref::<SetLayout>() {
+        Some(format!("{}x{}", a.rows, a.cols))
+    } else {
+        None
+    }
+}
+
+/// `ctrl-shift-f3` → `Ctrl+Shift+F3`.
+fn pretty_keys(keystroke: &str) -> String {
+    let (mods, key) = match keystroke.rsplit_once('-') {
+        Some((m, "")) => (m.trim_end_matches('-'), "-"),
+        Some((m, k)) => (m, k),
+        None => ("", keystroke),
+    };
+    let mut parts: Vec<String> = mods
+        .split('-')
+        .filter(|m| !m.is_empty())
+        .map(|m| match m {
+            "ctrl" => "Ctrl".to_string(),
+            "alt" => "Alt".to_string(),
+            "shift" => "Shift".to_string(),
+            "cmd" => "Cmd".to_string(),
+            "fn" => "Fn".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let key = match key {
+        "pageup" => "PgUp".to_string(),
+        "pagedown" => "PgDn".to_string(),
+        "escape" => "Esc".to_string(),
+        "enter" => "Enter".to_string(),
+        "backspace" => "Backspace".to_string(),
+        "delete" => "Del".to_string(),
+        "insert" => "Ins".to_string(),
+        "space" => "Space".to_string(),
+        "tab" => "Tab".to_string(),
+        "home" => "Home".to_string(),
+        "end" => "End".to_string(),
+        "up" => "↑".to_string(),
+        "down" => "↓".to_string(),
+        "left" => "←".to_string(),
+        "right" => "→".to_string(),
+        other => other.to_uppercase(),
+    };
+    parts.push(key);
+    parts.join("+")
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::{commands, pretty_keys};
+
+    #[test]
+    fn keys_read_like_a_manual() {
+        assert_eq!(pretty_keys("ctrl-shift-f3"), "Ctrl+Shift+F3");
+        assert_eq!(pretty_keys("ctrl--"), "Ctrl+-");
+        assert_eq!(pretty_keys("enter"), "Enter");
+        assert_eq!(pretty_keys("alt-left"), "Alt+←");
+    }
+
+    #[test]
+    fn palette_lists_panel_actions_once() {
+        let commands = commands();
+        let labels: Vec<&str> = commands.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"Copy Files"));
+        assert!(labels.contains(&"Sort By: Name"));
+        assert!(!labels.contains(&"Palette Confirm"));
+        assert_eq!(labels.iter().filter(|l| **l == "Open").count(), 1);
     }
 }

@@ -72,6 +72,8 @@ pub struct Config {
     pub tabs: Vec<TabConfig>,
     /// Directories the focused panel showed most recently, newest first.
     pub recent: Vec<Location>,
+    /// Directories bookmarked with Ctrl+D (the sidebar's Favorites group).
+    pub favorites: Vec<Location>,
     /// Saved remote connections.
     pub connections: Vec<ConnectionConfig>,
     /// Version 1 layout (single grid); read for migration, never written.
@@ -98,6 +100,7 @@ impl Default for Config {
             active_tab: 0,
             tabs: Vec::new(),
             recent: Vec::new(),
+            favorites: Vec::new(),
             connections: Vec::new(),
             layout: None,
             panels: Vec::new(),

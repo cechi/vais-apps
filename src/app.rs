@@ -134,6 +134,8 @@ pub struct Workspace {
     /// Recent group); `last_visited` is what was noted last.
     recent: Vec<Location>,
     last_visited: Option<Location>,
+    /// Bookmarked directories (Ctrl+D).
+    favorites: Vec<Location>,
     /// Personal font family from the config, applied over every theme.
     font_family: Option<String>,
     /// Divider between the sidebar and the main column.
@@ -211,7 +213,10 @@ impl Workspace {
         );
 
         let sidebar = cx.new(|cx| Sidebar::new(cx));
-        sidebar.update(cx, |s, cx| s.set_recent(&config.recent, cx));
+        sidebar.update(cx, |s, cx| {
+            s.set_recent(&config.recent, cx);
+            s.set_favorites(&config.favorites, cx);
+        });
         subscriptions.push(cx.subscribe_in(
             &sidebar,
             window,
@@ -263,6 +268,7 @@ impl Workspace {
             connections,
             recent: config.recent.clone(),
             last_visited: None,
+            favorites: config.favorites.clone(),
             font_family: config.font_family.clone(),
             side_split: cx.new(|_| ResizableState::default()),
             ops,
@@ -730,6 +736,52 @@ impl Workspace {
         }
     }
 
+    /// Ctrl+D: bookmark the active panel's directory, or drop the bookmark.
+    fn on_toggle_favorite(&mut self, _: &ToggleFavorite, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(grid) = self.active_tab().grid_view() else {
+            return;
+        };
+        let path = grid.read(cx).active_panel().read(cx).path().clone();
+        if path.is_roots() {
+            return;
+        }
+        let note = if let Some(ix) = self.favorites.iter().position(|f| *f == path) {
+            self.favorites.remove(ix);
+            format!("Removed {} from favorites", path.display_name())
+        } else {
+            self.favorites.push(path.clone());
+            format!("Added {} to favorites", path.display_name())
+        };
+        self.sidebar
+            .update(cx, |s, cx| s.set_favorites(&self.favorites, cx));
+        self.notify(Notification::info(note), window, cx);
+        self.schedule_save(cx);
+    }
+
+    /// Ctrl+Shift+P: every panel action by name, with its key.
+    fn on_command_palette(&mut self, _: &CommandPalette, window: &mut Window, cx: &mut Context<Self>) {
+        let commands = crate::keymap::commands();
+        let items: Vec<PaletteItem> = commands
+            .iter()
+            .map(|c| PaletteItem::new(c.label.clone()).detail(c.keys.clone()))
+            .collect();
+        let actions: std::rc::Rc<Vec<Box<dyn Action>>> =
+            std::rc::Rc::new(commands.into_iter().map(|c| c.action).collect());
+        let palette = cx.new(|cx| {
+            Palette::pick_filtered(items, "Command…", window, cx)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let Some(ix) = choice.item else {
+                        return;
+                    };
+                    let action = actions[ix].boxed_clone();
+                    window.defer(cx, move |window, cx| window.dispatch_action(action, cx));
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Commands".into(), palette, window, cx);
+    }
+
     fn on_open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings(window, cx);
     }
@@ -1038,6 +1090,7 @@ impl Workspace {
                 .count(),
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             recent: self.recent.clone(),
+            favorites: self.favorites.clone(),
             font_family: self.font_family.clone(),
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
@@ -1484,10 +1537,12 @@ impl Workspace {
             .icon(IconName::Menu)
             .dropdown_menu(move |menu, _window, _cx| {
                 menu.action_context(tab_focus.clone())
+                    .menu("Commands…", Box::new(CommandPalette))
                     .menu("Settings…", Box::new(OpenSettings))
                     .menu("Connections…", Box::new(OpenConnections))
                     .menu("Theme…", Box::new(ChooseTheme))
                     .separator()
+                    .menu("Add / remove favorite", Box::new(ToggleFavorite))
                     .menu_with_check("Places sidebar", sidebar_open, Box::new(ToggleSidebar))
                     .menu_with_check(
                         "Operations panel",
@@ -1716,6 +1771,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_ops_panel))
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_focus_command_line))
+            .on_action(cx.listener(Self::on_command_palette))
+            .on_action(cx.listener(Self::on_toggle_favorite))
             .on_action(cx.listener(Self::on_insert_name))
             .on_action(cx.listener(Self::on_insert_path))
             .on_action(cx.listener(Self::on_open_settings))
