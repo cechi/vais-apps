@@ -33,3 +33,7 @@ pub fn init(config: &Config, cx: &mut App) {
 pub fn get(cx: &App) -> &Settings {
     cx.global::<Settings>()
 }
+
+pub fn set_drop_action(cx: &mut App, action: DropAction) {
+    cx.global_mut::<Settings>().drop_action = action;
+}

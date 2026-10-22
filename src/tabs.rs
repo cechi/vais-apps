@@ -5,11 +5,14 @@ use gpui_kit::*;
 use crate::config::TabConfig;
 use crate::grid_view::GridView;
 use crate::rename::view::RenameView;
+use crate::settings_view::SettingsView;
 
 pub enum TabContent {
     Grid(Entity<GridView>),
     /// A batch rename form; transient, not saved in the config.
     Rename(Entity<RenameView>),
+    /// The application settings; transient as well.
+    Settings(Entity<SettingsView>),
 }
 
 pub struct Tab {
@@ -29,17 +32,40 @@ impl Tab {
         }
     }
 
+    pub fn settings(view: Entity<SettingsView>) -> Self {
+        Self {
+            content: TabContent::Settings(view),
+        }
+    }
+
     pub fn grid_view(&self) -> Option<&Entity<GridView>> {
         match &self.content {
             TabContent::Grid(view) => Some(view),
-            TabContent::Rename(_) => None,
+            _ => None,
         }
     }
 
     pub fn rename_view(&self) -> Option<&Entity<RenameView>> {
         match &self.content {
             TabContent::Rename(view) => Some(view),
-            TabContent::Grid(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn settings_view(&self) -> Option<&Entity<SettingsView>> {
+        match &self.content {
+            TabContent::Settings(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    /// Where actions from the tab bar menus are dispatched: the active
+    /// panel of a grid, or the form itself.
+    pub fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match &self.content {
+            TabContent::Grid(view) => view.read(cx).active_panel().focus_handle(cx),
+            TabContent::Rename(view) => view.read(cx).focus_handle(),
+            TabContent::Settings(view) => view.read(cx).focus_handle(),
         }
     }
 
@@ -47,6 +73,7 @@ impl Tab {
         match &self.content {
             TabContent::Grid(view) => view.read(cx).title(cx),
             TabContent::Rename(view) => view.read(cx).title(),
+            TabContent::Settings(view) => view.read(cx).title(),
         }
     }
 
@@ -54,6 +81,7 @@ impl Tab {
         match &self.content {
             TabContent::Grid(view) => view.update(cx, |grid, cx| grid.focus_active(window, cx)),
             TabContent::Rename(view) => view.update(cx, |form, cx| form.focus(window, cx)),
+            TabContent::Settings(view) => view.read(cx).focus_handle().focus(window, cx),
         }
     }
 
@@ -61,7 +89,7 @@ impl Tab {
     pub fn config(&self, cx: &App) -> Option<TabConfig> {
         match &self.content {
             TabContent::Grid(view) => Some(view.read(cx).config(cx)),
-            TabContent::Rename(_) => None,
+            _ => None,
         }
     }
 
@@ -69,6 +97,7 @@ impl Tab {
         match &self.content {
             TabContent::Grid(view) => view.clone().into_any_element(),
             TabContent::Rename(view) => view.clone().into_any_element(),
+            TabContent::Settings(view) => view.clone().into_any_element(),
         }
     }
 }

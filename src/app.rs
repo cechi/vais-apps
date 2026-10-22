@@ -26,6 +26,7 @@ use crate::ops::manager::{ManagerEvent, OperationsManager, summary};
 use crate::ops_panel::{OperationsPanel, PanelEvent as OpsPanelEvent};
 use crate::palette::{self, Palette, PaletteItem};
 use crate::rename::view::{RenameEvent, RenameView};
+use crate::settings_view::{SettingsEvent, SettingsValues, SettingsView};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
@@ -272,6 +273,7 @@ impl Workspace {
         self.theme = choice;
         self.apply_theme(cx);
         self.schedule_save(cx);
+        self.sync_settings(cx);
     }
 
     /// A dialog listing the built-in and user themes; clicking one applies it.
@@ -327,6 +329,7 @@ impl Workspace {
         self.scale = scale;
         self.apply_scale(cx);
         self.schedule_save(cx);
+        self.sync_settings(cx);
         cx.notify();
     }
 
@@ -395,8 +398,90 @@ impl Workspace {
                     },
                 ));
             }
+            if let Some(view) = tab.settings_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, view, event, window, cx| {
+                        this.on_settings_event(view, event, window, cx);
+                    },
+                ));
+            }
         }
         self.tab_subscriptions = subscriptions;
+    }
+
+    // ----- settings tab --------------------------------------------------
+
+    fn settings_values(&self, cx: &App) -> SettingsValues {
+        SettingsValues {
+            theme: self.theme.clone(),
+            scale: self.scale,
+            sidebar_open: self.sidebar_open,
+            drop_action: crate::settings::get(cx).drop_action,
+        }
+    }
+
+    /// Show the current values in the settings tab, if one is open.
+    fn sync_settings(&mut self, cx: &mut Context<Self>) {
+        let values = self.settings_values(cx);
+        for view in self.tabs.iter().filter_map(|t| t.settings_view()) {
+            view.update(cx, |view, cx| view.sync(values.clone(), cx));
+        }
+    }
+
+    /// Open the settings tab (or switch to it when it is already open).
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self.tabs.iter().position(|t| t.settings_view().is_some()) {
+            self.activate_tab(ix, window, cx);
+            return;
+        }
+        let values = self.settings_values(cx);
+        let view = cx.new(|cx| SettingsView::new(values, (MIN_SCALE, MAX_SCALE, SCALE_STEP), cx));
+        let ix = self.active_tab + 1;
+        self.tabs.insert(ix, Tab::settings(view));
+        self.resubscribe(window, cx);
+        self.activate_tab(ix, window, cx);
+    }
+
+    fn on_settings_event(
+        &mut self,
+        view: &Entity<SettingsView>,
+        event: &SettingsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SettingsEvent::ChooseTheme => self.choose_theme(window, cx),
+            SettingsEvent::Scale(scale) => {
+                let scale = clamp_scale(*scale);
+                self.scale_slider
+                    .update(cx, |slider, cx| slider.set_value(scale, window, cx));
+                self.set_scale(scale, cx);
+            }
+            SettingsEvent::Sidebar(open) => {
+                if self.sidebar_open != *open {
+                    self.toggle_sidebar(cx);
+                }
+            }
+            SettingsEvent::DropAction(action) => {
+                crate::settings::set_drop_action(cx, *action);
+                self.schedule_save(cx);
+            }
+            SettingsEvent::Close => {
+                if let Some(ix) = self
+                    .tabs
+                    .iter()
+                    .position(|tab| tab.settings_view() == Some(view))
+                {
+                    self.close_tab(ix, window, cx);
+                }
+            }
+        }
+    }
+
+    fn on_open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
     }
 
     /// Open the batch rename form for `paths` in a new tab next to the current one.
@@ -520,6 +605,7 @@ impl Workspace {
             });
         }
         self.schedule_save(cx);
+        self.sync_settings(cx);
         cx.notify();
     }
 
@@ -799,16 +885,36 @@ impl Workspace {
 
         // Layout picker for the active tab. The menu dispatches `SetLayout` to the
         // active panel, so the grid handles it exactly like Alt+1..9.
+        let tab_focus = self.active_tab().focus_handle(cx);
         let (current_layout, panel_focus) = match self.active_tab().grid_view() {
-            Some(view) => {
-                let grid = view.read(cx);
-                (
-                    Some(grid.layout()),
-                    Some(grid.active_panel().focus_handle(cx)),
-                )
-            }
+            Some(view) => (Some(view.read(cx).layout()), Some(tab_focus.clone())),
             None => (None, None),
         };
+        // The application menu: actions go to the active tab, which bubbles
+        // them up to the workspace.
+        let sidebar_open = self.sidebar_open;
+        let ops_open = self.ops_panel_open;
+        let app_menu = Button::new("app-menu")
+            .ghost()
+            .small()
+            .icon(IconName::Menu)
+            .dropdown_menu(move |menu, _window, _cx| {
+                menu.action_context(tab_focus.clone())
+                    .menu("Settings…", Box::new(OpenSettings))
+                    .menu("Theme…", Box::new(ChooseTheme))
+                    .separator()
+                    .menu_with_check("Places sidebar", sidebar_open, Box::new(ToggleSidebar))
+                    .menu_with_check(
+                        "Operations panel",
+                        ops_open,
+                        Box::new(ToggleOperationsPanel),
+                    )
+                    .separator()
+                    .menu("New tab", Box::new(NewTab))
+                    .menu("Close tab", Box::new(CloseTab))
+                    .separator()
+                    .menu("Quit", Box::new(Quit))
+            });
         let layout_button = Button::new("tab-layout")
             .ghost()
             .small()
@@ -871,7 +977,8 @@ impl Workspace {
                     .gap_1()
                     .border_b_1()
                     .border_color(border)
-                    .child(layout_button),
+                    .child(layout_button)
+                    .child(app_menu),
             )
     }
 }
@@ -1009,6 +1116,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_zoom_reset))
             .on_action(cx.listener(Self::on_toggle_ops_panel))
             .on_action(cx.listener(Self::on_toggle_sidebar))
+            .on_action(cx.listener(Self::on_open_settings))
             .on_action(cx.listener(Self::on_quit))
             // Repaint when Shift changes so the key bar shows the Shift captions.
             .on_modifiers_changed(cx.listener(|_this, _ev, _window, cx| cx.notify()))

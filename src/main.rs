@@ -12,6 +12,7 @@ mod panel;
 mod platform;
 mod rename;
 mod settings;
+mod settings_view;
 mod sidebar;
 mod tabs;
 mod theme;

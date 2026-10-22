@@ -111,6 +111,10 @@ impl RenameView {
         self.name.update(cx, |input, cx| input.focus(window, cx));
     }
 
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+
     fn rules(&self, cx: &App) -> Rules {
         let text = |input: &Entity<InputState>| input.read(cx).value().to_string();
         let number = |input: &Entity<InputState>, default: i64| {

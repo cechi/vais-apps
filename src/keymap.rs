@@ -11,6 +11,7 @@ pub const PANEL_CONTEXT: &str = "FilePanel";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 pub const PALETTE_CONTEXT: &str = "Palette";
 pub const RENAME_CONTEXT: &str = "RenameForm";
+pub const SETTINGS_CONTEXT: &str = "SettingsForm";
 
 actions!(
     vais,
@@ -24,6 +25,8 @@ actions!(
         ChooseTheme,
         ToggleOperationsPanel,
         ToggleSidebar,
+        OpenSettings,
+        CloseSettings,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -143,6 +146,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-shift-t", ChooseTheme, w),
         KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
         KeyBinding::new("secondary-b", ToggleSidebar, w),
+        KeyBinding::new("secondary-,", OpenSettings, w),
+        KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("secondary-=", ZoomIn, w),
         KeyBinding::new("secondary-+", ZoomIn, w),
         KeyBinding::new("secondary--", ZoomOut, w),
