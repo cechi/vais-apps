@@ -1,6 +1,5 @@
 //! The workspace: tabs (each with its own content), theme and persistence.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::theme;
@@ -421,8 +420,8 @@ impl Workspace {
                         GridEvent::BatchRename(paths) => {
                             this.open_rename(paths.clone(), window, cx)
                         }
-                        GridEvent::OpenFile { path, readonly } => {
-                            this.open_file(path.clone(), *readonly, window, cx)
+                        GridEvent::OpenFile { location, readonly } => {
+                            this.open_file(location.clone(), *readonly, window, cx)
                         }
                     },
                 ));
@@ -469,9 +468,8 @@ impl Workspace {
                                     this.close_tab(ix, window, cx);
                                 }
                             }
-                            EditorEvent::Saved(path) => {
-                                if let Some(dir) = path.parent() {
-                                    let dir = Location::local(dir);
+                            EditorEvent::Saved(location) => {
+                                if let Some(dir) = location.parent() {
                                     for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
                                         grid.update(cx, |grid, cx| grid.refresh_dir(&dir, cx));
                                     }
@@ -705,23 +703,47 @@ impl Workspace {
     /// gets its tab activated instead; F4 on it makes it editable.
     fn open_file(
         &mut self,
-        path: PathBuf,
+        location: Location,
         readonly: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(ix) = self
-            .tabs
-            .iter()
-            .position(|t| t.editor_view().is_some_and(|v| v.read(cx).path() == path))
-        {
+        if let Some(ix) = self.tabs.iter().position(|t| {
+            t.editor_view()
+                .is_some_and(|v| *v.read(cx).location() == location)
+        }) {
             if !readonly && let Some(view) = self.tabs[ix].editor_view() {
                 view.update(cx, |editor, cx| editor.set_readonly(false, cx));
             }
             self.activate_tab(ix, window, cx);
             return;
         }
-        match crate::editor_view::load(&path) {
+        // Reading may go over the network: do it on the background executor.
+        let task = cx.background_spawn({
+            let location = location.clone();
+            async move { crate::editor_view::load(&location) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.file_loaded(location, readonly, result, window, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The editor load finished: open the tab, or fall back to the default
+    /// application (through a local copy for remote files).
+    fn file_loaded(
+        &mut self,
+        location: Location,
+        readonly: bool,
+        result: Result<crate::editor_view::Loaded, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
             Ok(loaded) => {
                 let view = cx.new(|cx| EditorView::new(loaded, readonly, window, cx));
                 let ix = self.active_tab + 1;
@@ -733,15 +755,21 @@ impl Workspace {
                 window.push_notification(
                     Notification::info(format!(
                         "{}: {reason}",
-                        path.file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default()
+                        location.file_name().unwrap_or_default()
                     )),
                     cx,
                 );
-                if let Err(err) = open::that_detached(&path) {
-                    log::warn!("open {}: {err}", path.display());
-                }
+                cx.background_spawn(async move {
+                    match crate::vfs::local_copy(&location) {
+                        Ok(path) => {
+                            if let Err(err) = open::that_detached(&path) {
+                                log::warn!("open {}: {err}", path.display());
+                            }
+                        }
+                        Err(err) => log::warn!("open {}: {err}", location.display()),
+                    }
+                })
+                .detach();
             }
         }
     }

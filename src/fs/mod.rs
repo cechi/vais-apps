@@ -48,12 +48,6 @@ impl Entry {
     pub fn is_symlink(&self) -> bool {
         matches!(self.kind, EntryKind::Symlink { .. })
     }
-
-    /// The path on the local disk, for features that only work there
-    /// (opening with another app, thumbnails, the editor).
-    pub fn local_path(&self) -> Option<&std::path::Path> {
-        self.location.as_local()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]

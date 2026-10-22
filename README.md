@@ -189,8 +189,9 @@ path bar (`Ctrl+L`); panels on a connection are restored at startup and connect 
 first shown. Copy and move work in every direction (upload, download, remote to remote,
 even between connections) through streamed transfers with the usual progress; renaming,
 new folders and deleting work remotely (no trash: deletions there are permanent). The
-editor, thumbnails, "open with the default app" and the terminal still need a local
-file. Protocol support so far: SFTP (libssh2).
+editor reads and writes remote files through the connection, thumbnails are generated
+from them, and "open with the default app" downloads a copy into the cache directory
+first; only the terminal needs a local directory. Protocol support so far: SFTP (libssh2).
 
 ## Sidebar
 

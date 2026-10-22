@@ -224,10 +224,20 @@ impl Backend for SftpBackend {
     fn rename(&self, from: &Location, to: &Location) -> io::Result<()> {
         let (from, to) = (remote_path(&self.conn, from)?, remote_path(&self.conn, to)?);
         let flags = RenameFlags::OVERWRITE | RenameFlags::ATOMIC | RenameFlags::NATIVE;
-        self.sftp
-            .rename(from, to, Some(flags))
-            .or_else(|_| self.sftp.rename(from, to, None))
-            .map_err(io_err)
+        match self.sftp.rename(from, to, Some(flags)) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                // SFTP v3 servers (OpenSSH) refuse to rename over an existing
+                // file whatever the flags say: clear the target, then retry.
+                if let Ok(existing) = self.sftp.lstat(to)
+                    && !existing.is_dir()
+                {
+                    self.sftp.unlink(to).map_err(io_err)?;
+                    return self.sftp.rename(from, to, Some(flags)).map_err(io_err);
+                }
+                Err(io_err(err))
+            }
+        }
     }
 
     fn remove(&self, loc: &Location) -> io::Result<()> {

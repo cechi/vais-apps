@@ -427,14 +427,23 @@ impl FilePanel {
             let path = entry.location.clone();
             self.navigate(path, None, cx);
         } else {
-            let result = match entry.local_path() {
-                Some(path) => open::that_detached(path).map_err(|e| e.to_string()),
-                None => Err("remote files cannot be opened yet".to_string()),
-            };
-            if let Err(err) = result {
-                self.state.error = Some(format!("{}: {err}", entry.name));
-                cx.notify();
-            }
+            // Remote files are fetched into the cache first, off the UI thread.
+            let (name, location) = (entry.name.clone(), entry.location.clone());
+            let task = cx.background_spawn(async move {
+                crate::vfs::local_copy(&location)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| open::that_detached(&path).map_err(|e| e.to_string()))
+            });
+            cx.spawn(async move |this, cx| {
+                if let Err(err) = task.await {
+                    this.update(cx, |panel, cx| {
+                        panel.state.error = Some(format!("{name}: {err}"));
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            })
+            .detach();
         }
     }
 

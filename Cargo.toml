@@ -31,6 +31,10 @@ usvg = "0.46"
 ssh2 = "0.9"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# No system libssh2 / OpenSSL to link against on macOS and Windows runners.
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+
 [target.'cfg(windows)'.dependencies]
 # File icons from the shell (see src/icons/windows.rs); both crates are
 # already in the dependency graph through gpui.

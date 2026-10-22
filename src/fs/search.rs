@@ -96,7 +96,7 @@ mod tests {
         assert!(
             found
                 .iter()
-                .all(|e| e.depth == 0 && e.local_path().is_some_and(|p| p.is_absolute()))
+                .all(|e| e.depth == 0 && e.location.as_local().is_some_and(|p| p.is_absolute()))
         );
 
         let (found, truncated) = search_tree(

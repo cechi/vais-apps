@@ -1,8 +1,6 @@
 //! One grid of file panels: layout, focus between panels, divider sizes, and
 //! the file operations between the active and the target panel.
 
-use std::path::PathBuf;
-
 use crate::vfs::{Location, backend_for};
 use std::rc::Rc;
 
@@ -39,7 +37,7 @@ pub enum GridEvent {
     /// F2 with several entries marked: open the batch rename form for them.
     BatchRename(Vec<Location>),
     /// F3 / F4: open the file under the cursor in an editor tab.
-    OpenFile { path: PathBuf, readonly: bool },
+    OpenFile { location: Location, readonly: bool },
 }
 
 pub struct GridView {
@@ -557,16 +555,8 @@ impl GridView {
                 .update(cx, |panel, cx| panel.navigate_to(path, cx));
             return;
         }
-        let Some(local) = path.as_local() else {
-            self.notify(
-                Notification::info("Remote files cannot be edited yet"),
-                window,
-                cx,
-            );
-            return;
-        };
         cx.emit(GridEvent::OpenFile {
-            path: local.to_path_buf(),
+            location: path,
             readonly,
         });
     }

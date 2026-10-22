@@ -234,7 +234,6 @@ impl<'de> Deserialize<'de> for Location {
 pub struct Meta {
     pub kind: EntryKind,
     pub size: u64,
-    #[allow(dead_code)] // shown by conflict dialogs later
     pub modified: Option<SystemTime>,
 }
 
@@ -264,6 +263,74 @@ pub trait Backend: Send + Sync {
     fn exists(&self, loc: &Location) -> bool {
         self.stat(loc).is_ok()
     }
+}
+
+/// Read a whole file through its backend.
+pub fn read_all(loc: &Location) -> io::Result<Vec<u8>> {
+    let mut reader = backend_for(loc)?.open_read(loc)?;
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// Write a whole file through its backend: to a sibling temporary name
+/// first, then renamed over the target, so a failure leaves the old file.
+pub fn write_all(loc: &Location, bytes: &[u8]) -> io::Result<()> {
+    let backend = backend_for(loc)?;
+    let name = loc
+        .file_name()
+        .ok_or_else(|| io::Error::other("no file name"))?;
+    let partial = loc
+        .parent()
+        .ok_or_else(|| io::Error::other("no parent directory"))?
+        .join(&format!(".{name}.vais-save"));
+    let result = (|| {
+        let mut writer = backend.open_write(&partial)?;
+        writer.write_all(bytes)?;
+        writer.flush()?;
+        drop(writer);
+        backend.rename(&partial, loc)
+    })();
+    if result.is_err() {
+        let _ = backend.remove(&partial);
+    }
+    result
+}
+
+/// A local copy of `loc` for tools that need a real file (the default
+/// application, thumbnails): the path itself when local, otherwise a
+/// download into the cache directory, refreshed when size or mtime differ.
+pub fn local_copy(loc: &Location) -> io::Result<PathBuf> {
+    let Location::Remote { conn, path } = loc else {
+        return Ok(loc.as_local().unwrap().to_path_buf());
+    };
+    let dir = directories::ProjectDirs::from("", "", "vais-commander")
+        .map(|d| d.cache_dir().join("remote").join(&conn.0))
+        .ok_or_else(|| io::Error::other("no cache directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let backend = backend_for(loc)?;
+    let meta = backend.stat(loc)?;
+    let name = loc.file_name().unwrap_or_else(|| "file".into());
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut h);
+        h.finish()
+    };
+    let target = dir.join(format!("{key:016x}-{name}"));
+    let fresh = std::fs::metadata(&target)
+        .is_ok_and(|m| m.len() == meta.size && m.modified().ok() == meta.modified.map(|t| t));
+    if !fresh {
+        let bytes = read_all(loc)?;
+        std::fs::write(&target, bytes)?;
+        if let Some(mtime) = meta.modified {
+            let _ = std::fs::File::options()
+                .write(true)
+                .open(&target)
+                .and_then(|f| f.set_modified(mtime));
+        }
+    }
+    Ok(target)
 }
 
 /// The backend that serves `loc`: the disk, or the open connection.

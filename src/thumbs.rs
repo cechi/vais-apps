@@ -14,6 +14,7 @@ use gpui_kit::*;
 
 use crate::fs::Entry;
 use crate::panel::FilePanel;
+use crate::vfs::{self, Location};
 
 /// Side of the generated thumbnails, in pixels.
 const SIZE: u32 = 256;
@@ -42,13 +43,13 @@ enum State {
 }
 
 struct Job {
-    source: PathBuf,
+    source: Location,
     target: PathBuf,
 }
 
 pub struct Thumbnailer {
     dir: Option<PathBuf>,
-    states: HashMap<PathBuf, State>,
+    states: HashMap<Location, State>,
     queue: VecDeque<Job>,
     in_flight: usize,
     /// Panels to re-render when a thumbnail finishes.
@@ -89,7 +90,7 @@ impl Thumbnailer {
         panel: WeakEntity<FilePanel>,
         cx: &mut Context<Self>,
     ) -> Option<Arc<Path>> {
-        let source = entry.local_path()?.to_path_buf();
+        let source = entry.location.clone();
         match self.states.get(&source) {
             Some(State::Ready(path)) => return Some(path.clone()),
             Some(State::Failed) => return None,
@@ -172,14 +173,13 @@ fn key_of(entry: &Entry) -> u64 {
 }
 
 /// Decode `source`, scale it to fit [`SIZE`] and save it as `target`.
-fn generate(source: &Path, target: &Path) -> anyhow::Result<PathBuf> {
-    let is_svg = source
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+fn generate(source: &Location, target: &Path) -> anyhow::Result<PathBuf> {
+    let is_svg = extension_of(&source.file_name().unwrap_or_default()).as_deref() == Some("svg");
+    let data = vfs::read_all(source)?;
     let image = if is_svg {
-        render_svg(source)?
+        render_svg(&data)?
     } else {
-        image::ImageReader::open(source)?
+        image::ImageReader::new(std::io::Cursor::new(data))
             .with_guessed_format()?
             .decode()?
             .thumbnail(SIZE, SIZE)
@@ -196,9 +196,8 @@ fn generate(source: &Path, target: &Path) -> anyhow::Result<PathBuf> {
 }
 
 /// Rasterise an SVG so that its longer side is [`SIZE`].
-fn render_svg(source: &Path) -> anyhow::Result<image::RgbaImage> {
-    let data = std::fs::read(source)?;
-    let tree = usvg::Tree::from_data(&data, &usvg::Options::default())?;
+fn render_svg(data: &[u8]) -> anyhow::Result<image::RgbaImage> {
+    let tree = usvg::Tree::from_data(data, &usvg::Options::default())?;
     let size = tree.size();
     let scale = SIZE as f32 / size.width().max(size.height());
     let width = (size.width() * scale).ceil().max(1.0) as u32;

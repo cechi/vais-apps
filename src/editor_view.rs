@@ -7,7 +7,7 @@
 //! toolbar switches between the two at any time. Files that are not valid
 //! UTF-8 open read-only so that saving cannot mangle them.
 
-use std::path::{Path, PathBuf};
+use crate::vfs::{self, Location};
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -29,12 +29,12 @@ pub enum EditorEvent {
     /// The user wants the tab closed.
     Close,
     /// The file was written; panels showing its directory should reload.
-    Saved(PathBuf),
+    Saved(Location),
 }
 
 /// A file read for the editor.
 pub struct Loaded {
-    pub path: PathBuf,
+    pub location: Location,
     pub text: String,
     /// The file uses CRLF line endings (restored on save).
     pub crlf: bool,
@@ -45,18 +45,19 @@ pub struct Loaded {
 
 /// Read `path` as text. Errors explain why the file cannot be edited
 /// (too big, binary, unreadable).
-pub fn load(path: &Path) -> Result<Loaded, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    if !meta.is_file() {
+pub fn load(location: &Location) -> Result<Loaded, String> {
+    let backend = vfs::backend_for(location).map_err(|e| e.to_string())?;
+    let meta = backend.stat(location).map_err(|e| e.to_string())?;
+    if meta.is_dir() {
         return Err("not a regular file".into());
     }
-    if meta.len() > MAX_SIZE {
+    if meta.size > MAX_SIZE {
         return Err(format!(
             "too large to edit ({}), opening with the default application",
-            human_size(meta.len())
+            human_size(meta.size)
         ));
     }
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let bytes = vfs::read_all(location).map_err(|e| e.to_string())?;
     if bytes.iter().take(8192).any(|&b| b == 0) {
         return Err("binary file, opening with the default application".into());
     }
@@ -71,16 +72,16 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         text
     };
     Ok(Loaded {
-        path: path.to_path_buf(),
+        location: location.clone(),
         text,
         crlf,
         lossy,
-        size: meta.len(),
+        size: meta.size,
     })
 }
 
 pub struct EditorView {
-    path: PathBuf,
+    location: Location,
     state: Entity<EditorState>,
     readonly: bool,
     dirty: bool,
@@ -102,7 +103,7 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let language = language_for(&loaded.path);
+        let language = language_for(&loaded.location.file_name().unwrap_or_default());
         let readonly = readonly || loaded.lossy;
         let state = cx.new(|cx| {
             let mut state = EditorState::new(window, cx)
@@ -124,7 +125,7 @@ impl EditorView {
             }
         });
         Self {
-            path: loaded.path,
+            location: loaded.location,
             state,
             readonly,
             dirty: false,
@@ -138,8 +139,8 @@ impl EditorView {
         }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn location(&self) -> &Location {
+        &self.location
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -148,10 +149,9 @@ impl EditorView {
 
     pub fn title(&self) -> String {
         let name = self
-            .path
+            .location
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.path.display().to_string());
+            .unwrap_or_else(|| self.location.display());
         if self.dirty {
             format!("{name} ●")
         } else {
@@ -193,26 +193,16 @@ impl EditorView {
         } else {
             text
         };
-        let partial = self.path.with_extension(format!(
-            "{}.vais-save",
-            self.path
-                .extension()
-                .map(|e| e.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        ));
-        let result = std::fs::write(&partial, text.as_bytes())
-            .and_then(|_| std::fs::rename(&partial, &self.path));
-        match result {
+        match vfs::write_all(&self.location, text.as_bytes()) {
             Ok(()) => {
                 self.dirty = false;
                 self.size = text.len() as u64;
                 self.error = None;
-                cx.emit(EditorEvent::Saved(self.path.clone()));
+                cx.emit(EditorEvent::Saved(self.location.clone()));
                 cx.notify();
                 Ok(())
             }
             Err(err) => {
-                let _ = std::fs::remove_file(&partial);
                 self.error = Some(format!("save failed: {err}"));
                 cx.notify();
                 Err(err.to_string())
@@ -222,7 +212,7 @@ impl EditorView {
 
     /// Re-read the file from disk, dropping unsaved changes.
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match load(&self.path) {
+        match load(&self.location) {
             Ok(loaded) => {
                 self.crlf = loaded.crlf;
                 self.lossy = loaded.lossy;
@@ -266,15 +256,11 @@ impl Render for EditorView {
             let state = self.state.read(cx);
             (state.cursor_position(), state.text().lines_len())
         };
-        let name = self
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let name = self.location.file_name().unwrap_or_default();
         let dir = self
-            .path
+            .location
             .parent()
-            .map(|p| p.display().to_string())
+            .map(|p| p.display())
             .unwrap_or_default();
         let mode_label = if self.readonly {
             "Read-only"
@@ -398,8 +384,8 @@ impl Render for EditorView {
 }
 
 /// The highlighter language for a file, by extension or well-known name.
-fn language_for(path: &Path) -> Option<&'static str> {
-    let name = path.file_name()?.to_string_lossy().to_lowercase();
+fn language_for(file_name: &str) -> Option<&'static str> {
+    let name = file_name.to_lowercase();
     let by_name = match name.as_str() {
         "makefile" | "gnumakefile" => Some("make"),
         "dockerfile" => Some("dockerfile"),
@@ -409,7 +395,11 @@ fn language_for(path: &Path) -> Option<&'static str> {
     if by_name.is_some() {
         return by_name;
     }
-    let ext = path.extension()?.to_string_lossy().to_lowercase();
+    let ext = name
+        .rsplit_once('.')
+        .filter(|(stem, _)| !stem.is_empty())?
+        .1
+        .to_string();
     Some(match ext.as_str() {
         "rs" => "rust",
         "py" | "pyi" => "python",
@@ -444,13 +434,13 @@ fn language_for(path: &Path) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::language_for;
-    use std::path::Path;
 
     #[test]
     fn languages_come_from_extensions_and_names() {
-        assert_eq!(language_for(Path::new("main.rs")), Some("rust"));
-        assert_eq!(language_for(Path::new("Makefile")), Some("make"));
-        assert_eq!(language_for(Path::new("notes")), None);
-        assert_eq!(language_for(Path::new("a.unknownext")), None);
+        assert_eq!(language_for("main.rs"), Some("rust"));
+        assert_eq!(language_for("Makefile"), Some("make"));
+        assert_eq!(language_for("notes"), None);
+        assert_eq!(language_for("a.unknownext"), None);
+        assert_eq!(language_for(".bashrc"), None);
     }
 }
