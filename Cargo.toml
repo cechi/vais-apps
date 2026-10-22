@@ -23,6 +23,11 @@ chrono = "0.4"
 trash = "5"
 open = "5"
 regex = "1"
+# Thumbnails: decode and scale images, rasterise SVG. All three already
+# come with gpui, so the build only gains the direct use.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "qoi"] }
+resvg = "0.46"
+usvg = "0.46"
 
 [target.'cfg(windows)'.dependencies]
 # File icons from the shell (see src/icons/windows.rs); both crates are
@@ -34,7 +39,6 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

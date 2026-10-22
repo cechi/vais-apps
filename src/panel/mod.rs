@@ -1610,31 +1610,44 @@ impl FilePanel {
             entry.name.clone()
         };
         let cell = match self.view {
-            ViewMode::Thumbnails => v_flex()
-                .id(("cell", ix))
-                .w(rems(THUMB_CELL_REMS))
-                .h(rems(THUMB_ROW_REMS))
-                .flex_none()
-                .p_1()
-                .gap_1()
-                .items_center()
-                .child(
-                    div()
-                        .size(rems(THUMB_IMAGE_REMS))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().size(rems(3.)).child(icon)),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .text_xs()
-                        .text_center()
-                        .truncate()
-                        .child(name),
-                ),
+            ViewMode::Thumbnails => {
+                // The preview when it exists (or once it is generated), else
+                // a large icon.
+                let weak = cx.entity().downgrade();
+                let preview: AnyElement = match crate::thumbs::request(cx, entry, weak) {
+                    Some(path) => img(path)
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .when(look.is_cut, |i| i.opacity(0.5))
+                        .into_any_element(),
+                    None => div().size(rems(3.)).child(icon).into_any_element(),
+                };
+                v_flex()
+                    .id(("cell", ix))
+                    .w(rems(THUMB_CELL_REMS))
+                    .h(rems(THUMB_ROW_REMS))
+                    .flex_none()
+                    .p_1()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .size(rems(THUMB_IMAGE_REMS))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(preview),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .text_xs()
+                            .text_center()
+                            .truncate()
+                            .child(name),
+                    )
+            }
             _ => h_flex()
                 .id(("cell", ix))
                 .w(rems(BRIEF_CELL_REMS))

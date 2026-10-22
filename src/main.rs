@@ -17,6 +17,7 @@ mod settings_view;
 mod sidebar;
 mod tabs;
 mod theme;
+mod thumbs;
 mod ui;
 
 use gpui_kit::*;
@@ -32,6 +33,7 @@ fn main() {
         init(cx);
         settings::init(&config, cx);
         clipboard::init(cx);
+        thumbs::init(cx);
         icons::init(cx);
         cx.bind_keys(keymap::bindings());
         // File lists are long; keep their scrollbars visible instead of fading out.
