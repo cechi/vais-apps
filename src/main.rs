@@ -1,6 +1,7 @@
 mod app;
 mod clipboard;
 mod config;
+mod editor_view;
 mod fs;
 mod grid_view;
 mod icons;

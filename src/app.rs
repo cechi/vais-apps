@@ -17,6 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::config::{CONFIG_VERSION, Config, TabConfig, ThemeChoice, WindowConfig};
+use crate::editor_view::{EditorEvent, EditorView};
 use crate::fs::format::human_size;
 use crate::grid_view::{GridEvent, GridView};
 use crate::keymap::*;
@@ -84,8 +85,8 @@ impl FKey {
         if shift {
             [
                 ("F2", "Rename", FKey::Rename, true),
-                ("F3", "View", FKey::View, false),
-                ("F4", "Edit", FKey::Edit, false),
+                ("F3", "View", FKey::View, true),
+                ("F4", "Edit", FKey::Edit, true),
                 ("F5", "Copy", FKey::Copy, true),
                 ("F6", "Rename", FKey::Rename, true),
                 ("F7", "MkDir", FKey::MkDir, true),
@@ -96,8 +97,8 @@ impl FKey {
         } else {
             [
                 ("F2", "Rename", FKey::Rename, true),
-                ("F3", "View", FKey::View, false),
-                ("F4", "Edit", FKey::Edit, false),
+                ("F3", "View", FKey::View, true),
+                ("F4", "Edit", FKey::Edit, true),
                 ("F5", "Copy", FKey::Copy, true),
                 ("F6", "Move", FKey::Move, true),
                 ("F7", "MkDir", FKey::MkDir, true),
@@ -393,6 +394,9 @@ impl Workspace {
                         GridEvent::BatchRename(paths) => {
                             this.open_rename(paths.clone(), window, cx)
                         }
+                        GridEvent::OpenFile { path, readonly } => {
+                            this.open_file(path.clone(), *readonly, window, cx)
+                        }
                     },
                 ));
             }
@@ -411,6 +415,33 @@ impl Workspace {
                     window,
                     |this, view, event, window, cx| {
                         this.on_settings_event(view, event, window, cx);
+                    },
+                ));
+            }
+            if let Some(view) = tab.editor_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, view, event, window, cx| {
+                        match event {
+                            EditorEvent::Close => {
+                                if let Some(ix) = this
+                                    .tabs
+                                    .iter()
+                                    .position(|tab| tab.editor_view() == Some(view))
+                                {
+                                    this.close_tab(ix, window, cx);
+                                }
+                            }
+                            EditorEvent::Saved(path) => {
+                                if let Some(dir) = path.parent() {
+                                    for grid in this.tabs.iter().filter_map(|t| t.grid_view()) {
+                                        grid.update(cx, |grid, cx| grid.refresh_dir(dir, cx));
+                                    }
+                                }
+                                cx.notify();
+                            }
+                        }
                     },
                 ));
             }
@@ -497,6 +528,51 @@ impl Workspace {
 
     fn on_open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings(window, cx);
+    }
+
+    /// Open `path` in an editor tab (read-only for F3). A file already open
+    /// gets its tab activated instead; F4 on it makes it editable.
+    fn open_file(
+        &mut self,
+        path: PathBuf,
+        readonly: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ix) = self
+            .tabs
+            .iter()
+            .position(|t| t.editor_view().is_some_and(|v| v.read(cx).path() == path))
+        {
+            if !readonly && let Some(view) = self.tabs[ix].editor_view() {
+                view.update(cx, |editor, cx| editor.set_readonly(false, cx));
+            }
+            self.activate_tab(ix, window, cx);
+            return;
+        }
+        match crate::editor_view::load(&path) {
+            Ok(loaded) => {
+                let view = cx.new(|cx| EditorView::new(loaded, readonly, window, cx));
+                let ix = self.active_tab + 1;
+                self.tabs.insert(ix, Tab::editor(view));
+                self.resubscribe(window, cx);
+                self.activate_tab(ix, window, cx);
+            }
+            Err(reason) => {
+                window.push_notification(
+                    Notification::info(format!(
+                        "{}: {reason}",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    )),
+                    cx,
+                );
+                if let Err(err) = open::that_detached(&path) {
+                    log::warn!("open {}: {err}", path.display());
+                }
+            }
+        }
     }
 
     /// Open the batch rename form for `paths` in a new tab next to the current one.
@@ -591,6 +667,20 @@ impl Workspace {
         if self.tabs.len() <= 1 || ix >= self.tabs.len() {
             return;
         }
+        // An editor with unsaved changes asks first.
+        if let Some(editor) = self.tabs[ix].editor_view().cloned()
+            && editor.read(cx).is_dirty()
+        {
+            self.confirm_close_editor(editor, window, cx);
+            return;
+        }
+        self.remove_tab(ix, window, cx);
+    }
+
+    fn remove_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.len() <= 1 || ix >= self.tabs.len() {
+            return;
+        }
         self.tabs.remove(ix);
         self.resubscribe(window, cx);
         let next = if ix < self.active_tab || self.active_tab >= self.tabs.len() {
@@ -599,6 +689,51 @@ impl Workspace {
             self.active_tab
         };
         self.activate_tab(next, window, cx);
+    }
+
+    /// Save / Discard / Cancel for an editor tab with unsaved changes.
+    fn confirm_close_editor(
+        &mut self,
+        editor: Entity<EditorView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = editor.read(cx).title();
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            let items = vec![
+                PaletteItem::new("Save and close"),
+                PaletteItem::new("Discard changes").danger(true),
+                PaletteItem::new("Cancel"),
+            ];
+            Palette::pick(items, cx)
+                .description(format!("{title} has unsaved changes."))
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, editor) = (view.clone(), editor.clone());
+                    let save = match choice.item {
+                        Some(0) => true,
+                        Some(1) => false,
+                        _ => return,
+                    };
+                    window.defer(cx, move |window, cx| {
+                        if save && editor.update(cx, |e, cx| e.save(cx)).is_err() {
+                            return;
+                        }
+                        view.update(cx, |this, cx| {
+                            if let Some(ix) = this
+                                .tabs
+                                .iter()
+                                .position(|t| t.editor_view() == Some(&editor))
+                            {
+                                this.remove_tab(ix, window, cx);
+                            }
+                        });
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Unsaved changes".to_string(), palette, window, cx);
     }
 
     // ----- sidebar -------------------------------------------------------
@@ -768,7 +903,9 @@ impl Workspace {
             FKey::Delete => grid.start_delete(false, window, cx),
             FKey::DeletePermanently => grid.start_delete(true, window, cx),
             FKey::Terminal => grid.active_panel().update(cx, |p, cx| p.open_terminal(cx)),
-            FKey::View | FKey::Edit | FKey::Quit => {}
+            FKey::View => grid.start_edit(true, window, cx),
+            FKey::Edit => grid.start_edit(false, window, cx),
+            FKey::Quit => {}
         });
     }
 

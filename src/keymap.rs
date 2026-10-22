@@ -13,6 +13,7 @@ pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 pub const PALETTE_CONTEXT: &str = "Palette";
 pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
+pub const EDITOR_CONTEXT: &str = "FileEditor";
 
 actions!(
     vais,
@@ -28,6 +29,11 @@ actions!(
         ToggleSidebar,
         OpenSettings,
         CloseSettings,
+        // Files in the editor tab
+        ViewFile,
+        EditFile,
+        SaveFile,
+        ToggleReadOnly,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -163,6 +169,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-b", ToggleSidebar, w),
         KeyBinding::new("secondary-,", OpenSettings, w),
         KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("secondary-s", SaveFile, Some(EDITOR_CONTEXT)),
+        KeyBinding::new("secondary-shift-e", ToggleReadOnly, Some(EDITOR_CONTEXT)),
         KeyBinding::new("secondary-=", ZoomIn, w),
         KeyBinding::new("secondary-+", ZoomIn, w),
         KeyBinding::new("secondary--", ZoomOut, w),
@@ -170,6 +178,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-q", Quit, w),
         KeyBinding::new("f10", Quit, w),
         // Grid: file operations (Commander F-keys)
+        KeyBinding::new("f3", ViewFile, g),
+        KeyBinding::new("f4", EditFile, g),
         KeyBinding::new("f5", CopyFiles, g),
         KeyBinding::new("f6", MoveFiles, g),
         KeyBinding::new("secondary-c", CopyToClipboard, g),

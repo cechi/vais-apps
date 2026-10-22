@@ -99,6 +99,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
+| `F3` / `F4` | View / edit the file under the cursor in an editor tab (see Editor) |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
 | `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
 | `F2` / `Shift+F6` | Rename the entry under the cursor (the name without its extension is preselected). With several entries marked, a batch rename form opens in its own tab: masks (`[N]` name, `[E]` extension, `[C]` counter with start / step / digits), find & replace (plain or regex with `$1` groups, optional ignore case), case change, and a live preview that flags empty, duplicate or existing names. `Ctrl+Enter` renames, `Esc` closes |
@@ -159,6 +160,17 @@ Each panel has its own view, saved with the tab:
   tiff, ico, qoi, svg) and large icons for everything else. Previews are generated in the
   background and cached under the user cache directory (`~/.cache/vais-commander/thumbs`).
 
+## Editor
+
+`F3` opens the file under the cursor read-only, `F4` editable, both in a tab next to the
+current one using gpui-kit's code editor: line numbers, search (`Ctrl+F`), replace
+(`Ctrl+H`), undo and syntax highlighting by extension. Viewing and editing are the same
+tab; the Read-only / Editable button (or `Ctrl+Shift+E`) switches between them, so a
+look at a file never changes it by accident. `Ctrl+S` saves (CRLF line endings are kept),
+Reload re-reads the file, and closing a tab with unsaved changes asks whether to save.
+Files over 8 MiB, binary files and files that are not valid UTF-8 are not edited: the
+first two open with the default application, the last stays read-only.
+
 ## Sidebar
 
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
@@ -195,6 +207,7 @@ src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
+src/editor_view.rs  the file editor tab (view / edit)
 src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name

@@ -12,7 +12,7 @@ name = "vais-commander"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "=0.8.0"
+gpui-kit = { version = "=0.8.0", features = ["syntect"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 directories = "5"

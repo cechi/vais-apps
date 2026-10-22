@@ -36,6 +36,8 @@ pub enum GridEvent {
     ClipboardChanged,
     /// F2 with several entries marked: open the batch rename form for them.
     BatchRename(Vec<PathBuf>),
+    /// F3 / F4: open the file under the cursor in an editor tab.
+    OpenFile { path: PathBuf, readonly: bool },
 }
 
 pub struct GridView {
@@ -531,6 +533,32 @@ impl GridView {
         }
     }
 
+    /// F3 / F4: view or edit the file under the cursor. Directories open as
+    /// usual; files the editor cannot show go to the default application.
+    pub fn start_edit(&mut self, readonly: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.active_panel().read(cx).current_path() else {
+            self.notify(
+                Notification::warning("Nothing under the cursor"),
+                window,
+                cx,
+            );
+            return;
+        };
+        if path.is_dir() {
+            self.active_panel()
+                .update(cx, |panel, cx| panel.navigate_to(path, cx));
+            return;
+        }
+        cx.emit(GridEvent::OpenFile { path, readonly });
+    }
+
+    fn on_view_file(&mut self, _: &ViewFile, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_edit(true, window, cx);
+    }
+    fn on_edit_file(&mut self, _: &EditFile, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_edit(false, window, cx);
+    }
+
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let marked = self.active_panel().read(cx).selected_paths();
         if marked.len() > 1 {
@@ -777,6 +805,8 @@ impl Render for GridView {
             .on_action(cx.listener(Self::on_copy))
             .on_action(cx.listener(Self::on_move))
             .on_action(cx.listener(Self::on_rename))
+            .on_action(cx.listener(Self::on_view_file))
+            .on_action(cx.listener(Self::on_edit_file))
             .on_action(cx.listener(Self::on_mkdir))
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_delete_permanently))

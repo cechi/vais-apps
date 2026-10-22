@@ -3,6 +3,7 @@
 use gpui_kit::*;
 
 use crate::config::TabConfig;
+use crate::editor_view::EditorView;
 use crate::grid_view::GridView;
 use crate::rename::view::RenameView;
 use crate::settings_view::SettingsView;
@@ -13,6 +14,8 @@ pub enum TabContent {
     Rename(Entity<RenameView>),
     /// The application settings; transient as well.
     Settings(Entity<SettingsView>),
+    /// A text file in the editor.
+    Editor(Entity<EditorView>),
 }
 
 pub struct Tab {
@@ -35,6 +38,19 @@ impl Tab {
     pub fn settings(view: Entity<SettingsView>) -> Self {
         Self {
             content: TabContent::Settings(view),
+        }
+    }
+
+    pub fn editor(view: Entity<EditorView>) -> Self {
+        Self {
+            content: TabContent::Editor(view),
+        }
+    }
+
+    pub fn editor_view(&self) -> Option<&Entity<EditorView>> {
+        match &self.content {
+            TabContent::Editor(view) => Some(view),
+            _ => None,
         }
     }
 
@@ -66,6 +82,7 @@ impl Tab {
             TabContent::Grid(view) => view.read(cx).active_panel().focus_handle(cx),
             TabContent::Rename(view) => view.read(cx).focus_handle(),
             TabContent::Settings(view) => view.read(cx).focus_handle(),
+            TabContent::Editor(view) => view.read(cx).focus_handle(),
         }
     }
 
@@ -74,6 +91,7 @@ impl Tab {
             TabContent::Grid(view) => view.read(cx).title(cx),
             TabContent::Rename(view) => view.read(cx).title(),
             TabContent::Settings(view) => view.read(cx).title(),
+            TabContent::Editor(view) => view.read(cx).title(),
         }
     }
 
@@ -82,6 +100,7 @@ impl Tab {
             TabContent::Grid(view) => view.update(cx, |grid, cx| grid.focus_active(window, cx)),
             TabContent::Rename(view) => view.update(cx, |form, cx| form.focus(window, cx)),
             TabContent::Settings(view) => view.read(cx).focus_handle().focus(window, cx),
+            TabContent::Editor(view) => view.update(cx, |editor, cx| editor.focus(window, cx)),
         }
     }
 
@@ -98,6 +117,7 @@ impl Tab {
             TabContent::Grid(view) => view.clone().into_any_element(),
             TabContent::Rename(view) => view.clone().into_any_element(),
             TabContent::Settings(view) => view.clone().into_any_element(),
+            TabContent::Editor(view) => view.clone().into_any_element(),
         }
     }
 }
