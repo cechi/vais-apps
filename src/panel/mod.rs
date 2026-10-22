@@ -1297,7 +1297,7 @@ impl FilePanel {
                 crate::icons::file_icon(cx, &entry.name, entry.is_dir())
             };
         let icon: AnyElement = match system_icon {
-            Some(path) => img(path)
+            Some(source) => img(source)
                 .size_full()
                 .when(is_cut, |i| i.opacity(0.5))
                 .into_any_element(),

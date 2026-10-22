@@ -6948,12 +6948,14 @@ dependencies = [
  "directories",
  "env_logger",
  "gpui-kit",
+ "image",
  "log",
  "open",
  "regex",
  "serde",
  "toml 0.8.23",
  "trash",
+ "windows 0.58.0",
  "winresource",
 ]
 

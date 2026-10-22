@@ -1,10 +1,20 @@
-//! File icons from the desktop's icon theme (freedesktop.org on Linux).
+//! File icons from the desktop.
 //!
-//! A file name is mapped to a MIME type through the shared-mime-info glob
-//! database, the MIME type to an icon name (`text-plain`, then the generic
-//! `text-x-generic`), and the icon name to a file in the current icon theme
-//! or one it inherits from. Lookups are cached per extension. Everything is
-//! best effort: when something is missing the caller draws a generic icon.
+//! Linux (freedesktop.org): a file name is mapped to a MIME type through the
+//! shared-mime-info glob database, the MIME type to an icon name
+//! (`text-plain`, then the generic `text-x-generic`), and the icon name to a
+//! file in the current icon theme or one it inherits from.
+//!
+//! Windows: the shell's icon for the extension, read through
+//! `SHGetFileInfo` and handed to GPUI as a PNG (see `shell.rs`).
+//!
+//! Lookups are cached per extension. Everything is best effort: when
+//! something is missing the caller draws a generic icon.
+
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
+#[cfg(target_os = "windows")]
+mod shell;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +42,7 @@ pub struct IconTheme {
     mime_icons: HashMap<String, String>,
     /// MIME type → generic icon name.
     generic_icons: HashMap<String, String>,
-    cache: RefCell<HashMap<String, Option<Arc<Path>>>>,
+    cache: RefCell<HashMap<String, Option<ImageSource>>>,
 }
 
 impl Global for IconTheme {}
@@ -97,8 +107,8 @@ pub fn init(cx: &mut App) {
     cx.set_global(IconTheme::load());
 }
 
-/// The icon file for `name` (a file or directory name), if the theme has one.
-pub fn file_icon(cx: &App, name: &str, is_dir: bool) -> Option<Arc<Path>> {
+/// The desktop's icon for `name` (a file or directory name), if it has one.
+pub fn file_icon(cx: &App, name: &str, is_dir: bool) -> Option<ImageSource> {
     cx.global::<IconTheme>().file_icon(name, is_dir)
 }
 
@@ -124,10 +134,7 @@ impl IconTheme {
         this
     }
 
-    pub fn file_icon(&self, name: &str, is_dir: bool) -> Option<Arc<Path>> {
-        if self.themes.is_empty() {
-            return None;
-        }
+    pub fn file_icon(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
         let key = if is_dir {
             "/dir".to_string()
         } else {
@@ -136,15 +143,38 @@ impl IconTheme {
         if let Some(hit) = self.cache.borrow().get(&key) {
             return hit.clone();
         }
-        let found = if is_dir {
+        let found = self.lookup(name, is_dir);
+        self.cache.borrow_mut().insert(key, found.clone());
+        found
+    }
+
+    #[cfg(target_os = "linux")]
+    fn lookup(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
+        if self.themes.is_empty() {
+            return None;
+        }
+        let path = if is_dir {
             self.find_any(&["folder", "inode-directory"])
         } else {
             let names = self.icon_names(name);
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             self.find_any(&refs)
-        };
-        self.cache.borrow_mut().insert(key, found.clone());
-        found
+        }?;
+        Some(ImageSource::from(path))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn lookup(&self, name: &str, is_dir: bool) -> Option<ImageSource> {
+        let png = shell::icon_png(name, is_dir)?;
+        Some(ImageSource::Image(Arc::new(Image::from_bytes(
+            ImageFormat::Png,
+            png,
+        ))))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    fn lookup(&self, _name: &str, _is_dir: bool) -> Option<ImageSource> {
+        None
     }
 
     /// Candidate icon names for a file, most specific first.

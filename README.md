@@ -106,7 +106,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
 | `Ctrl+J` | Show / hide the operations panel |
 | `Ctrl+B` | Show / hide the places sidebar (also the toggle at the left of the status bar) |
-| `Ctrl+,` | Settings tab: theme, UI scale, file icons (desktop icon theme on Linux, or generic), sidebar, drag & drop behaviour, config and themes folders (also in the ☰ menu at the right of the tab bar, which lists the other app-level commands too) |
+| `Ctrl+,` | Settings tab: theme, UI scale, file icons (desktop icon theme on Linux, shell icons on Windows, or generic), sidebar, drag & drop behaviour, config and themes folders (also in the ☰ menu at the right of the tab bar, which lists the other app-level commands too) |
 | `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory); type to filter the list |
 | `Ctrl+Shift+D` | Toggle light / dark |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar) |
@@ -180,7 +180,7 @@ src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
-src/icons.rs       file icons from the desktop icon theme (MIME globs → icon name → theme lookup)
+src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)
