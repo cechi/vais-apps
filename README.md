@@ -256,7 +256,8 @@ also carry syntax colours for the editor). Any other [gpui-kit theme file](https
 placed in `~/.config/vais-commander/themes/` is loaded and watched, so edits apply while
 the app runs. `Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"`
 in the config (`light`, `dark` and `system` select the kit defaults). Fonts are personal
-rather than part of a theme: `font_family = "MesloLGS Nerd Font"` in the config applies
+rather than part of a theme: the Font row in Settings (any installed family, or "Theme
+default") is stored as `font_family = "MesloLGS Nerd Font"` in the config and applies
 that family to the UI and the editor whatever the theme.
 
 ## Layout of the code

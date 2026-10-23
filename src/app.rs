@@ -392,6 +392,57 @@ impl Workspace {
         palette::open("Theme".to_string(), palette, window, cx);
     }
 
+    /// A palette of the installed font families, "Theme default" first.
+    fn choose_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut fonts = cx.text_system().all_font_names();
+        fonts.sort_by_key(|f| f.to_lowercase());
+        fonts.dedup();
+        let current = self.font_family.clone();
+        let mut items = vec![
+            PaletteItem::new("Theme default")
+                .detail("the font the theme (or the toolkit) picks")
+                .icon(IconName::Palette)
+                .checked(current.is_none()),
+        ];
+        items.extend(fonts.iter().map(|name| {
+            PaletteItem::new(name.clone()).checked(current.as_deref() == Some(name.as_str()))
+        }));
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::pick_filtered(items, "Filter fonts", window, cx)
+                .footer("Installed font families; the choice applies to the UI and the editor")
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let Some(ix) = choice.item else {
+                        return;
+                    };
+                    let family = (ix > 0).then(|| fonts[ix - 1].clone());
+                    let view = view.clone();
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| this.set_font(family, window, cx));
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Font".to_string(), palette, window, cx);
+    }
+
+    /// Apply a font family over the theme; `None` goes back to the theme's.
+    fn set_font(&mut self, family: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.font_family == family {
+            return;
+        }
+        self.font_family = family;
+        if self.font_family.is_none() {
+            // The theme brings its own fonts back.
+            theme::apply(&self.theme, Some(window), cx);
+        }
+        self.apply_scale(cx);
+        self.sync_settings(cx);
+        self.schedule_save(cx);
+        cx.notify();
+    }
+
     // ----- UI scale ------------------------------------------------------
 
     /// Scale the whole UI: gpui-kit's `Root` sets the window rem size from the
@@ -533,6 +584,7 @@ impl Workspace {
     fn settings_values(&self, cx: &App) -> SettingsValues {
         SettingsValues {
             theme: self.theme.clone(),
+            font_family: self.font_family.clone(),
             scale: self.scale,
             sidebar_open: self.sidebar_open,
             command_line: self.command_line_open,
@@ -707,6 +759,7 @@ impl Workspace {
     ) {
         match event {
             SettingsEvent::ChooseTheme => self.choose_theme(window, cx),
+            SettingsEvent::ChooseFont => self.choose_font(window, cx),
             SettingsEvent::Scale(scale) => {
                 let scale = clamp_scale(*scale);
                 self.scale_slider

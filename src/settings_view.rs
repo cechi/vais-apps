@@ -22,6 +22,8 @@ use crate::ui::{h_flex, v_flex};
 pub enum SettingsEvent {
     /// Open the theme chooser.
     ChooseTheme,
+    /// Open the font chooser.
+    ChooseFont,
     Scale(f32),
     Sidebar(bool),
     CommandLine(bool),
@@ -34,6 +36,8 @@ pub enum SettingsEvent {
 #[derive(Clone, PartialEq)]
 pub struct SettingsValues {
     pub theme: ThemeChoice,
+    /// Font family over the theme's; `None` keeps the theme's own.
+    pub font_family: Option<String>,
     pub scale: f32,
     pub sidebar_open: bool,
     pub command_line: bool,
@@ -270,6 +274,28 @@ impl Render for SettingsView {
                                     .label("Choose…")
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(SettingsEvent::ChooseTheme)
+                                    })),
+                            )
+                            .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        "Font",
+                        "UI and monospace font family, over the theme's (config: font_family)",
+                        muted,
+                        h_flex()
+                            .gap_2()
+                            .child(div().text_sm().child(
+                                self.values
+                                    .font_family
+                                    .clone()
+                                    .unwrap_or_else(|| "Theme default".to_string()),
+                            ))
+                            .child(
+                                Button::new("settings-font")
+                                    .small()
+                                    .label("Choose…")
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SettingsEvent::ChooseFont)
                                     })),
                             )
                             .into_any_element(),
