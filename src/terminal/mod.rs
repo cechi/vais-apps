@@ -99,6 +99,9 @@ impl TerminalView {
             Ok(session) => {
                 self.session = Some(session);
                 self.state = SessionState::Running;
+                self.title.clear();
+                // The tab title shows the state: let the panel redraw.
+                cx.emit(TerminalEvent::TitleChanged);
             }
             Err(err) => {
                 self.session = None;
@@ -384,6 +387,11 @@ impl TerminalView {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !self.is_running() {
+            // Enter on the "exited" overlay starts the program again.
+            if event.keystroke.key == "enter" {
+                self.restart(cx);
+                cx.stop_propagation();
+            }
             return;
         }
         let ks = &event.keystroke;
