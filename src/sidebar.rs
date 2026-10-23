@@ -4,6 +4,7 @@
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -15,6 +16,12 @@ use crate::vfs::Location;
 pub enum SidebarEvent {
     /// Navigate the active panel to this directory.
     Open(Location),
+    /// Open a new tab from the saved layout with this index.
+    OpenLayout(usize),
+    /// Drop a bookmarked directory.
+    RemoveFavorite(Location),
+    /// Drop a saved layout.
+    RemoveLayout(usize),
     /// Open the connection manager.
     ManageConnections,
 }
@@ -26,6 +33,10 @@ pub struct Place {
     pub icon: IconName,
     /// Muted text after the name (the parent of a recent directory).
     pub detail: Option<String>,
+    /// A saved layout (index into the workspace's list) instead of a directory.
+    pub layout: Option<usize>,
+    /// A favorite the context menu can remove.
+    pub removable: bool,
 }
 
 /// How many recently visited directories the sidebar lists.
@@ -35,6 +46,8 @@ pub struct Sidebar {
     places: Vec<Place>,
     /// Bookmarked directories (Ctrl+D), listed after the user folders.
     favorites: Vec<Place>,
+    /// Saved layouts, after the bookmarked directories.
+    layouts: Vec<Place>,
     volumes: Vec<Place>,
     recent: Vec<Place>,
     connections: Vec<Place>,
@@ -49,6 +62,7 @@ impl Sidebar {
         let mut this = Self {
             places: Vec::new(),
             favorites: Vec::new(),
+            layouts: Vec::new(),
             volumes: Vec::new(),
             recent: Vec::new(),
             connections: Vec::new(),
@@ -67,6 +81,8 @@ impl Sidebar {
                 path: Location::Local(path),
                 icon,
                 detail: None,
+                layout: None,
+                removable: false,
             })
             .collect();
         self.volumes = platform::volumes()
@@ -76,6 +92,8 @@ impl Sidebar {
                 path: Location::Local(path),
                 icon: IconName::HardDrive,
                 detail: None,
+                layout: None,
+                removable: false,
             })
             .collect();
     }
@@ -95,7 +113,29 @@ impl Sidebar {
                     path: path.clone(),
                     icon: IconName::Star,
                     detail: parent.filter(|p| !p.is_empty()),
+                    layout: None,
+                    removable: true,
                 }
+            })
+            .collect();
+        cx.notify();
+    }
+
+    /// The saved layouts (whole tabs), in the order they were added.
+    pub fn set_layouts(&mut self, layouts: &[crate::config::FavoriteLayout], cx: &mut Context<Self>) {
+        self.layouts = layouts
+            .iter()
+            .enumerate()
+            .map(|(ix, saved)| Place {
+                name: saved.name.clone(),
+                path: Location::Local(std::path::PathBuf::new()),
+                icon: IconName::LayoutDashboard,
+                detail: Some(format!(
+                    "{}x{} layout",
+                    saved.tab.layout.rows, saved.tab.layout.cols
+                )),
+                layout: Some(ix),
+                removable: true,
             })
             .collect();
         cx.notify();
@@ -116,6 +156,8 @@ impl Sidebar {
                     path: path.clone(),
                     icon: IconName::Folder,
                     detail: parent.filter(|p| !p.is_empty()),
+                    layout: None,
+                    removable: false,
                 }
             })
             .collect();
@@ -148,6 +190,8 @@ impl Sidebar {
                     Status::Connected => "connected".to_string(),
                     Status::Failed(err) => format!("failed: {err}"),
                 }),
+                layout: None,
+                removable: false,
             })
             .collect();
         cx.notify();
@@ -181,9 +225,11 @@ impl Sidebar {
             )
             .children(places.iter().enumerate().map(|(i, place)| {
                 let ix = offset + i;
-                let selected = self.current.as_ref() == Some(&place.path);
+                let selected =
+                    place.layout.is_none() && self.current.as_ref() == Some(&place.path);
                 let path = place.path.clone();
-                h_flex()
+                let layout = place.layout;
+                let row = h_flex()
                     .id(("place", ix))
                     .w_full()
                     .h(rems(1.75))
@@ -194,7 +240,10 @@ impl Sidebar {
                     .when(selected, |d| d.bg(c.accent).text_color(c.accent_foreground))
                     .hover(|s| s.bg(c.hover))
                     .on_click(cx.listener(move |_this, _, _window, cx| {
-                        cx.emit(SidebarEvent::Open(path.clone()));
+                        cx.emit(match layout {
+                            Some(ix) => SidebarEvent::OpenLayout(ix),
+                            None => SidebarEvent::Open(path.clone()),
+                        });
                     }))
                     .child(
                         Icon::new(place.icon.clone())
@@ -227,7 +276,27 @@ impl Sidebar {
                                 })
                                 .child(detail),
                         )
-                    })
+                    });
+                if !place.removable {
+                    return row.into_any_element();
+                }
+                // Favorites: a context menu to drop them again.
+                let sidebar = cx.entity();
+                let path = place.path.clone();
+                row.context_menu(move |menu, _, _| {
+                    let (sidebar, path) = (sidebar.clone(), path.clone());
+                    menu.item(
+                        PopupMenuItem::new("Remove from favorites").on_click(move |_, _, cx| {
+                            sidebar.update(cx, |_, cx| {
+                                cx.emit(match layout {
+                                    Some(ix) => SidebarEvent::RemoveLayout(ix),
+                                    None => SidebarEvent::RemoveFavorite(path.clone()),
+                                });
+                            });
+                        }),
+                    )
+                })
+                .into_any_element()
             }))
     }
 }
@@ -266,6 +335,7 @@ impl Render for Sidebar {
             .places
             .iter()
             .chain(self.favorites.iter())
+            .chain(self.layouts.iter())
             .cloned()
             .collect();
         let volumes = self.volumes.clone();

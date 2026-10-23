@@ -7,7 +7,7 @@ use crate::theme;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -17,7 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::command_line::{CommandLine, CommandLineEvent};
-use crate::config::{CONFIG_VERSION, Config, TabConfig, ThemeChoice, WindowConfig};
+use crate::config::{CONFIG_VERSION, Config, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig};
 use crate::connections::{ConnectionEvent, ConnectionManager, Status};
 use crate::connections_view::{ConnectionsEvent, ConnectionsView};
 use crate::editor_view::{EditorEvent, EditorView};
@@ -136,6 +136,8 @@ pub struct Workspace {
     last_visited: Option<Location>,
     /// Bookmarked directories (Ctrl+D).
     favorites: Vec<Location>,
+    /// Whole tabs saved from a tab's context menu.
+    favorite_layouts: Vec<FavoriteLayout>,
     /// Personal font family from the config, applied over every theme.
     font_family: Option<String>,
     /// Divider between the sidebar and the main column.
@@ -216,12 +218,18 @@ impl Workspace {
         sidebar.update(cx, |s, cx| {
             s.set_recent(&config.recent, cx);
             s.set_favorites(&config.favorites, cx);
+            s.set_layouts(&config.favorite_layouts, cx);
         });
         subscriptions.push(cx.subscribe_in(
             &sidebar,
             window,
             |this, _sidebar, event, window, cx| match event {
                 SidebarEvent::Open(path) => this.open_place(path.clone(), cx),
+                SidebarEvent::OpenLayout(ix) => this.open_layout(*ix, window, cx),
+                SidebarEvent::RemoveFavorite(path) => {
+                    this.toggle_favorite(path.clone(), window, cx)
+                }
+                SidebarEvent::RemoveLayout(ix) => this.remove_layout(*ix, window, cx),
                 SidebarEvent::ManageConnections => this.open_connections(window, cx),
             },
         ));
@@ -269,6 +277,7 @@ impl Workspace {
             recent: config.recent.clone(),
             last_visited: None,
             favorites: config.favorites.clone(),
+            favorite_layouts: config.favorite_layouts.clone(),
             font_family: config.font_family.clone(),
             side_split: cx.new(|_| ResizableState::default()),
             ops,
@@ -447,6 +456,9 @@ impl Workspace {
                             cx.notify();
                         }
                         GridEvent::ClipboardChanged => cx.notify(),
+                        GridEvent::ToggleFavorite(path) => {
+                            this.toggle_favorite(path.clone(), window, cx)
+                        }
                         GridEvent::BatchRename(paths) => {
                             this.open_rename(paths.clone(), window, cx)
                         }
@@ -742,6 +754,11 @@ impl Workspace {
             return;
         };
         let path = grid.read(cx).active_panel().read(cx).path().clone();
+        self.toggle_favorite(path, window, cx);
+    }
+
+    /// Add `path` to the favorites, or remove it when it is there already.
+    fn toggle_favorite(&mut self, path: Location, window: &mut Window, cx: &mut Context<Self>) {
         if path.is_roots() {
             return;
         }
@@ -752,9 +769,104 @@ impl Workspace {
             self.favorites.push(path.clone());
             format!("Added {} to favorites", path.display_name())
         };
+        crate::settings::set_favorites(cx, self.favorites.clone());
         self.sidebar
             .update(cx, |s, cx| s.set_favorites(&self.favorites, cx));
+        // The stars next to the paths follow the list.
+        for grid in self.tabs.iter().filter_map(|t| t.grid_view()) {
+            grid.update(cx, |grid, cx| grid.redraw_panels(cx));
+        }
         self.notify(Notification::info(note), window, cx);
+        self.schedule_save(cx);
+    }
+
+    /// The tab's context menu: save the whole tab (layout + panels) under a
+    /// name asked for in a palette.
+    fn save_layout_favorite(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(ix) else {
+            return;
+        };
+        let Some(config) = tab.config(cx) else {
+            return;
+        };
+        let default = tab.title(cx);
+        // The config keeps every slot; only rows x cols of them are shown.
+        let shown = usize::from(config.layout.rows) * usize::from(config.layout.cols);
+        let description = format!(
+            "{}x{} layout, {} panel{}",
+            config.layout.rows,
+            config.layout.cols,
+            shown,
+            if shown == 1 { "" } else { "s" }
+        );
+        let rows = vec![
+            PaletteItem::new("Save").value("").icon(IconName::Check),
+            PaletteItem::new("Cancel").value("").icon(IconName::Close),
+        ];
+        const CANCEL_ROW: usize = 1;
+        let view = cx.entity();
+        let len = default.len();
+        let palette = cx.new(|cx| {
+            Palette::new(rows, &default, "Name", window, cx)
+                .input_icon(Some(IconName::LayoutDashboard))
+                .description(description)
+                .select_range(0..len)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    if choice.item == Some(CANCEL_ROW) {
+                        return;
+                    }
+                    let name = choice.value.trim().to_string();
+                    if name.is_empty() {
+                        return;
+                    }
+                    let (view, config) = (view.clone(), config.clone());
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.favorite_layouts.push(FavoriteLayout { name: name.clone(), tab: config });
+                            this.sync_layouts(cx);
+                            this.notify(
+                                Notification::info(format!("Saved layout {name}")),
+                                window,
+                                cx,
+                            );
+                            this.schedule_save(cx);
+                        });
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Add layout to favorites".into(), palette, window, cx);
+    }
+
+    fn sync_layouts(&mut self, cx: &mut Context<Self>) {
+        self.sidebar
+            .update(cx, |s, cx| s.set_layouts(&self.favorite_layouts, cx));
+    }
+
+    /// A saved layout from the sidebar: a new tab with it, activated.
+    fn open_layout(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(saved) = self.favorite_layouts.get(ix) else {
+            return;
+        };
+        let config = saved.tab.clone();
+        self.push_grid_tab(&config, window, cx);
+        let last = self.tabs.len() - 1;
+        self.activate_tab(last, window, cx);
+        self.schedule_save(cx);
+    }
+
+    fn remove_layout(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if ix >= self.favorite_layouts.len() {
+            return;
+        }
+        let removed = self.favorite_layouts.remove(ix);
+        self.sync_layouts(cx);
+        self.notify(
+            Notification::info(format!("Removed layout {}", removed.name)),
+            window,
+            cx,
+        );
         self.schedule_save(cx);
     }
 
@@ -1091,6 +1203,7 @@ impl Workspace {
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             recent: self.recent.clone(),
             favorites: self.favorites.clone(),
+            favorite_layouts: self.favorite_layouts.clone(),
             font_family: self.font_family.clone(),
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
@@ -1484,6 +1597,35 @@ impl Workspace {
                 .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
                     this.move_tab(drag.index, ix, window, cx);
                 }))
+                // Right click: save the tab as a layout favorite, close it.
+                .context_menu({
+                    let workspace = cx.entity();
+                    let is_grid = tab.grid_view().is_some();
+                    move |menu, _, _| {
+                        let menu = if is_grid {
+                            let workspace = workspace.clone();
+                            menu.item(PopupMenuItem::new("Add layout to favorites…").on_click(
+                                move |_, window, cx| {
+                                    workspace.update(cx, |this, cx| {
+                                        this.save_layout_favorite(ix, window, cx)
+                                    });
+                                },
+                            ))
+                        } else {
+                            menu
+                        };
+                        if closable {
+                            let workspace = workspace.clone();
+                            menu.separator().item(PopupMenuItem::new("Close tab").on_click(
+                                move |_, window, cx| {
+                                    workspace.update(cx, |this, cx| this.close_tab(ix, window, cx));
+                                },
+                            ))
+                        } else {
+                            menu
+                        }
+                    }
+                })
                 // Fonts reserve more room above capitals (accents) than below
                 // the baseline, so a centred line box leaves the title looking
                 // high. Nudge it down a little; the offset scales with the font.

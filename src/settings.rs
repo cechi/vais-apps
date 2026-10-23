@@ -31,6 +31,8 @@ pub enum FileIcons {
 pub struct Settings {
     pub drop_action: DropAction,
     pub file_icons: FileIcons,
+    /// Bookmarked directories, so a panel can show a filled star for its own.
+    pub favorites: Vec<crate::vfs::Location>,
 }
 
 impl Global for Settings {}
@@ -39,6 +41,7 @@ pub fn init(config: &Config, cx: &mut App) {
     cx.set_global(Settings {
         drop_action: config.drop_action,
         file_icons: config.file_icons,
+        favorites: config.favorites.clone(),
     });
 }
 
@@ -52,4 +55,8 @@ pub fn set_drop_action(cx: &mut App, action: DropAction) {
 
 pub fn set_file_icons(cx: &mut App, icons: FileIcons) {
     cx.global_mut::<Settings>().file_icons = icons;
+}
+
+pub fn set_favorites(cx: &mut App, favorites: Vec<crate::vfs::Location>) {
+    cx.global_mut::<Settings>().favorites = favorites;
 }

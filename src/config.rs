@@ -74,6 +74,8 @@ pub struct Config {
     pub recent: Vec<Location>,
     /// Directories bookmarked with Ctrl+D (the sidebar's Favorites group).
     pub favorites: Vec<Location>,
+    /// Whole tabs (layout + panels) saved from a tab's context menu.
+    pub favorite_layouts: Vec<FavoriteLayout>,
     /// Saved remote connections.
     pub connections: Vec<ConnectionConfig>,
     /// Version 1 layout (single grid); read for migration, never written.
@@ -101,6 +103,7 @@ impl Default for Config {
             tabs: Vec::new(),
             recent: Vec::new(),
             favorites: Vec::new(),
+            favorite_layouts: Vec::new(),
             connections: Vec::new(),
             layout: None,
             panels: Vec::new(),
@@ -113,6 +116,14 @@ impl Default for Config {
 pub enum TabKind {
     #[default]
     Grid,
+}
+
+/// A tab saved under a name: opening it adds a tab with that layout and panels.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FavoriteLayout {
+    pub name: String,
+    pub tab: TabConfig,
 }
 
 /// One workspace tab. Only `Grid` exists so far; other kinds will add their own fields.

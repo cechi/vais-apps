@@ -40,6 +40,8 @@ pub enum GridEvent {
     BatchRename(Vec<Location>),
     /// F3 / F4: open the file under the cursor in an editor tab.
     OpenFile { location: Location, readonly: bool },
+    /// The star next to a panel's path.
+    ToggleFavorite(Location),
 }
 
 pub struct GridView {
@@ -85,6 +87,9 @@ impl GridView {
                     }
                     PanelEvent::Dropped { paths, dest } => {
                         this.handle_drop(paths.clone(), dest.clone(), window, cx);
+                    }
+                    PanelEvent::ToggleFavorite(path) => {
+                        cx.emit(GridEvent::ToggleFavorite(path.clone()));
                     }
                 },
             ));

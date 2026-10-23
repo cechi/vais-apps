@@ -109,6 +109,8 @@ pub enum PanelEvent {
         paths: Vec<Location>,
         dest: Location,
     },
+    /// The star next to the path: bookmark this directory, or drop the bookmark.
+    ToggleFavorite(Location),
 }
 
 pub struct FilePanel {
@@ -2351,6 +2353,21 @@ impl Render for FilePanel {
                                     ),
                             )
                             .child(header)
+                            .when(!self.state.path.is_roots(), |d| {
+                                let path = self.state.path.clone();
+                                let is_favorite =
+                                    crate::settings::get(cx).favorites.contains(&path);
+                                d.child(
+                                    Button::new(("favorite", self.index))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Star)
+                                        .selected(is_favorite)
+                                        .on_click(cx.listener(move |_, _, _, cx| {
+                                            cx.emit(PanelEvent::ToggleFavorite(path.clone()));
+                                        })),
+                                )
+                            })
                             .child(
                                 Button::new(("search", self.index))
                                     .ghost()
