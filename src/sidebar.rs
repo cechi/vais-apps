@@ -5,6 +5,7 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -55,6 +56,8 @@ pub struct Sidebar {
     connections: Vec<Place>,
     /// Directory of the active panel, highlighted when it is a listed place.
     current: Option<Location>,
+    /// Scroll position of the places list, for its scrollbar.
+    scroll: ScrollHandle,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -69,6 +72,7 @@ impl Sidebar {
             recent: Vec::new(),
             connections: Vec::new(),
             current: None,
+            scroll: ScrollHandle::new(),
         };
         this.refresh();
         this
@@ -127,7 +131,11 @@ impl Sidebar {
     }
 
     /// The saved layouts (whole tabs), in the order they were added.
-    pub fn set_layouts(&mut self, layouts: &[crate::config::FavoriteLayout], cx: &mut Context<Self>) {
+    pub fn set_layouts(
+        &mut self,
+        layouts: &[crate::config::FavoriteLayout],
+        cx: &mut Context<Self>,
+    ) {
         self.layouts = layouts
             .iter()
             .enumerate()
@@ -233,8 +241,7 @@ impl Sidebar {
             )
             .children(places.iter().enumerate().map(|(i, place)| {
                 let ix = offset + i;
-                let selected =
-                    place.layout.is_none() && self.current.as_ref() == Some(&place.path);
+                let selected = place.layout.is_none() && self.current.as_ref() == Some(&place.path);
                 let path = place.path.clone();
                 let layout = place.layout;
                 let row = h_flex()
@@ -297,16 +304,16 @@ impl Sidebar {
                 let path = place.path.clone();
                 row.context_menu(move |menu, _, _| {
                     let (sidebar, path) = (sidebar.clone(), path.clone());
-                    menu.item(
-                        PopupMenuItem::new("Remove from favorites").on_click(move |_, _, cx| {
+                    menu.item(PopupMenuItem::new("Remove from favorites").on_click(
+                        move |_, _, cx| {
                             sidebar.update(cx, |_, cx| {
                                 cx.emit(match layout {
                                     Some(ix) => SidebarEvent::RemoveLayout(ix),
                                     None => SidebarEvent::RemoveFavorite(path.clone()),
                                 });
                             });
-                        }),
-                    )
+                        },
+                    ))
                 })
                 .into_any_element()
             }))
@@ -389,39 +396,57 @@ impl Render for Sidebar {
             )
             .child(
                 div()
-                    .id("sidebar-scroll")
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .child(self.render_section("Favorites", &places, 0, &c, cx))
-                    .when(!volumes.is_empty(), |d| {
-                        d.child(self.render_section("Volumes", &volumes, places.len(), &c, cx))
-                    })
-                    .child({
-                        let offset = places.len() + volumes.len();
-                        self.render_section("Connections", &connections, offset, &c, cx)
-                    })
+                    .w_full()
+                    .flex()
+                    .flex_col()
                     .child(
-                        h_flex()
-                            .id("sidebar-manage-connections")
+                        div()
+                            .id("sidebar-scroll")
+                            .flex_1()
+                            .min_h_0()
                             .w_full()
-                            .h(rems(1.75))
-                            .px_3()
-                            .gap_2()
-                            .cursor_pointer()
-                            .text_sm()
-                            .text_color(c.muted_foreground)
-                            .hover(|s| s.bg(c.hover))
-                            .on_click(
-                                cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ManageConnections)),
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .child(self.render_section("Favorites", &places, 0, &c, cx))
+                            .when(!volumes.is_empty(), |d| {
+                                d.child(self.render_section(
+                                    "Volumes",
+                                    &volumes,
+                                    places.len(),
+                                    &c,
+                                    cx,
+                                ))
+                            })
+                            .child({
+                                let offset = places.len() + volumes.len();
+                                self.render_section("Connections", &connections, offset, &c, cx)
+                            })
+                            .child(
+                                h_flex()
+                                    .id("sidebar-manage-connections")
+                                    .w_full()
+                                    .h(rems(1.75))
+                                    .px_3()
+                                    .gap_2()
+                                    .cursor_pointer()
+                                    .text_sm()
+                                    .text_color(c.muted_foreground)
+                                    .hover(|s| s.bg(c.hover))
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SidebarEvent::ManageConnections)
+                                    }))
+                                    .child(Icon::new(IconName::Plus).size_4().flex_none())
+                                    .child("Manage connections…"),
                             )
-                            .child(Icon::new(IconName::Plus).size_4().flex_none())
-                            .child("Manage connections…"),
+                            .when(!recent.is_empty(), |d| {
+                                let offset = places.len() + volumes.len() + connections.len();
+                                d.child(self.render_section("Recent", &recent, offset, &c, cx))
+                            }),
                     )
-                    .when(!recent.is_empty(), |d| {
-                        let offset = places.len() + volumes.len() + connections.len();
-                        d.child(self.render_section("Recent", &recent, offset, &c, cx))
-                    }),
+                    .child(Scrollbar::vertical(&self.scroll).viewport_from_layout()),
             )
     }
 }

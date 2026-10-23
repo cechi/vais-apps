@@ -243,7 +243,7 @@ active panel's directory name (saved with the tab; empty goes back to the direct
 along the top of the tab, and a thick left border on the layout once saved to Favorites.
 Below them a **Recent** group lists the last 10 directories the focused panel showed
 (newest first, remembered across restarts). Clicking a place navigates the active panel;
-the place matching the panel's directory is highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and
+the place matching the panel's directory is highlighted. The list scrolls (with a scrollbar) when it is taller than the window. The sidebar is resizable, its state is saved, and the tab bar, panels and
 function key bar shift right while it is open; the status bar keeps the full width.
 
 ## Themes
