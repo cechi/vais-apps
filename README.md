@@ -105,6 +105,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Shift+P` | Command palette: every action by name, with its key |
 | `Ctrl+D` | Add the current directory to the sidebar's Favorites, or remove it (the star next to the path does the same) |
 | `Ctrl+E` | Focus the command line |
+| `Ctrl+Shift+B` / `` Ctrl+` `` / `Ctrl+Shift+N` | Agents panel: toggle / focus it or go back to the files / new session |
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
@@ -220,6 +221,43 @@ Windows) in that directory: a command with output opens it in a read-only tab, o
 just reports its exit code. `cd dir` moves the panel instead. Interactive programs need a
 real terminal (F9).
 
+## Agents
+
+`Ctrl+Shift+B` (or the button at the right end of the status bar) opens the **Agents**
+panel at the right edge: terminals in tabs, each running a coding agent or a plain shell.
+The panel lists what is installed (`claude`, `opencode`, `codex`, `gemini` found on `PATH`,
+plus your shell); `+` or `Ctrl+Shift+N` starts a session in the active panel's directory.
+`` Ctrl+` `` moves the focus into the panel (opening it) and back to the files.
+
+The terminal is a real one (alacritty's emulator core): colours, full-screen programs,
+mouse selection, `Ctrl+Shift+C` / `Ctrl+Shift+V` copy and paste (bracketed when the program
+asks), `Shift+PgUp` / `Shift+PgDn` scroll the history, the wheel too. Keys the program may
+want (F-keys, `Ctrl+T`, `Ctrl+W`, `Ctrl+Q`…) go to it, not to the app; the global ones
+(`Ctrl+Shift+P`, zoom, the panel toggles) still work. When the program exits, `Enter` or the
+Restart button starts it again.
+
+Every session gets the app's **MCP server**: `vais-commander --mcp` is registered for that
+run only (Claude Code through `--mcp-config` and `--allowedTools mcp__vais__*`, OpenCode
+through `OPENCODE_CONFIG_CONTENT`, Codex through `-c mcp_servers.vais.*`, Gemini CLI through
+a settings file named in `GEMINI_CLI_SYSTEM_SETTINGS_PATH`; the Codex and Gemini forms are
+untested here). The server forwards tool calls to the running app over a socket under
+`$XDG_RUNTIME_DIR/vais-commander/` (loopback TCP with a token on Windows), so the agent can do
+what you would do by hand:
+
+| Tool | What it does |
+|---|---|
+| `get_state` | Tabs, layouts, panels, their directories, cursor and marked entries |
+| `list_dir`, `search` | Read a directory; find entries by name or by text inside files (connections and archives included) |
+| `navigate`, `set_layout`, `new_tab`, `activate_tab`, `close_tab` | Panels and tabs, like the keys |
+| `select` | Mark entries by names or a pattern, place the cursor |
+| `copy`, `move` | F5 / F6; existing files bring up the usual Overwrite / Skip / Cancel dialog, and the call waits for the operation |
+| `rename`, `mkdir` | Never overwrite |
+| `delete` | To the trash (or permanently); **you confirm it in a dialog** that names the agent, and `Esc` tells the agent it was cancelled |
+| `open_file`, `add_favorite`, `save_layout`, `set_tab_title`, `set_tab_color` | The rest of the UI |
+
+Writes into archives are refused. An agent started outside the app can use the same server:
+`claude mcp add vais -- vais-commander --mcp` (it talks to the newest running instance).
+
 ## Archives
 
 Enter on a zip (also jar, apk, whl…), tar, tar.gz / tgz, tar.bz2, tar.xz or tar.zst
@@ -283,6 +321,10 @@ src/palette.rs     command-center style dialog body: value input + rows (F5/F6, 
 src/keymap.rs      actions and default bindings
 src/clipboard.rs   the file clipboard behind Ctrl+C / X / V
 src/command_line.rs  the shell prompt under the panels (history, Ctrl+Enter insertion)
+src/agents/        the Agents panel: sessions in tabs, detection of installed CLIs, per-CLI launch with the MCP server registered
+src/terminal/      the embedded terminal: alacritty_terminal session (pty.rs), grid painting (element.rs), key encoding (keys.rs), colours
+src/bridge/        the socket other processes drive the app through, and the tool catalogue; src/app/tools.rs carries the tools out
+src/mcp.rs         `vais-commander --mcp`: the MCP server on stdio, forwarding to the bridge
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
 src/editor_view.rs  the file editor tab (view / edit)

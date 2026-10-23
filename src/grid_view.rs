@@ -16,7 +16,7 @@ use crate::config::{LayoutConfig, TabConfig, TabKind};
 use crate::keymap::*;
 use crate::layout::grid::{GridState, OnResize, render_grid};
 use crate::layout::{Dir, Layout, MAX_PANELS};
-use crate::ops::manager::{ManagerEvent, OperationsManager};
+use crate::ops::manager::{ManagerEvent, OperationId, OperationsManager};
 use crate::ops::{self, OpKind, Request};
 use crate::palette::{self, Palette, PaletteItem};
 use crate::panel::{FilePanel, PanelEvent};
@@ -43,6 +43,17 @@ pub enum GridEvent {
     /// The star next to a panel's path.
     ToggleFavorite(Location),
 }
+
+/// How a transfer or delete asked for by another party (the agents'
+/// bridge) ended up: started as an operation, cancelled in the dialog, or
+/// refused outright.
+pub enum Outcome {
+    Started(OperationId),
+    Cancelled,
+    Rejected(String),
+}
+
+pub type OnOutcome = Rc<dyn Fn(Outcome, &mut Window, &mut App)>;
 
 pub struct GridView {
     panels: Vec<Entity<FilePanel>>,
@@ -125,6 +136,11 @@ impl GridView {
 
     pub fn layout(&self) -> Layout {
         self.layout
+    }
+
+    /// Every panel slot (only the first rows x cols are shown).
+    pub fn panels(&self) -> &[Entity<FilePanel>] {
+        &self.panels
     }
 
     pub fn active_index(&self) -> usize {
@@ -216,14 +232,14 @@ impl GridView {
         cx.notify();
     }
 
-    fn focus_panel(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus_panel(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if ix < self.layout.count() {
             let handle = self.panels[ix].focus_handle(cx);
             handle.focus(window, cx);
         }
     }
 
-    fn set_layout(&mut self, layout: Layout, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_layout(&mut self, layout: Layout, window: &mut Window, cx: &mut Context<Self>) {
         if layout != self.layout {
             self.layout = layout;
             // Fresh states so the new grid starts evenly distributed.
@@ -339,13 +355,35 @@ impl GridView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.confirm_transfer_with(kind, sources, dest, None, window, cx);
+    }
+
+    /// Copy or move `sources` into `dest`, asking about existing files;
+    /// `on_outcome` (the bridge) hears how it ended.
+    pub fn confirm_transfer_with(
+        &mut self,
+        kind: OpKind,
+        sources: Vec<Location>,
+        dest: Location,
+        on_outcome: Option<OnOutcome>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let reject =
+            |this: &mut Self, message: String, window: &mut Window, cx: &mut Context<Self>| {
+                this.notify(Notification::error(message.clone()), window, cx);
+                if let Some(cb) = &on_outcome {
+                    cb(Outcome::Rejected(message), window, cx);
+                }
+            };
         if dest.is_archive() {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            reject(self, READ_ONLY_ARCHIVE.to_string(), window, cx);
             return;
         }
         if kind == OpKind::Move && sources.iter().any(Location::is_archive) {
-            self.notify(
-                Notification::error("Cannot move out of an archive: copy instead"),
+            reject(
+                self,
+                "Cannot move out of an archive: copy instead".to_string(),
                 window,
                 cx,
             );
@@ -355,8 +393,9 @@ impl GridView {
             .and_then(|b| b.stat(&dest))
             .is_ok_and(|m| m.is_dir());
         if !is_dir {
-            self.notify(
-                Notification::error(format!("{} is not a directory", dest.display())),
+            reject(
+                self,
+                format!("{} is not a directory", dest.display()),
                 window,
                 cx,
             );
@@ -371,7 +410,10 @@ impl GridView {
             overwrite: false,
         };
         if conflicts.is_empty() {
-            self.run_operation(request, cx);
+            let id = self.run_operation(request, cx);
+            if let Some(cb) = &on_outcome {
+                cb(Outcome::Started(id), window, cx);
+            }
             return;
         }
 
@@ -398,6 +440,12 @@ impl GridView {
         );
         let overwrite = request.clone_with_overwrite(true);
         let view = cx.entity();
+        let on_cancel_outcome = on_outcome.clone();
+        let title = if on_outcome.is_some() {
+            "Agent: files already exist".to_string()
+        } else {
+            "Files already exist".to_string()
+        };
         let palette = cx.new(|cx| {
             let items = vec![
                 PaletteItem::new("Overwrite").danger(true),
@@ -411,13 +459,26 @@ impl GridView {
                     let request = match choice.item {
                         Some(0) => overwrite.clone(),
                         Some(1) => request.clone(),
-                        _ => return,
+                        _ => {
+                            if let Some(cb) = &on_outcome {
+                                cb(Outcome::Cancelled, window, cx);
+                            }
+                            return;
+                        }
                     };
-                    view.update(cx, |this, cx| this.run_operation(request, cx));
+                    let id = view.update(cx, |this, cx| this.run_operation(request, cx));
+                    if let Some(cb) = &on_outcome {
+                        cb(Outcome::Started(id), window, cx);
+                    }
                 })
-                .on_cancel(|window, cx| window.close_dialog(cx))
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    if let Some(cb) = &on_cancel_outcome {
+                        cb(Outcome::Cancelled, window, cx);
+                    }
+                })
         });
-        palette::open("Files already exist".to_string(), palette, window, cx);
+        palette::open(title, palette, window, cx);
     }
 
     /// Entries dropped onto `dest`: move or copy them there according to the
@@ -495,8 +556,25 @@ impl GridView {
         let Some(sources) = self.selection(window, cx) else {
             return;
         };
+        self.confirm_delete(sources, permanent, None, None, window, cx);
+    }
+
+    /// Ask, then delete `sources`. `requester` names who asks (an agent)
+    /// in the title; `on_outcome` hears how it ended.
+    pub fn confirm_delete(
+        &mut self,
+        sources: Vec<Location>,
+        permanent: bool,
+        requester: Option<String>,
+        on_outcome: Option<OnOutcome>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if sources.iter().any(Location::is_archive) {
             self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            if let Some(cb) = &on_outcome {
+                cb(Outcome::Rejected(READ_ONLY_ARCHIVE.to_string()), window, cx);
+            }
             return;
         }
         // Remote storages have no trash.
@@ -516,7 +594,14 @@ impl GridView {
                 ""
             }
         );
-        let title = format!("{} {}?", kind.verb(), ops::describe(&sources));
+        let title = match &requester {
+            Some(who) => format!(
+                "{who} wants to {} {}",
+                kind.verb().to_lowercase(),
+                ops::describe(&sources)
+            ),
+            None => format!("{} {}?", kind.verb(), ops::describe(&sources)),
+        };
         let request = Request {
             kind,
             sources,
@@ -524,6 +609,7 @@ impl GridView {
             overwrite: false,
         };
         let view = cx.entity();
+        let on_cancel_outcome = on_outcome.clone();
         let palette = cx.new(|cx| {
             let items = vec![
                 PaletteItem::new(if permanent {
@@ -540,10 +626,20 @@ impl GridView {
                     window.close_dialog(cx);
                     if choice.item == Some(0) {
                         let request = request.clone();
-                        view.update(cx, |this, cx| this.run_operation(request, cx));
+                        let id = view.update(cx, |this, cx| this.run_operation(request, cx));
+                        if let Some(cb) = &on_outcome {
+                            cb(Outcome::Started(id), window, cx);
+                        }
+                    } else if let Some(cb) = &on_outcome {
+                        cb(Outcome::Cancelled, window, cx);
                     }
                 })
-                .on_cancel(|window, cx| window.close_dialog(cx))
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    if let Some(cb) = &on_cancel_outcome {
+                        cb(Outcome::Cancelled, window, cx);
+                    }
+                })
         });
         palette::open(title, palette, window, cx);
     }
@@ -579,26 +675,33 @@ impl GridView {
         if name.is_empty() {
             return;
         }
+        match self.make_dir_quiet(base, name, cx) {
+            Ok(_) => {}
+            Err(err) => self.notify(Notification::error(err), window, cx),
+        }
+    }
+
+    /// Create `name` under `base` and show it; the error is returned, not shown.
+    pub fn make_dir_quiet(
+        &mut self,
+        base: &Location,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<Location, String> {
         if base.is_archive() {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
-            return;
+            return Err(READ_ONLY_ARCHIVE.to_string());
         }
         let path = base.join(name);
-        match backend_for(base).and_then(|b| b.mkdir_all(&path)) {
-            Ok(()) => {
-                // Select the first component of a nested name.
-                let first = name
-                    .split(['/', '\\'])
-                    .find(|s| !s.is_empty())
-                    .map(|c| base.join(c));
-                self.refresh_active(first, cx);
-            }
-            Err(err) => self.notify(
-                Notification::error(format!("{}: {err}", path.display())),
-                window,
-                cx,
-            ),
-        }
+        backend_for(base)
+            .and_then(|b| b.mkdir_all(&path))
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        // Select the first component of a nested name.
+        let first = name
+            .split(['/', '\\'])
+            .find(|s| !s.is_empty())
+            .map(|c| base.join(c));
+        self.refresh_active(first, cx);
+        Ok(path)
     }
 
     /// F3 / F4: view or edit the file under the cursor. Directories open as
@@ -693,30 +796,42 @@ impl GridView {
         if new_name.is_empty() || new_name == old_name {
             return;
         }
-        let (from, to) = (base.join(old_name), base.join(new_name));
-        let result = backend_for(base).and_then(|backend| {
-            if backend.exists(&to) {
-                Err(std::io::Error::other(
-                    "a file with that name already exists",
-                ))
-            } else {
-                backend.rename(&from, &to)
-            }
-        });
-        match result {
-            Ok(()) => self.refresh_active(Some(to), cx),
-            Err(err) => self.notify(
-                Notification::error(format!("{new_name}: {err}")),
-                window,
-                cx,
-            ),
+        if let Err(err) = self.rename_quiet(base, old_name, new_name, cx) {
+            self.notify(Notification::error(err), window, cx);
         }
     }
 
-    fn run_operation(&mut self, request: Request, cx: &mut Context<Self>) {
-        self.ops.update(cx, |m, cx| {
-            m.start(request, cx);
-        });
+    /// Rename `old_name` to `new_name` under `base`, refusing to overwrite;
+    /// the error is returned, not shown.
+    pub fn rename_quiet(
+        &mut self,
+        base: &Location,
+        old_name: &str,
+        new_name: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<Location, String> {
+        if base.is_archive() {
+            return Err(READ_ONLY_ARCHIVE.to_string());
+        }
+        let (from, to) = (base.join(old_name), base.join(new_name));
+        backend_for(base)
+            .and_then(|backend| {
+                if backend.exists(&to) {
+                    Err(std::io::Error::other(
+                        "a file with that name already exists",
+                    ))
+                } else {
+                    backend.rename(&from, &to)
+                }
+            })
+            .map_err(|err| format!("{new_name}: {err}"))?;
+        self.refresh_dir(base, cx);
+        self.refresh_active(Some(to.clone()), cx);
+        Ok(to)
+    }
+
+    pub fn run_operation(&mut self, request: Request, cx: &mut Context<Self>) -> OperationId {
+        self.ops.update(cx, |m, cx| m.start(request, cx))
     }
 
     /// Reload every panel on connection `conn` (it connected or dropped).

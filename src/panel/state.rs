@@ -205,6 +205,15 @@ impl PanelState {
         self.anchor = None;
     }
 
+    /// Names of the marked entries, in listing order.
+    pub fn selected_marked_names(&self) -> Vec<String> {
+        self.marked
+            .iter()
+            .filter_map(|&i| self.entries.get(i))
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
     /// What an operation acts on: the marked entries, else the entry under the cursor.
     pub fn selected_entries(&self) -> Vec<&Entry> {
         if self.marked.is_empty() {

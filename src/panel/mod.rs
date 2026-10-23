@@ -1362,6 +1362,44 @@ impl FilePanel {
         .detach();
     }
 
+    /// Mark the entries called `names` (replacing the marks unless `add`);
+    /// how many were found.
+    pub fn select_names(&mut self, names: &[String], add: bool, cx: &mut Context<Self>) -> usize {
+        if !add {
+            self.state.clear_marks();
+        }
+        let mut found = 0;
+        for (ix, entry) in self.state.entries.iter().enumerate() {
+            if !entry.is_parent && names.iter().any(|n| *n == entry.name) {
+                self.state.marked.insert(ix);
+                found += 1;
+            }
+        }
+        cx.notify();
+        found
+    }
+
+    pub fn clear_marks(&mut self, cx: &mut Context<Self>) {
+        self.state.clear_marks();
+        cx.notify();
+    }
+
+    /// Put the cursor on the entry called `name`; whether it was found.
+    pub fn set_cursor_to(&mut self, name: &str, cx: &mut Context<Self>) -> bool {
+        let Some(ix) = self
+            .state
+            .entries
+            .iter()
+            .position(|e| !e.is_parent && e.name == name)
+        else {
+            return false;
+        };
+        self.state.move_cursor_to(ix);
+        self.scroll_to_cursor();
+        cx.notify();
+        true
+    }
+
     /// Mark or unmark the entries matching `pattern` (glob or substring).
     pub fn mark_pattern(&mut self, pattern: &str, on: bool, cx: &mut Context<Self>) {
         let matcher = crate::fs::filter::Matcher::new(pattern);
