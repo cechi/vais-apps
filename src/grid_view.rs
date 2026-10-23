@@ -46,6 +46,8 @@ pub enum GridEvent {
 
 pub struct GridView {
     panels: Vec<Entity<FilePanel>>,
+    /// A title set by the user (Rename tab); `None` follows the active panel.
+    title: Option<String>,
     layout: Layout,
     grid: GridState,
     active: usize,
@@ -105,6 +107,7 @@ impl GridView {
 
         Self {
             panels,
+            title: cfg.title.clone(),
             layout: cfg.layout.layout(),
             grid: GridState::new(cx),
             active: 0,
@@ -143,7 +146,25 @@ impl GridView {
 
     /// Short name of the active panel's directory, used as the tab title.
     pub fn title(&self, cx: &App) -> String {
-        self.active_panel().read(cx).state.path.display_name()
+        match &self.title {
+            Some(title) => title.clone(),
+            None => self.active_panel().read(cx).state.path.display_name(),
+        }
+    }
+
+    /// The user-given title, if any.
+    pub fn custom_title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Give the tab a fixed title; `None` goes back to the directory name.
+    pub fn set_title(&mut self, title: Option<String>, cx: &mut Context<Self>) {
+        let title = title.filter(|t| !t.trim().is_empty());
+        if self.title != title {
+            self.title = title;
+            cx.emit(GridEvent::Changed);
+            cx.notify();
+        }
     }
 
     pub fn config(&self, cx: &App) -> TabConfig {
@@ -154,6 +175,7 @@ impl GridView {
             .unwrap_or_default();
         TabConfig {
             kind: TabKind::Grid,
+            title: self.title.clone(),
             layout: LayoutConfig {
                 rows: self.layout.rows,
                 cols: self.layout.cols,

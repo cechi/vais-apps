@@ -839,6 +839,51 @@ impl Workspace {
         palette::open("Add layout to favorites".into(), palette, window, cx);
     }
 
+    /// The tab's context menu: a fixed title for the tab, or none again.
+    fn rename_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(grid) = self.tabs.get(ix).and_then(|t| t.grid_view()).cloned() else {
+            return;
+        };
+        let current = grid.read(cx).title(cx);
+        let fixed = grid.read(cx).custom_title().is_some();
+        let rows = vec![
+            PaletteItem::new("Rename").value("").icon(IconName::Check),
+            PaletteItem::new(if fixed {
+                "Back to the directory name"
+            } else {
+                "Cancel"
+            })
+            .value("")
+            .icon(IconName::Close),
+        ];
+        const SECOND_ROW: usize = 1;
+        let len = current.len();
+        let palette = cx.new(|cx| {
+            Palette::new(rows, &current, "Tab title", window, cx)
+                .input_icon(None)
+                .hint("A fixed title; empty to follow the active panel's directory again")
+                .select_range(0..len)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let title = if choice.item == Some(SECOND_ROW) {
+                        if fixed {
+                            None
+                        } else {
+                            return;
+                        }
+                    } else {
+                        Some(choice.value.trim().to_string()).filter(|t| !t.is_empty())
+                    };
+                    let grid = grid.clone();
+                    window.defer(cx, move |_, cx| {
+                        grid.update(cx, |grid, cx| grid.set_title(title, cx));
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Rename tab".into(), palette, window, cx);
+    }
+
     fn sync_layouts(&mut self, cx: &mut Context<Self>) {
         self.sidebar
             .update(cx, |s, cx| s.set_layouts(&self.favorite_layouts, cx));
@@ -849,7 +894,9 @@ impl Workspace {
         let Some(saved) = self.favorite_layouts.get(ix) else {
             return;
         };
-        let config = saved.tab.clone();
+        // The new tab carries the layout's name as its title.
+        let mut config = saved.tab.clone();
+        config.title = Some(saved.name.clone());
         self.push_grid_tab(&config, window, cx);
         let last = self.tabs.len() - 1;
         self.activate_tab(last, window, cx);
@@ -1603,10 +1650,15 @@ impl Workspace {
                     let is_grid = tab.grid_view().is_some();
                     move |menu, _, _| {
                         let menu = if is_grid {
-                            let workspace = workspace.clone();
-                            menu.item(PopupMenuItem::new("Add layout to favorites…").on_click(
+                            let (ws_rename, ws_save) = (workspace.clone(), workspace.clone());
+                            menu.item(PopupMenuItem::new("Rename tab…").on_click(
                                 move |_, window, cx| {
-                                    workspace.update(cx, |this, cx| {
+                                    ws_rename.update(cx, |this, cx| this.rename_tab(ix, window, cx));
+                                },
+                            ))
+                            .item(PopupMenuItem::new("Add layout to favorites…").on_click(
+                                move |_, window, cx| {
+                                    ws_save.update(cx, |this, cx| {
                                         this.save_layout_favorite(ix, window, cx)
                                     });
                                 },

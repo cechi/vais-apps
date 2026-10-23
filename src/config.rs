@@ -132,6 +132,10 @@ pub struct FavoriteLayout {
 pub struct TabConfig {
     #[serde(rename = "type")]
     pub kind: TabKind,
+    /// A fixed title given by the user; otherwise the tab shows the active
+    /// panel's directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub layout: LayoutConfig,
     pub panels: Vec<PanelConfig>,
 }
@@ -277,6 +281,7 @@ impl Config {
         }
         vec![TabConfig {
             kind: TabKind::Grid,
+            title: None,
             layout: self.layout.clone().unwrap_or_default(),
             panels: self.panels.clone(),
         }]
