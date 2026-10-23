@@ -199,6 +199,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-shift-p", CommandPalette, w),
         KeyBinding::new("secondary-shift-b", ToggleAgents, w),
         KeyBinding::new("secondary-`", FocusAgents, w),
+        KeyBinding::new("secondary-shift-n", NewAgentSession, w),
         KeyBinding::new("secondary-d", ToggleFavorite, wt),
         KeyBinding::new("secondary-e", FocusCommandLine, wt),
         KeyBinding::new("secondary-enter", InsertNameToCommandLine, p),

@@ -1550,7 +1550,7 @@ impl Workspace {
         } else {
             self.agents_open = true;
             self.agents.update(cx, |panel, cx| panel.refresh(cx));
-            let focus = self.agents.read(cx).focus_handle().clone();
+            let focus = self.agents.read(cx).focus_handle(cx);
             focus.focus(window, cx);
         }
         self.schedule_save(cx);
@@ -1563,7 +1563,7 @@ impl Workspace {
 
     /// Ctrl+`: into the Agents panel (opening it), or back to the files.
     fn on_focus_agents(&mut self, _: &FocusAgents, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self.agents.read(cx).focus_handle().clone();
+        let focus = self.agents.read(cx).focus_handle(cx);
         if self.agents_open && focus.contains_focused(window, cx) {
             self.focus_active_panel(window, cx);
             return;
@@ -1584,8 +1584,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if !self.agents_open {
-            self.toggle_agents(window, cx);
+            self.agents_open = true;
+            self.agents.update(cx, |panel, cx| panel.refresh(cx));
+            self.schedule_save(cx);
+            cx.notify();
         }
+        self.agents
+            .update(cx, |panel, cx| panel.choose_and_start(window, cx));
     }
 
     // ----- command line --------------------------------------------------
@@ -2258,6 +2263,14 @@ impl Render for Workspace {
         }
         let shift = window.modifiers().shift;
         let key_bar = self.render_key_bar(shift, cx);
+        if self.agents_open {
+            let cwd = current
+                .as_ref()
+                .and_then(|loc| loc.as_local())
+                .map(Path::to_path_buf);
+            self.agents
+                .update(cx, |panel, _| panel.set_default_cwd(cwd));
+        }
         let show_command_line = self.command_line_open && self.active_tab().grid_view().is_some();
         if show_command_line {
             let prompt = current
