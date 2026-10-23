@@ -419,7 +419,9 @@ impl TerminalView {
             _ => {}
         }
         let _ = window;
-        if let Some(bytes) = keys::encode(ks, self.mode()) {
+        let encoded = keys::encode(ks, self.mode());
+        log::trace!("terminal key {:?} -> {:?}", ks, encoded);
+        if let Some(bytes) = encoded {
             self.clear_selection();
             self.write(bytes);
             self.scroll_to_bottom();
