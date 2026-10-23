@@ -94,9 +94,8 @@ pub fn handle(line: &str, session: &mut Session) -> Option<String> {
             }
         }
         _ => {
-            if id.is_none() {
-                return None;
-            }
+            // A notification we do not know gets no answer.
+            id.as_ref()?;
             Err((-32601, format!("method not found: {method}")))
         }
     };

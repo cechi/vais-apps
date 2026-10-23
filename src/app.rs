@@ -342,7 +342,7 @@ impl Workspace {
             agents_width: if config.agents_width.is_finite() && config.agents_width >= 200.0 {
                 config.agents_width
             } else {
-                420.0
+                520.0
             },
             connections,
             recent: config.recent.clone(),

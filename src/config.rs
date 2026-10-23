@@ -101,7 +101,7 @@ impl Default for Config {
             sidebar_collapsed: Vec::new(),
             command_line: true,
             agents_open: false,
-            agents_width: 420.0,
+            agents_width: 520.0,
             command_history: Vec::new(),
             drop_action: DropAction::Ask,
             file_icons: FileIcons::System,

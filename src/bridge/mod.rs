@@ -39,9 +39,13 @@ impl BridgeAddr {
         }
     }
 
-    /// The address a child was given, from its environment.
+    /// The address a child was given, from its environment; without one,
+    /// the newest instance's socket (`bridge.sock`), so an agent started
+    /// outside the app can still reach it.
     pub fn from_env() -> Option<Self> {
-        let value = std::env::var("VAIS_BRIDGE").ok()?;
+        let Ok(value) = std::env::var("VAIS_BRIDGE") else {
+            return Self::latest();
+        };
         if let Some(path) = value.strip_prefix("unix:") {
             return Some(BridgeAddr::Unix(PathBuf::from(path)));
         }
@@ -116,9 +120,29 @@ pub fn start() -> io::Result<(BridgeAddr, UnboundedReceiver<BridgeRequest>)> {
     server::start()
 }
 
-/// Remove what the listener left behind (the socket file).
+impl BridgeAddr {
+    #[cfg(unix)]
+    fn latest() -> Option<Self> {
+        let link = server::socket_dir()?.join("bridge.sock");
+        let target = std::fs::read_link(&link).ok()?;
+        target.exists().then_some(BridgeAddr::Unix(target))
+    }
+
+    #[cfg(not(unix))]
+    fn latest() -> Option<Self> {
+        None
+    }
+}
+
+/// Remove what the listener left behind (the socket file and, when it
+/// still points here, the `bridge.sock` link).
 pub fn cleanup(addr: &BridgeAddr) {
     if let BridgeAddr::Unix(path) = addr {
         let _ = std::fs::remove_file(path);
+        if let Some(link) = path.parent().map(|d| d.join("bridge.sock"))
+            && std::fs::read_link(&link).is_ok_and(|t| t == *path)
+        {
+            let _ = std::fs::remove_file(link);
+        }
     }
 }

@@ -19,6 +19,37 @@ use super::{BridgeAddr, BridgeRequest, Reply, ToolError};
 /// the user).
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// Where the sockets live: the user's runtime directory, else the cache.
+#[cfg(unix)]
+pub fn socket_dir() -> Option<std::path::PathBuf> {
+    directories::BaseDirs::new()
+        .and_then(|d| d.runtime_dir().map(|r| r.to_path_buf()))
+        .or_else(|| {
+            directories::ProjectDirs::from("", "", "vais-commander")
+                .map(|d| d.cache_dir().to_path_buf())
+        })
+        .map(|d| d.join("vais-commander"))
+}
+
+/// Sockets of instances that are gone (killed without cleaning up) do not
+/// answer a connection: drop them.
+#[cfg(unix)]
+fn remove_stale_sockets(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("bridge-") || !name.ends_with(".sock") {
+            continue;
+        }
+        if std::os::unix::net::UnixStream::connect(&path).is_err() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 pub fn start() -> io::Result<(BridgeAddr, UnboundedReceiver<BridgeRequest>)> {
     let (tx, rx) = unbounded();
     let addr = listen(tx)?;
@@ -30,20 +61,19 @@ fn listen(tx: UnboundedSender<BridgeRequest>) -> io::Result<BridgeAddr> {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
 
-    let dir = directories::BaseDirs::new()
-        .and_then(|d| d.runtime_dir().map(|r| r.to_path_buf()))
-        .or_else(|| {
-            directories::ProjectDirs::from("", "", "vais-commander")
-                .map(|d| d.cache_dir().to_path_buf())
-        })
-        .ok_or_else(|| io::Error::other("no runtime directory"))?
-        .join("vais-commander");
+    let dir = socket_dir().ok_or_else(|| io::Error::other("no runtime directory"))?;
     std::fs::create_dir_all(&dir)?;
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    remove_stale_sockets(&dir);
     let path = dir.join(format!("bridge-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    // `bridge.sock` points at the newest instance, for agents started
+    // outside the app (`--mcp` falls back to it).
+    let latest = dir.join("bridge.sock");
+    let _ = std::fs::remove_file(&latest);
+    let _ = std::os::unix::fs::symlink(&path, &latest);
     std::thread::Builder::new()
         .name("bridge".into())
         .spawn(move || {
