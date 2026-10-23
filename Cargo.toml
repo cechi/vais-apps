@@ -29,7 +29,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 resvg = "0.46"
 usvg = "0.46"
 ssh2 = "0.9"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# Secret Service over zbus (pure Rust): no libdbus to link against on Linux.
+keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 suppaftp = { version = "12", default-features = false }
 # Directory watching (auto refresh); futures only for its channel and select.
 notify = "8"

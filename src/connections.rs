@@ -398,6 +398,17 @@ impl ConnectionManager {
 mod tests {
     use super::ConnectionConfig;
 
+    /// Touches the real keyring: `cargo test -- --ignored keyring_roundtrip`.
+    #[test]
+    #[ignore]
+    fn keyring_roundtrip() {
+        let entry = keyring::Entry::new("vais-commander-test", "roundtrip").unwrap();
+        entry.set_password("s3cret").unwrap();
+        assert_eq!(entry.get_password().unwrap(), "s3cret");
+        entry.delete_credential().unwrap();
+        assert!(entry.get_password().is_err());
+    }
+
     #[test]
     fn slugs_are_short_unique_and_safe() {
         assert_eq!(ConnectionConfig::slug("My NAS", &[]), "my-nas");
