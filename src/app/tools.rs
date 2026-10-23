@@ -390,7 +390,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> ToolResult {
         let path = crate::panel::expand_path(arg_str(args, "path")?.trim());
-        if self.favorites.contains(&path) {
+        if self.favorites.iter().any(|f| f.path == path) {
             return Ok(json!({ "path": path.display(), "added": false }));
         }
         self.toggle_favorite(path.clone(), window, cx);

@@ -41,7 +41,7 @@ pub fn init(config: &Config, cx: &mut App) {
     cx.set_global(Settings {
         drop_action: config.drop_action,
         file_icons: config.file_icons,
-        favorites: config.favorites.clone(),
+        favorites: config.favorites.iter().map(|f| f.path.clone()).collect(),
     });
 }
 

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 
 use futures::StreamExt as _;
 use std::time::Duration;
@@ -25,7 +26,9 @@ mod tools;
 use crate::agents::{AgentsEvent, AgentsPanel};
 use crate::bridge::BridgeAddr;
 use crate::command_line::{CommandLine, CommandLineEvent};
-use crate::config::{CONFIG_VERSION, Config, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig};
+use crate::config::{
+    CONFIG_VERSION, Config, Favorite, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig,
+};
 use crate::connections::{ConnectionEvent, ConnectionManager, Status};
 use crate::connections_view::{ConnectionsEvent, ConnectionsView};
 use crate::editor_view::{EditorEvent, EditorView};
@@ -39,7 +42,7 @@ use crate::ops_panel::{OperationsPanel, PanelEvent as OpsPanelEvent};
 use crate::palette::{self, Palette, PaletteItem};
 use crate::rename::view::{RenameEvent, RenameView};
 use crate::settings_view::{SettingsEvent, SettingsValues, SettingsView};
-use crate::sidebar::{Sidebar, SidebarEvent};
+use crate::sidebar::{FavoriteId, Sidebar, SidebarEvent};
 use crate::tabs::Tab;
 use crate::ui::{h_flex, v_flex};
 use crate::vfs::{ConnId, Location};
@@ -49,6 +52,21 @@ const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 pub const HEADER_HEIGHT_REMS: f32 = 2.0;
 const OPS_PANEL_HEIGHT: f32 = 220.0;
 const SIDEBAR_WIDTH: f32 = 220.0;
+
+/// What a palette does with the user's choice once the dialog is closed.
+type Apply<T> = Rc<dyn Fn(T, &mut Window, &mut App)>;
+
+/// The texts of a palette asking for a name (see `Workspace::ask_name`).
+struct NameAsk {
+    title: &'static str,
+    placeholder: &'static str,
+    hint: &'static str,
+    /// The second row while a name is fixed now (else it is "Cancel").
+    reset_label: &'static str,
+    current: String,
+    /// Whether a user-given name is set now, so it can be reset.
+    fixed: bool,
+}
 
 /// A tab being dragged to a new position.
 #[derive(Clone, Copy)]
@@ -156,7 +174,7 @@ pub struct Workspace {
     recent: Vec<Location>,
     last_visited: Option<Location>,
     /// Bookmarked directories (Ctrl+D).
-    favorites: Vec<Location>,
+    favorites: Vec<Favorite>,
     /// Whole tabs saved from a tab's context menu.
     favorite_layouts: Vec<FavoriteLayout>,
     /// Personal font family from the config, applied over every theme.
@@ -282,6 +300,8 @@ impl Workspace {
                     this.toggle_favorite(path.clone(), window, cx)
                 }
                 SidebarEvent::RemoveLayout(ix) => this.remove_layout(*ix, window, cx),
+                SidebarEvent::RenameFavorite(id) => this.rename_favorite(id.clone(), window, cx),
+                SidebarEvent::ColorFavorite(id) => this.pick_favorite_color(id.clone(), window, cx),
                 SidebarEvent::ManageConnections => this.open_connections(window, cx),
                 SidebarEvent::Changed => this.schedule_save(cx),
             },
@@ -969,21 +989,152 @@ impl Workspace {
         if path.is_roots() {
             return;
         }
-        let note = if let Some(ix) = self.favorites.iter().position(|f| *f == path) {
-            self.favorites.remove(ix);
-            format!("Removed {} from favorites", path.display_name())
+        let note = if let Some(ix) = self.favorites.iter().position(|f| f.path == path) {
+            let removed = self.favorites.remove(ix);
+            format!("Removed {} from favorites", removed.display_name())
         } else {
-            self.favorites.push(path.clone());
+            self.favorites.push(Favorite::new(path.clone()));
             format!("Added {} to favorites", path.display_name())
         };
-        crate::settings::set_favorites(cx, self.favorites.clone());
+        self.sync_favorites(cx);
+        self.notify(Notification::info(note), window, cx);
+        self.schedule_save(cx);
+    }
+
+    /// Show the bookmarked directories in the sidebar and the panels' stars.
+    fn sync_favorites(&mut self, cx: &mut Context<Self>) {
+        let paths = self.favorites.iter().map(|f| f.path.clone()).collect();
+        crate::settings::set_favorites(cx, paths);
         self.sidebar
             .update(cx, |s, cx| s.set_favorites(&self.favorites, cx));
         // The stars next to the paths follow the list.
         for grid in self.tabs.iter().filter_map(|t| t.grid_view()) {
             grid.update(cx, |grid, cx| grid.redraw_panels(cx));
         }
-        self.notify(Notification::info(note), window, cx);
+    }
+
+    /// The sidebar's context menu: a name for a favorite (a directory gets a
+    /// fixed name instead of its own, or that back; a layout is renamed).
+    fn rename_favorite(&mut self, id: FavoriteId, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity();
+        match id {
+            FavoriteId::Path(path) => {
+                let Some(fav) = self.favorites.iter().find(|f| f.path == path) else {
+                    return;
+                };
+                let (current, fixed) = (fav.display_name(), fav.name.is_some());
+                self.ask_name(
+                    NameAsk {
+                        title: "Rename favorite",
+                        placeholder: "Name",
+                        hint: "A fixed name; empty to show the directory's own name again",
+                        reset_label: "Back to the directory name",
+                        current,
+                        fixed,
+                    },
+                    Rc::new(move |name, _, cx| {
+                        let id = FavoriteId::Path(path.clone());
+                        view.update(cx, |this, cx| this.set_favorite_name(id, name, cx));
+                    }),
+                    window,
+                    cx,
+                );
+            }
+            FavoriteId::Layout(ix) => {
+                let Some(saved) = self.favorite_layouts.get(ix) else {
+                    return;
+                };
+                self.ask_name(
+                    NameAsk {
+                        title: "Rename layout",
+                        placeholder: "Name",
+                        hint: "Tabs opened from the layout take this name as their title",
+                        reset_label: "Cancel",
+                        current: saved.name.clone(),
+                        fixed: false,
+                    },
+                    Rc::new(move |name, _, cx| {
+                        if name.is_some() {
+                            let id = FavoriteId::Layout(ix);
+                            view.update(cx, |this, cx| this.set_favorite_name(id, name, cx));
+                        }
+                    }),
+                    window,
+                    cx,
+                );
+            }
+        }
+    }
+
+    fn set_favorite_name(&mut self, id: FavoriteId, name: Option<String>, cx: &mut Context<Self>) {
+        match id {
+            FavoriteId::Path(path) => {
+                let Some(fav) = self.favorites.iter_mut().find(|f| f.path == path) else {
+                    return;
+                };
+                fav.name = name;
+                self.sync_favorites(cx);
+            }
+            FavoriteId::Layout(ix) => {
+                let (Some(saved), Some(name)) = (self.favorite_layouts.get_mut(ix), name) else {
+                    return;
+                };
+                saved.name = name;
+                self.sync_layouts(cx);
+            }
+        }
+        self.schedule_save(cx);
+    }
+
+    /// The sidebar's context menu: a colour tag for a favorite, with the
+    /// same choices as a tab.
+    fn pick_favorite_color(&mut self, id: FavoriteId, window: &mut Window, cx: &mut Context<Self>) {
+        let current = match &id {
+            FavoriteId::Path(path) => self
+                .favorites
+                .iter()
+                .find(|f| f.path == *path)
+                .map(|f| f.color.clone()),
+            FavoriteId::Layout(ix) => self.favorite_layouts.get(*ix).map(|l| l.tab.color.clone()),
+        };
+        let Some(current) = current else {
+            return;
+        };
+        let view = cx.entity();
+        self.pick_color(
+            "Favorite color",
+            current,
+            Rc::new(move |color, _, cx| {
+                let id = id.clone();
+                view.update(cx, |this, cx| this.set_favorite_color(id, color, cx));
+            }),
+            window,
+            cx,
+        );
+    }
+
+    fn set_favorite_color(
+        &mut self,
+        id: FavoriteId,
+        color: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match id {
+            FavoriteId::Path(path) => {
+                let Some(fav) = self.favorites.iter_mut().find(|f| f.path == path) else {
+                    return;
+                };
+                fav.color = color;
+                self.sync_favorites(cx);
+            }
+            FavoriteId::Layout(ix) => {
+                let Some(saved) = self.favorite_layouts.get_mut(ix) else {
+                    return;
+                };
+                saved.tab.color = color;
+                self.sync_layouts(cx);
+            }
+        }
         self.schedule_save(cx);
     }
 
@@ -1056,26 +1207,50 @@ impl Workspace {
         };
         let current = grid.read(cx).title(cx);
         let fixed = grid.read(cx).custom_title().is_some();
+        self.ask_name(
+            NameAsk {
+                title: "Rename tab",
+                placeholder: "Tab title",
+                hint: "A fixed title; empty to follow the active panel's directory again",
+                reset_label: "Back to the directory name",
+                current,
+                fixed,
+            },
+            Rc::new(move |title, _, cx| {
+                grid.update(cx, |grid, cx| grid.set_title(title, cx));
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// A palette asking for a name. The first row applies the typed text
+    /// (`None` when empty); the second resets to `None` when a name is fixed
+    /// now, else cancels.
+    fn ask_name(
+        &mut self,
+        ask: NameAsk,
+        apply: Apply<Option<String>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let rows = vec![
             PaletteItem::new("Rename").value("").icon(IconName::Check),
-            PaletteItem::new(if fixed {
-                "Back to the directory name"
-            } else {
-                "Cancel"
-            })
-            .value("")
-            .icon(IconName::Close),
+            PaletteItem::new(if ask.fixed { ask.reset_label } else { "Cancel" })
+                .value("")
+                .icon(IconName::Close),
         ];
         const SECOND_ROW: usize = 1;
-        let len = current.len();
+        let len = ask.current.len();
+        let fixed = ask.fixed;
         let palette = cx.new(|cx| {
-            Palette::new(rows, &current, "Tab title", window, cx)
+            Palette::new(rows, &ask.current, ask.placeholder, window, cx)
                 .input_icon(None)
-                .hint("A fixed title; empty to follow the active panel's directory again")
+                .hint(ask.hint)
                 .select_range(0..len)
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
-                    let title = if choice.item == Some(SECOND_ROW) {
+                    let name = if choice.item == Some(SECOND_ROW) {
                         if fixed {
                             None
                         } else {
@@ -1084,14 +1259,12 @@ impl Workspace {
                     } else {
                         Some(choice.value.trim().to_string()).filter(|t| !t.is_empty())
                     };
-                    let grid = grid.clone();
-                    window.defer(cx, move |_, cx| {
-                        grid.update(cx, |grid, cx| grid.set_title(title, cx));
-                    });
+                    let apply = apply.clone();
+                    window.defer(cx, move |window, cx| apply(name, window, cx));
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Rename tab".into(), palette, window, cx);
+        palette::open(ask.title.into(), palette, window, cx);
     }
 
     /// The tab's context menu: a colour tag from the presets, a typed hex,
@@ -1101,6 +1274,27 @@ impl Workspace {
             return;
         };
         let current = grid.read(cx).color().map(str::to_string);
+        self.pick_color(
+            "Tab color",
+            current,
+            Rc::new(move |color, _, cx| {
+                grid.update(cx, |grid, cx| grid.set_color(color, cx));
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// A palette with the preset colours, "Custom…" (a hex asked for next)
+    /// and "No color"; `current` is shown checked.
+    fn pick_color(
+        &mut self,
+        title: &'static str,
+        current: Option<String>,
+        apply: Apply<Option<String>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut items: Vec<PaletteItem> = crate::tab_color::PRESETS
             .iter()
             .map(|(name, hex)| {
@@ -1135,10 +1329,12 @@ impl Workspace {
                     let Some(item) = choice.item else {
                         return;
                     };
-                    let (grid, view) = (grid.clone(), view.clone());
+                    let (view, apply, current) = (view.clone(), apply.clone(), current.clone());
                     window.defer(cx, move |window, cx| {
                         if item == custom_ix {
-                            view.update(cx, |this, cx| this.ask_tab_color(grid, window, cx));
+                            view.update(cx, |this, cx| {
+                                this.ask_color(title, current, apply, window, cx)
+                            });
                             return;
                         }
                         let color = if item == none_ix {
@@ -1148,26 +1344,24 @@ impl Workspace {
                                 .get(item)
                                 .map(|(_, hex)| hex.to_string())
                         };
-                        grid.update(cx, |grid, cx| grid.set_color(color, cx));
+                        apply(color, window, cx);
                     });
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Tab color".into(), palette, window, cx);
+        palette::open(title.into(), palette, window, cx);
     }
 
     /// The hex input behind "Custom…".
-    fn ask_tab_color(
+    fn ask_color(
         &mut self,
-        grid: Entity<GridView>,
+        title: &'static str,
+        current: Option<String>,
+        apply: Apply<Option<String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current = grid
-            .read(cx)
-            .color()
-            .map(str::to_string)
-            .unwrap_or_else(|| "#".into());
+        let current = current.unwrap_or_else(|| "#".into());
         let len = current.len();
         let palette = cx.new(|cx| {
             Palette::new(Vec::new(), &current, "#rrggbb", window, cx)
@@ -1178,10 +1372,8 @@ impl Workspace {
                     match crate::tab_color::normalise(&choice.value) {
                         Some(hex) => {
                             window.close_dialog(cx);
-                            let grid = grid.clone();
-                            window.defer(cx, move |_, cx| {
-                                grid.update(cx, |grid, cx| grid.set_color(Some(hex), cx));
-                            });
+                            let apply = apply.clone();
+                            window.defer(cx, move |window, cx| apply(Some(hex), window, cx));
                         }
                         None => window.push_notification(
                             Notification::error(format!("{}: not a hex color", choice.value)),
@@ -1191,7 +1383,12 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Custom tab color".into(), palette, window, cx);
+        palette::open(
+            format!("Custom {}", title.to_lowercase()).into(),
+            palette,
+            window,
+            cx,
+        );
     }
 
     fn sync_layouts(&mut self, cx: &mut Context<Self>) {

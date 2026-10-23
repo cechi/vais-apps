@@ -82,7 +82,7 @@ pub struct Config {
     /// Directories the focused panel showed most recently, newest first.
     pub recent: Vec<Location>,
     /// Directories bookmarked with Ctrl+D (the sidebar's Favorites group).
-    pub favorites: Vec<Location>,
+    pub favorites: Vec<Favorite>,
     /// Whole tabs (layout + panels) saved from a tab's context menu.
     pub favorite_layouts: Vec<FavoriteLayout>,
     /// Saved remote connections.
@@ -129,6 +129,59 @@ impl Default for Config {
 pub enum TabKind {
     #[default]
     Grid,
+}
+
+/// A bookmarked directory, with an optional fixed name and colour tag.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "FavoriteRepr")]
+pub struct Favorite {
+    pub path: Location,
+    /// A name given by the user; otherwise the directory's own name is shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A colour tag (`#rrggbb`), drawn as a thick left border in the sidebar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+impl Favorite {
+    pub fn new(path: Location) -> Self {
+        Self {
+            path,
+            name: None,
+            color: None,
+        }
+    }
+
+    /// The name shown in the sidebar: the user's, else the directory's.
+    pub fn display_name(&self) -> String {
+        self.name
+            .clone()
+            .unwrap_or_else(|| self.path.display_name())
+    }
+}
+
+/// Earlier files wrote a favorite as its bare path; both forms are read.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FavoriteRepr {
+    Path(Location),
+    Full {
+        path: Location,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+    },
+}
+
+impl From<FavoriteRepr> for Favorite {
+    fn from(repr: FavoriteRepr) -> Self {
+        match repr {
+            FavoriteRepr::Path(path) => Favorite::new(path),
+            FavoriteRepr::Full { path, name, color } => Favorite { path, name, color },
+        }
+    }
 }
 
 /// A tab saved under a name: opening it adds a tab with that layout and panels.
@@ -308,6 +361,30 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn favorites_read_bare_paths_and_tables() {
+        // Earlier files: a list of paths.
+        let cfg: Config = toml::from_str("favorites = [\"/tmp/a\", \"/tmp/b\"]\n").unwrap();
+        assert_eq!(cfg.favorites.len(), 2);
+        assert_eq!(cfg.favorites[0].display_name(), "a");
+        assert!(cfg.favorites[0].name.is_none() && cfg.favorites[0].color.is_none());
+
+        // Now: tables with the optional name and colour.
+        let mut cfg = Config::default();
+        cfg.favorites
+            .push(Favorite::new(Location::Local("/tmp/a".into())));
+        cfg.favorites.push(Favorite {
+            path: Location::Local("/tmp/b".into()),
+            name: Some("Bee".into()),
+            color: Some("#3e63dd".into()),
+        });
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("[[favorites]]"), "{text}");
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.favorites, cfg.favorites);
+        assert_eq!(back.favorites[1].display_name(), "Bee");
+    }
 
     #[test]
     fn roundtrip_and_partial_parse() {

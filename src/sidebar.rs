@@ -23,10 +23,22 @@ pub enum SidebarEvent {
     RemoveFavorite(Location),
     /// Drop a saved layout.
     RemoveLayout(usize),
+    /// Ask for a new name for a favorite.
+    RenameFavorite(FavoriteId),
+    /// Ask for a colour tag for a favorite.
+    ColorFavorite(FavoriteId),
     /// Open the connection manager.
     ManageConnections,
     /// A group was folded or unfolded (worth saving).
     Changed,
+}
+
+/// One of the user's own favorites: a bookmarked directory or a saved layout
+/// (by its index in the workspace's list).
+#[derive(Clone, Debug)]
+pub enum FavoriteId {
+    Path(Location),
+    Layout(usize),
 }
 
 #[derive(Clone)]
@@ -128,23 +140,33 @@ impl Sidebar {
     }
 
     /// The bookmarked directories, in the order they were added.
-    pub fn set_favorites(&mut self, paths: &[Location], cx: &mut Context<Self>) {
+    pub fn set_favorites(&mut self, favorites: &[crate::config::Favorite], cx: &mut Context<Self>) {
         let home = crate::config::home_dir();
-        self.favorites = paths
+        self.favorites = favorites
             .iter()
-            .map(|path| {
-                let parent = path.parent().map(|p| match p.as_local() {
-                    Some(local) => abbreviate(local, &home),
-                    None => p.display(),
-                });
+            .map(|fav| {
+                let path = &fav.path;
+                // A renamed favorite shows the whole path as its detail, the
+                // others only the parent.
+                let detail = if fav.name.is_some() {
+                    Some(match path.as_local() {
+                        Some(local) => abbreviate(local, &home),
+                        None => path.display(),
+                    })
+                } else {
+                    path.parent().map(|p| match p.as_local() {
+                        Some(local) => abbreviate(local, &home),
+                        None => p.display(),
+                    })
+                };
                 Place {
-                    name: path.display_name(),
+                    name: fav.display_name(),
                     path: path.clone(),
                     icon: IconName::Star,
-                    detail: parent.filter(|p| !p.is_empty()),
+                    detail: detail.filter(|p| !p.is_empty()),
                     layout: None,
                     removable: true,
-                    color: None,
+                    color: fav.color.as_deref().and_then(crate::tab_color::parse),
                 }
             })
             .collect();
@@ -358,21 +380,36 @@ impl Sidebar {
                     if !place.removable {
                         return row.into_any_element();
                     }
-                    // Favorites: a context menu to drop them again.
+                    // Favorites: a context menu to rename, colour or drop them.
                     let sidebar = cx.entity();
-                    let path = place.path.clone();
+                    let id = match layout {
+                        Some(ix) => FavoriteId::Layout(ix),
+                        None => FavoriteId::Path(place.path.clone()),
+                    };
                     row.context_menu(move |menu, _, _| {
-                        let (sidebar, path) = (sidebar.clone(), path.clone());
-                        menu.item(PopupMenuItem::new("Remove from favorites").on_click(
-                            move |_, _, cx| {
-                                sidebar.update(cx, |_, cx| {
-                                    cx.emit(match layout {
-                                        Some(ix) => SidebarEvent::RemoveLayout(ix),
-                                        None => SidebarEvent::RemoveFavorite(path.clone()),
-                                    });
-                                });
-                            },
-                        ))
+                        let emit = |event: fn(FavoriteId) -> SidebarEvent| {
+                            let (sidebar, id) = (sidebar.clone(), id.clone());
+                            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                sidebar.update(cx, |_, cx| cx.emit(event(id.clone())));
+                            }
+                        };
+                        menu.item(
+                            PopupMenuItem::new("Rename…")
+                                .on_click(emit(SidebarEvent::RenameFavorite)),
+                        )
+                        .item(
+                            PopupMenuItem::new("Color…")
+                                .on_click(emit(SidebarEvent::ColorFavorite)),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Remove from favorites").on_click(emit(
+                                |id| match id {
+                                    FavoriteId::Layout(ix) => SidebarEvent::RemoveLayout(ix),
+                                    FavoriteId::Path(path) => SidebarEvent::RemoveFavorite(path),
+                                },
+                            )),
+                        )
                     })
                     .into_any_element()
                 }))
