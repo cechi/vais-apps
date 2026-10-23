@@ -1,0 +1,44 @@
+version = 2
+theme = "Cechi Dark"
+ui_scale = 1.15
+sidebar_open = true
+command_line = true
+drop_action = "ask"
+file_icons = "system"
+font_family = "MesloLGS Nerd Font"
+active_tab = 0
+recent = ["/tmp/vais-demo/photos", "/tmp/vais-demo/src"]
+favorites = ["/tmp/vais-demo"]
+favorite_layouts = []
+sidebar_collapsed = ["Volumes"]
+
+[window]
+x = 300.0
+y = 600.0
+w = 1280.0
+h = 800.0
+maximized = false
+
+[[tabs]]
+type = "grid"
+color = "#30a46c"
+
+[tabs.layout]
+rows = 1
+cols = 2
+row_sizes = [1.0]
+col_sizes = [[0.5, 0.5]]
+
+[[tabs.panels]]
+path = "/tmp/vais-demo"
+show_hidden = false
+sort = "name"
+sort_desc = false
+view = "full"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/out"
+show_hidden = false
+sort = "name"
+sort_desc = false
+view = "full"

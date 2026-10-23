@@ -7,7 +7,10 @@ fixed panes it shows a configurable grid of panels (1x2, 2x1, 1x3, 3x1, 2x2, 2x3
 1x1), and the window has tabs, each with its own grid. Built in Rust on
 [gpui-kit](https://gpui-kit.com) (GPUI from Zed).
 
-![VAIS Commander: sidebar, tabs, a 1x2 grid with an expanded tree and marked files](docs/screenshot.png)
+![VAIS Commander demo: quick search, thumbnails, copying marked files, browsing a zip, the command palette and the command line](docs/demo.gif)
+
+The same tour as a video: [docs/demo.mp4](docs/demo.mp4). `scripts/demo/record.sh` records it
+again in a nested niri compositor.
 
 Status: navigation, marking, tabs, layouts, persistence, the file operations (copy, move,
 rename, batch rename, new folder, delete to trash), views, a text editor (F3 / F4),

@@ -1,0 +1,22 @@
+input {
+    keyboard {
+        xkb {
+            layout "us"
+        }
+    }
+}
+output "winit" {
+    mode "1600x1000"
+}
+layout {
+    gaps 0
+    focus-ring { off; }
+    border { off; }
+}
+prefer-no-csd
+hotkey-overlay {
+    skip-at-startup
+}
+window-rule {
+    open-floating true
+}
