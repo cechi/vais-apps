@@ -25,6 +25,8 @@ pub enum SidebarEvent {
     RemoveLayout(usize),
     /// Open the connection manager.
     ManageConnections,
+    /// A group was folded or unfolded (worth saving).
+    Changed,
 }
 
 #[derive(Clone)]
@@ -58,12 +60,14 @@ pub struct Sidebar {
     current: Option<Location>,
     /// Scroll position of the places list, for its scrollbar.
     scroll: ScrollHandle,
+    /// Titles of the folded groups.
+    collapsed: Vec<String>,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
 
 impl Sidebar {
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(collapsed: Vec<String>, _cx: &mut Context<Self>) -> Self {
         let mut this = Self {
             places: Vec::new(),
             favorites: Vec::new(),
@@ -73,6 +77,7 @@ impl Sidebar {
             connections: Vec::new(),
             current: None,
             scroll: ScrollHandle::new(),
+            collapsed,
         };
         this.refresh();
         this
@@ -213,6 +218,26 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// The folded groups, for the config.
+    pub fn collapsed(&self) -> &[String] {
+        &self.collapsed
+    }
+
+    fn is_collapsed(&self, title: &str) -> bool {
+        self.collapsed.iter().any(|t| t == title)
+    }
+
+    fn toggle_group(&mut self, title: &str, cx: &mut Context<Self>) {
+        match self.collapsed.iter().position(|t| t == title) {
+            Some(ix) => {
+                self.collapsed.remove(ix);
+            }
+            None => self.collapsed.push(title.to_string()),
+        }
+        cx.emit(SidebarEvent::Changed);
+        cx.notify();
+    }
+
     pub fn set_current(&mut self, path: Option<Location>, cx: &mut Context<Self>) {
         if self.current != path {
             self.current = path;
@@ -228,18 +253,34 @@ impl Sidebar {
         c: &Colors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let collapsed = self.is_collapsed(title);
         v_flex()
             .w_full()
+            // The header folds the group; a chevron shows the state.
             .child(
-                div()
+                h_flex()
+                    .id(title)
                     .px_3()
                     .pt_2()
                     .pb_1()
+                    .gap_1()
                     .text_xs()
                     .text_color(c.muted_foreground)
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(c.accent_foreground))
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(title, cx)))
+                    .child(
+                        Icon::new(if collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .size_3()
+                        .flex_none(),
+                    )
                     .child(title),
             )
-            .children(places.iter().enumerate().map(|(i, place)| {
+            .when(!collapsed, |d| d.children(places.iter().enumerate().map(|(i, place)| {
                 let ix = offset + i;
                 let selected = place.layout.is_none() && self.current.as_ref() == Some(&place.path);
                 let path = place.path.clone();
@@ -316,7 +357,7 @@ impl Sidebar {
                     ))
                 })
                 .into_any_element()
-            }))
+            })))
     }
 }
 
@@ -424,7 +465,7 @@ impl Render for Sidebar {
                                 let offset = places.len() + volumes.len();
                                 self.render_section("Connections", &connections, offset, &c, cx)
                             })
-                            .child(
+                            .when(!self.is_collapsed("Connections"), |d| d.child(
                                 h_flex()
                                     .id("sidebar-manage-connections")
                                     .w_full()
@@ -440,7 +481,7 @@ impl Render for Sidebar {
                                     }))
                                     .child(Icon::new(IconName::Plus).size_4().flex_none())
                                     .child("Manage connections…"),
-                            )
+                            ))
                             .when(!recent.is_empty(), |d| {
                                 let offset = places.len() + volumes.len() + connections.len();
                                 d.child(self.render_section("Recent", &recent, offset, &c, cx))

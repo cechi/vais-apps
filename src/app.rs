@@ -217,7 +217,7 @@ impl Workspace {
             }),
         );
 
-        let sidebar = cx.new(|cx| Sidebar::new(cx));
+        let sidebar = cx.new(|cx| Sidebar::new(config.sidebar_collapsed.clone(), cx));
         sidebar.update(cx, |s, cx| {
             s.set_recent(&config.recent, cx);
             s.set_favorites(&config.favorites, cx);
@@ -234,6 +234,7 @@ impl Workspace {
                 }
                 SidebarEvent::RemoveLayout(ix) => this.remove_layout(*ix, window, cx),
                 SidebarEvent::ManageConnections => this.open_connections(window, cx),
+                SidebarEvent::Changed => this.schedule_save(cx),
             },
         ));
         let connections = crate::connections::manager(cx);
@@ -1437,6 +1438,7 @@ impl Workspace {
             theme: self.theme.clone(),
             ui_scale: (self.scale * 100.0).round() / 100.0,
             sidebar_open: self.sidebar_open,
+            sidebar_collapsed: self.sidebar.read(cx).collapsed().to_vec(),
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
             window: self.window_cfg,

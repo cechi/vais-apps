@@ -56,6 +56,8 @@ pub struct Config {
     pub ui_scale: f32,
     /// Whether the places sidebar is shown.
     pub sidebar_open: bool,
+    /// Sidebar groups folded away (by title: Favorites, Volumes, Connections, Recent).
+    pub sidebar_collapsed: Vec<String>,
     /// Whether the command line under the panels is shown.
     pub command_line: bool,
     /// Commands run from the command line, oldest first.
@@ -93,6 +95,7 @@ impl Default for Config {
             theme: ThemeChoice::default(),
             ui_scale: 1.0,
             sidebar_open: false,
+            sidebar_collapsed: Vec::new(),
             command_line: true,
             command_history: Vec::new(),
             drop_action: DropAction::Ask,
