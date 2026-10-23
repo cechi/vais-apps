@@ -31,6 +31,8 @@ struct Session {
 
 pub struct AgentsPanel {
     agents: Vec<Agent>,
+    /// `VAIS_BRIDGE` and friends: how a session's agent reaches the app.
+    bridge_env: Vec<(String, String)>,
     sessions: Vec<Session>,
     active: usize,
     /// Where new sessions start: the active file panel's directory.
@@ -41,9 +43,10 @@ pub struct AgentsPanel {
 impl EventEmitter<AgentsEvent> for AgentsPanel {}
 
 impl AgentsPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(bridge_env: Vec<(String, String)>, cx: &mut Context<Self>) -> Self {
         Self {
             agents: detect::available(),
+            bridge_env,
             sessions: Vec::new(),
             active: 0,
             default_cwd: None,
@@ -72,7 +75,7 @@ impl AgentsPanel {
 
     /// Start `agent` in a new session tab and focus it.
     pub fn start(&mut self, agent: &Agent, window: &mut Window, cx: &mut Context<Self>) {
-        let launch = launch_for(agent, self.default_cwd.clone());
+        let launch = launch_for(agent, self.default_cwd.clone(), &self.bridge_env);
         let view = cx.new(|cx| TerminalView::new(launch, cx));
         let subscription = cx.subscribe(
             &view,
@@ -171,7 +174,7 @@ impl AgentsPanel {
 
 /// How to run an installed agent: the program itself, in the active panel's
 /// directory. The MCP server is wired in the launcher step.
-fn launch_for(agent: &Agent, cwd: Option<PathBuf>) -> Launch {
+fn launch_for(agent: &Agent, cwd: Option<PathBuf>, bridge_env: &[(String, String)]) -> Launch {
     let mut args = Vec::new();
     if agent.kind == AgentKind::Shell && cfg!(target_os = "macos") {
         args.push("-l".to_string());
@@ -180,7 +183,7 @@ fn launch_for(agent: &Agent, cwd: Option<PathBuf>) -> Launch {
         program: agent.path.to_string_lossy().into_owned(),
         args,
         cwd: cwd.or_else(|| Some(crate::config::home_dir())),
-        env: Vec::new(),
+        env: bridge_env.to_vec(),
     }
 }
 

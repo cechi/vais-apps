@@ -1,6 +1,8 @@
 //! The workspace: tabs (each with its own content), theme and persistence.
 
 use std::path::Path;
+
+use futures::StreamExt as _;
 use std::time::Duration;
 
 use crate::theme;
@@ -17,7 +19,10 @@ use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+mod tools;
+
 use crate::agents::{AgentsEvent, AgentsPanel};
+use crate::bridge::BridgeAddr;
 use crate::command_line::{CommandLine, CommandLineEvent};
 use crate::config::{CONFIG_VERSION, Config, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig};
 use crate::connections::{ConnectionEvent, ConnectionManager, Status};
@@ -131,6 +136,8 @@ pub struct Workspace {
     sidebar_open: bool,
     command_line: Entity<CommandLine>,
     command_line_open: bool,
+    /// Where the bridge for agents listens (`None` when it could not start).
+    bridge_addr: Option<BridgeAddr>,
     /// The Agents panel at the right edge (terminals with coding agents).
     agents: Entity<AgentsPanel>,
     agents_open: bool,
@@ -168,8 +175,34 @@ impl Workspace {
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.on_app_quit(|this, cx| {
             this.save_now(cx);
+            if let Some(addr) = &this.bridge_addr {
+                crate::bridge::cleanup(addr);
+            }
             std::future::ready(())
         }));
+
+        // The bridge: tool calls from agents, carried out on the foreground.
+        let bridge_addr = match crate::bridge::start() {
+            Ok((addr, mut requests)) => {
+                cx.spawn_in(window, async move |this, cx| {
+                    while let Some(request) = requests.next().await {
+                        let handled = this.update_in(cx, |this, window, cx| {
+                            this.handle_tool(request, window, cx)
+                        });
+                        if handled.is_err() {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+                log::info!("bridge listening: {addr:?}");
+                Some(addr)
+            }
+            Err(err) => {
+                log::warn!("bridge not started: {err}");
+                None
+            }
+        };
 
         // Theme reloads (file watcher, mode switches) reset the font size to the
         // theme's own value; put the scale back whenever that happens.
@@ -276,7 +309,11 @@ impl Workspace {
             },
         ));
 
-        let agents = cx.new(|cx| AgentsPanel::new(cx));
+        let bridge_env = bridge_addr
+            .as_ref()
+            .map(BridgeAddr::env)
+            .unwrap_or_default();
+        let agents = cx.new(|cx| AgentsPanel::new(bridge_env, cx));
         subscriptions.push(
             cx.subscribe_in(
                 &agents,
@@ -294,6 +331,7 @@ impl Workspace {
             sidebar_open: config.sidebar_open,
             command_line,
             command_line_open: config.command_line,
+            bridge_addr,
             agents,
             agents_open: config.agents_open,
             agents_width: if config.agents_width.is_finite() && config.agents_width >= 200.0 {

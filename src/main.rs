@@ -1,5 +1,6 @@
 mod agents;
 mod app;
+mod bridge;
 mod clipboard;
 mod command_line;
 mod config;
@@ -11,6 +12,7 @@ mod grid_view;
 mod icons;
 mod keymap;
 mod layout;
+mod mcp;
 mod ops;
 mod ops_panel;
 mod palette;
@@ -37,6 +39,11 @@ use crate::config::Config;
 
 fn main() {
     env_logger::init();
+    // `vais-commander --mcp`: the MCP server a coding agent talks to; it
+    // forwards every tool call to the running app.
+    if std::env::args().nth(1).as_deref() == Some("--mcp") {
+        std::process::exit(mcp::run());
+    }
     let config = Config::load();
 
     application().with_assets(assets::Assets).run(move |cx| {

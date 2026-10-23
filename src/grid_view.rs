@@ -127,6 +127,11 @@ impl GridView {
         self.layout
     }
 
+    /// Every panel slot (only the first rows x cols are shown).
+    pub fn panels(&self) -> &[Entity<FilePanel>] {
+        &self.panels
+    }
+
     pub fn active_index(&self) -> usize {
         self.active
     }
