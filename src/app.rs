@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::theme;
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -12,10 +13,11 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::agents::{AgentsEvent, AgentsPanel};
 use crate::command_line::{CommandLine, CommandLineEvent};
 use crate::config::{CONFIG_VERSION, Config, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig};
 use crate::connections::{ConnectionEvent, ConnectionManager, Status};
@@ -129,6 +131,10 @@ pub struct Workspace {
     sidebar_open: bool,
     command_line: Entity<CommandLine>,
     command_line_open: bool,
+    /// The Agents panel at the right edge (terminals with coding agents).
+    agents: Entity<AgentsPanel>,
+    agents_open: bool,
+    agents_width: f32,
     connections: Entity<ConnectionManager>,
     /// Directories the focused panel showed, newest first (the sidebar's
     /// Recent group); `last_visited` is what was noted last.
@@ -270,6 +276,17 @@ impl Workspace {
             },
         ));
 
+        let agents = cx.new(|cx| AgentsPanel::new(cx));
+        subscriptions.push(
+            cx.subscribe_in(
+                &agents,
+                window,
+                |this, _panel, event, window, cx| match event {
+                    AgentsEvent::CloseRequested => this.toggle_agents(window, cx),
+                },
+            ),
+        );
+
         let mut this = Self {
             tabs: Vec::new(),
             active_tab: 0,
@@ -277,6 +294,13 @@ impl Workspace {
             sidebar_open: config.sidebar_open,
             command_line,
             command_line_open: config.command_line,
+            agents,
+            agents_open: config.agents_open,
+            agents_width: if config.agents_width.is_finite() && config.agents_width >= 200.0 {
+                config.agents_width
+            } else {
+                420.0
+            },
             connections,
             recent: config.recent.clone(),
             last_visited: None,
@@ -1477,6 +1501,8 @@ impl Workspace {
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
             command_history: self.command_line.read(cx).history().to_vec(),
+            agents_open: self.agents_open,
+            agents_width: self.current_agents_width(cx),
             ..Default::default()
         };
         if let Err(err) = config.save() {
@@ -1497,6 +1523,69 @@ impl Workspace {
             h: bounds.size.height.as_f32(),
             maximized,
         });
+    }
+
+    // ----- agents panel ----------------------------------------------------
+
+    /// The panel's width as last laid out (the third resizable panel), else
+    /// the remembered one.
+    fn current_agents_width(&self, cx: &App) -> f32 {
+        if !self.agents_open {
+            return self.agents_width;
+        }
+        self.side_split
+            .read(cx)
+            .sizes()
+            .get(2)
+            .map(|w| w.as_f32())
+            .filter(|w| *w >= 200.0)
+            .unwrap_or(self.agents_width)
+    }
+
+    fn toggle_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.agents_open {
+            self.agents_width = self.current_agents_width(cx);
+            self.agents_open = false;
+            self.focus_active_panel(window, cx);
+        } else {
+            self.agents_open = true;
+            self.agents.update(cx, |panel, cx| panel.refresh(cx));
+            let focus = self.agents.read(cx).focus_handle().clone();
+            focus.focus(window, cx);
+        }
+        self.schedule_save(cx);
+        cx.notify();
+    }
+
+    fn on_toggle_agents(&mut self, _: &ToggleAgents, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_agents(window, cx);
+    }
+
+    /// Ctrl+`: into the Agents panel (opening it), or back to the files.
+    fn on_focus_agents(&mut self, _: &FocusAgents, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.agents.read(cx).focus_handle().clone();
+        if self.agents_open && focus.contains_focused(window, cx) {
+            self.focus_active_panel(window, cx);
+            return;
+        }
+        if !self.agents_open {
+            self.agents_open = true;
+            self.agents.update(cx, |panel, cx| panel.refresh(cx));
+            self.schedule_save(cx);
+        }
+        focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn on_new_agent_session(
+        &mut self,
+        _: &NewAgentSession,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.agents_open {
+            self.toggle_agents(window, cx);
+        }
     }
 
     // ----- command line --------------------------------------------------
@@ -1992,6 +2081,7 @@ impl Workspace {
         // them up to the workspace.
         let sidebar_open = self.sidebar_open;
         let ops_open = self.ops_panel_open;
+        let agents_open = self.agents_open;
         let app_menu = Button::new("app-menu")
             .ghost()
             .small()
@@ -2010,6 +2100,7 @@ impl Workspace {
                         ops_open,
                         Box::new(ToggleOperationsPanel),
                     )
+                    .menu_with_check("Agents panel", agents_open, Box::new(ToggleAgents))
                     .separator()
                     .menu("New tab", Box::new(NewTab))
                     .menu("Close tab", Box::new(CloseTab))
@@ -2217,6 +2308,15 @@ impl Render for Workspace {
                 IconName::PanelLeftOpen
             })
             .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)));
+        let agents_toggle = Button::new("agents-toggle")
+            .ghost()
+            .xsmall()
+            .icon(Icon::new(if self.agents_open {
+                Lucide::PanelRightClose
+            } else {
+                Lucide::PanelRightOpen
+            }))
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_agents(window, cx)));
 
         v_flex()
             .key_context(WORKSPACE_CONTEXT)
@@ -2235,6 +2335,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_focus_command_line))
             .on_action(cx.listener(Self::on_command_palette))
+            .on_action(cx.listener(Self::on_toggle_agents))
+            .on_action(cx.listener(Self::on_focus_agents))
+            .on_action(cx.listener(Self::on_new_agent_session))
             .on_action(cx.listener(Self::on_toggle_favorite))
             .on_action(cx.listener(Self::on_insert_name))
             .on_action(cx.listener(Self::on_insert_path))
@@ -2256,7 +2359,13 @@ impl Render for Workspace {
                                 .visible(self.sidebar_open)
                                 .child(self.sidebar.clone()),
                         )
-                        .child(resizable_panel().child(main_column)),
+                        .child(resizable_panel().child(main_column))
+                        .child(
+                            resizable_panel()
+                                .size(px(self.agents_width))
+                                .visible(self.agents_open)
+                                .child(self.agents.clone()),
+                        ),
                 ),
             )
             .child(
@@ -2280,7 +2389,8 @@ impl Render for Workspace {
                             .text_right()
                             .child(status_right),
                     )
-                    .child(scale_control),
+                    .child(scale_control)
+                    .child(agents_toggle),
             )
     }
 }

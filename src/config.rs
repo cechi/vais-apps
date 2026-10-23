@@ -60,6 +60,9 @@ pub struct Config {
     pub sidebar_collapsed: Vec<String>,
     /// Whether the command line under the panels is shown.
     pub command_line: bool,
+    /// Whether the Agents panel at the right is shown, and how wide it is.
+    pub agents_open: bool,
+    pub agents_width: f32,
     /// Commands run from the command line, oldest first.
     pub command_history: Vec<String>,
     /// What dragging entries onto a directory does: ask, move or copy.
@@ -97,6 +100,8 @@ impl Default for Config {
             sidebar_open: false,
             sidebar_collapsed: Vec::new(),
             command_line: true,
+            agents_open: false,
+            agents_width: 420.0,
             command_history: Vec::new(),
             drop_action: DropAction::Ask,
             file_icons: FileIcons::System,

@@ -11,6 +11,12 @@ pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 pub const COMMAND_LINE_CONTEXT: &str = "CommandLine";
+/// The embedded terminal in the Agents panel. Workspace bindings a terminal
+/// program would want for itself (Ctrl+T, F10, …) are bound with
+/// [`WORKSPACE_NOT_TERMINAL`] so they never fire while it has the focus.
+#[allow(dead_code)] // the terminal view (next step) sets it
+pub const TERMINAL_CONTEXT: &str = "Terminal";
+pub const WORKSPACE_NOT_TERMINAL: &str = "Workspace && !Terminal";
 pub const PALETTE_CONTEXT: &str = "Palette";
 pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
@@ -31,6 +37,9 @@ actions!(
         ToggleSidebar,
         OpenSettings,
         CommandPalette,
+        ToggleAgents,
+        FocusAgents,
+        NewAgentSession,
         ToggleFavorite,
         FocusCommandLine,
         InsertNameToCommandLine,
@@ -162,6 +171,8 @@ pub struct ToggleColumn {
 /// Finder's Cmd+Shift+. and panel focus uses Cmd+Alt+arrows there.
 pub fn bindings() -> Vec<KeyBinding> {
     let w = Some(WORKSPACE_CONTEXT);
+    // Workspace bindings the terminal must be able to swallow.
+    let wt = Some(WORKSPACE_NOT_TERMINAL);
     let g = Some(GRID_CONTEXT);
     let p = Some(PANEL_CONTEXT);
     let mac = cfg!(target_os = "macos");
@@ -174,26 +185,28 @@ pub fn bindings() -> Vec<KeyBinding> {
 
     let mut v = vec![
         // Workspace: tabs, theme, zoom, quit
-        KeyBinding::new("secondary-t", NewTab, w),
-        KeyBinding::new("secondary-w", CloseTab, w),
-        KeyBinding::new("ctrl-tab", NextTab, w),
-        KeyBinding::new("ctrl-shift-tab", PrevTab, w),
-        KeyBinding::new("ctrl-pagedown", NextTab, w),
-        KeyBinding::new("ctrl-pageup", PrevTab, w),
+        KeyBinding::new("secondary-t", NewTab, wt),
+        KeyBinding::new("secondary-w", CloseTab, wt),
+        KeyBinding::new("ctrl-tab", NextTab, wt),
+        KeyBinding::new("ctrl-shift-tab", PrevTab, wt),
+        KeyBinding::new("ctrl-pagedown", NextTab, wt),
+        KeyBinding::new("ctrl-pageup", PrevTab, wt),
         KeyBinding::new("secondary-shift-d", ToggleTheme, w),
         KeyBinding::new("secondary-shift-t", ChooseTheme, w),
-        KeyBinding::new("secondary-j", ToggleOperationsPanel, w),
-        KeyBinding::new("secondary-b", ToggleSidebar, w),
-        KeyBinding::new("secondary-,", OpenSettings, w),
+        KeyBinding::new("secondary-j", ToggleOperationsPanel, wt),
+        KeyBinding::new("secondary-b", ToggleSidebar, wt),
+        KeyBinding::new("secondary-,", OpenSettings, wt),
         KeyBinding::new("secondary-shift-p", CommandPalette, w),
-        KeyBinding::new("secondary-d", ToggleFavorite, w),
-        KeyBinding::new("secondary-e", FocusCommandLine, w),
+        KeyBinding::new("secondary-shift-b", ToggleAgents, w),
+        KeyBinding::new("secondary-`", FocusAgents, w),
+        KeyBinding::new("secondary-d", ToggleFavorite, wt),
+        KeyBinding::new("secondary-e", FocusCommandLine, wt),
         KeyBinding::new("secondary-enter", InsertNameToCommandLine, p),
         KeyBinding::new("secondary-shift-enter", InsertPathToCommandLine, p),
         KeyBinding::new("up", CommandHistoryPrev, Some(COMMAND_LINE_CONTEXT)),
         KeyBinding::new("down", CommandHistoryNext, Some(COMMAND_LINE_CONTEXT)),
         KeyBinding::new("escape", CommandLineCancel, Some(COMMAND_LINE_CONTEXT)),
-        KeyBinding::new("secondary-k", OpenConnections, w),
+        KeyBinding::new("secondary-k", OpenConnections, wt),
         KeyBinding::new("escape", CloseConnections, Some(CONNECTIONS_CONTEXT)),
         KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("secondary-s", SaveFile, Some(EDITOR_CONTEXT)),
@@ -202,8 +215,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-+", ZoomIn, w),
         KeyBinding::new("secondary--", ZoomOut, w),
         KeyBinding::new("secondary-0", ZoomReset, w),
-        KeyBinding::new("secondary-q", Quit, w),
-        KeyBinding::new("f10", Quit, w),
+        KeyBinding::new("secondary-q", Quit, wt),
+        KeyBinding::new("f10", Quit, wt),
         // Grid: file operations (Commander F-keys)
         KeyBinding::new("f3", ViewFile, g),
         KeyBinding::new("f4", EditFile, g),
@@ -325,7 +338,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         v.push(KeyBinding::new(
             &format!("secondary-{}", i + 1),
             ActivateTab { index: i },
-            w,
+            wt,
         ));
     }
     v
@@ -358,11 +371,10 @@ pub fn commands() -> Vec<Command> {
         .collect();
     let mut out: Vec<Command> = Vec::new();
     for binding in bindings() {
-        // As in dispatch, a binding applies when its predicate holds for
-        // some node of the focus path (the path up to that node).
-        let applies = binding.predicate().is_none_or(|predicate| {
-            (1..=contexts.len()).any(|end| predicate.eval(&contexts[..end]))
-        });
+        // As in dispatch: the predicate holds at some depth of the focus path.
+        let applies = binding
+            .predicate()
+            .is_none_or(|predicate| predicate.depth_of(&contexts).is_some());
         if !applies {
             continue;
         }
@@ -466,6 +478,7 @@ fn pretty_keys(keystroke: &str) -> String {
 #[cfg(test)]
 mod palette_tests {
     use super::{commands, pretty_keys};
+    use gpui_kit::KeyContext;
 
     #[test]
     fn keys_read_like_a_manual() {
@@ -473,6 +486,42 @@ mod palette_tests {
         assert_eq!(pretty_keys("ctrl--"), "Ctrl+-");
         assert_eq!(pretty_keys("enter"), "Enter");
         assert_eq!(pretty_keys("alt-left"), "Alt+←");
+    }
+
+    /// With the terminal focused, the bindings a terminal program needs
+    /// (Ctrl+T, Ctrl+W, F10, …) must not match; global ones still do.
+    #[test]
+    fn terminal_swallows_workspace_keys() {
+        let stack: Vec<KeyContext> = [super::WORKSPACE_CONTEXT, super::TERMINAL_CONTEXT]
+            .iter()
+            .map(|c| KeyContext::parse(c).unwrap())
+            .collect();
+        let matches = |name: &str| {
+            super::bindings().iter().any(|b| {
+                b.action().name().ends_with(name)
+                    && b.predicate().is_none_or(|p| p.depth_of(&stack).is_some())
+            })
+        };
+        for swallowed in [
+            "::NewTab",
+            "::CloseTab",
+            "::Quit",
+            "::ToggleSidebar",
+            "::ActivateTab",
+        ] {
+            assert!(
+                !matches(swallowed),
+                "{swallowed} must not reach the workspace"
+            );
+        }
+        for global in [
+            "::CommandPalette",
+            "::ToggleAgents",
+            "::FocusAgents",
+            "::ZoomIn",
+        ] {
+            assert!(matches(global), "{global} must still work");
+        }
     }
 
     #[test]
