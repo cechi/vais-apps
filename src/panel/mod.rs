@@ -139,6 +139,8 @@ pub struct FilePanel {
     marquee: Option<Marquee>,
     /// The destination palette points at this panel.
     highlighted: bool,
+    /// Keep the active look while the focus is lent to the Agents panel.
+    focus_lent: bool,
     view: ViewMode,
     columns: Columns,
     /// Entries per line in a grid view (1 in the full view); measured from
@@ -248,6 +250,7 @@ impl FilePanel {
             press_on_cursor: false,
             marquee: None,
             highlighted: false,
+            focus_lent: false,
             view: cfg.view,
             columns: cfg.columns,
             per_row: 1,
@@ -260,6 +263,15 @@ impl FilePanel {
 
     /// Draw the accent border even without focus (the destination palette
     /// points at this panel).
+    /// The focus sits in the Agents panel: this panel stays the active one
+    /// visually, so the user (and the agent) see which panel is meant.
+    pub fn set_focus_lent(&mut self, lent: bool, cx: &mut Context<Self>) {
+        if self.focus_lent != lent {
+            self.focus_lent = lent;
+            cx.notify();
+        }
+    }
+
     pub fn set_highlighted(&mut self, on: bool, cx: &mut Context<Self>) {
         if self.highlighted != on {
             self.highlighted = on;
@@ -2183,7 +2195,7 @@ impl Render for FilePanel {
             theme.danger,
         );
 
-        let active = self.focus_handle.contains_focused(window, cx);
+        let active = self.focus_handle.contains_focused(window, cx) || self.focus_lent;
         let body_drop_bg = colors.primary.alpha(0.12);
         let marquee_color = colors.primary;
         // A press on a marked row belongs to the file drag, not the rubber band.

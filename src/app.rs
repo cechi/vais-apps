@@ -318,6 +318,15 @@ impl Workspace {
             .map(BridgeAddr::env)
             .unwrap_or_default();
         let agents = cx.new(|cx| AgentsPanel::new(bridge_env, cx));
+        // While the focus is in the Agents panel, the active file panel
+        // keeps its active look: the user and the agent see the same thing.
+        let agents_root = agents.read(cx).root_focus_handle().clone();
+        subscriptions.push(cx.on_focus_in(&agents_root, window, |this, _, cx| {
+            this.lend_focus(true, cx)
+        }));
+        subscriptions.push(cx.on_focus_out(&agents_root, window, |this, _, _, cx| {
+            this.lend_focus(false, cx)
+        }));
         subscriptions.push(
             cx.subscribe_in(
                 &agents,
@@ -1583,6 +1592,12 @@ impl Workspace {
             .map(|w| w.as_f32())
             .filter(|w| *w >= 200.0)
             .unwrap_or(self.agents_width)
+    }
+
+    fn lend_focus(&mut self, lent: bool, cx: &mut Context<Self>) {
+        if let Some(grid) = self.active_tab().grid_view().cloned() {
+            grid.update(cx, |grid, cx| grid.set_focus_lent(lent, cx));
+        }
     }
 
     fn toggle_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {

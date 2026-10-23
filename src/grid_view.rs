@@ -232,6 +232,17 @@ impl GridView {
         cx.notify();
     }
 
+    /// The focus went to (or came back from) the Agents panel: the active
+    /// panel keeps (or drops) its active look.
+    pub fn set_focus_lent(&mut self, lent: bool, cx: &mut Context<Self>) {
+        for (ix, panel) in self.panels.iter().enumerate() {
+            let active = self.active;
+            panel.update(cx, |panel, cx| {
+                panel.set_focus_lent(lent && ix == active, cx)
+            });
+        }
+    }
+
     pub fn focus_panel(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if ix < self.layout.count() {
             let handle = self.panels[ix].focus_handle(cx);

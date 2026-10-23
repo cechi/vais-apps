@@ -61,6 +61,11 @@ impl AgentsPanel {
         cx.notify();
     }
 
+    /// The handle every session sits under (focus in/out of the whole panel).
+    pub fn root_focus_handle(&self) -> &FocusHandle {
+        &self.focus_handle
+    }
+
     /// The focus target: the active terminal, else the panel itself.
     pub fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.sessions
