@@ -105,7 +105,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting. With no files waiting, `Ctrl+V` saves an image from the system clipboard (a screenshot, a copied picture) into the directory, asking for the file name first |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F3` / `F4` | View / edit the file under the cursor in an editor tab (see Editor) |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |

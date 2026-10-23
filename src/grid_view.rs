@@ -756,7 +756,9 @@ impl GridView {
     fn paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let clip = clipboard::get(cx);
         if clip.is_empty() {
-            self.notify(Notification::warning("Nothing to paste"), window, cx);
+            if !self.paste_image(window, cx) {
+                self.notify(Notification::warning("Nothing to paste"), window, cx);
+            }
             return;
         }
         let dest = canonical(self.active_panel().read(cx).path().clone());
@@ -776,6 +778,109 @@ impl GridView {
         }
         let kind = if clip.cut { OpKind::Move } else { OpKind::Copy };
         self.confirm_transfer(kind, sources, dest, window, cx);
+    }
+
+    /// The system clipboard holds an image (a screenshot, a copied picture):
+    /// ask for a file name and save it into the active panel's directory.
+    /// `false` when there is no image.
+    fn paste_image(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(item) = cx.read_from_clipboard() else {
+            return false;
+        };
+        let Some(image) = item.entries().iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image.clone()),
+            _ => None,
+        }) else {
+            return false;
+        };
+        let dest = self.active_panel().read(cx).path().clone();
+        if dest.is_archive() {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return true;
+        }
+        if dest.is_roots() {
+            self.notify(
+                Notification::error("Pick a directory to save the image in"),
+                window,
+                cx,
+            );
+            return true;
+        }
+        let extension = image.format.extension();
+        let default = format!(
+            "clipboard-{}.{extension}",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        );
+        let description = format!(
+            "{} image, {}",
+            extension.to_uppercase(),
+            crate::fs::format::human_size(image.bytes.len() as u64)
+        );
+        let bytes = std::sync::Arc::new(image.bytes);
+        let view = cx.entity();
+        let stem = stem_len(&default, false);
+        let palette = cx.new(|cx| {
+            let (dest_for_confirm, hint) = (dest.clone(), format!("in {}", dest.display()));
+            Palette::new(Vec::new(), &default, "File name", window, cx)
+                .input_icon(Some(IconName::File))
+                .description(description)
+                .hint(hint)
+                .select_range(0..stem)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, dest, bytes) =
+                        (view.clone(), dest_for_confirm.clone(), bytes.clone());
+                    let name = choice.value.trim().to_string();
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.save_clipboard_image(dest, name, bytes, window, cx);
+                        });
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Save image from clipboard".into(), palette, window, cx);
+        true
+    }
+
+    fn save_clipboard_image(
+        &mut self,
+        dest: Location,
+        name: String,
+        bytes: std::sync::Arc<Vec<u8>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if name.is_empty() || name.contains(['/', '\\']) {
+            self.notify(Notification::error("Not a valid file name"), window, cx);
+            return;
+        }
+        let target = dest.join(&name);
+        if backend_for(&target).is_ok_and(|b| b.exists(&target)) {
+            self.notify(
+                Notification::error(format!("{name}: a file with that name already exists")),
+                window,
+                cx,
+            );
+            return;
+        }
+        // Writing may go to a connection: keep it off the UI thread.
+        let task = cx.background_spawn({
+            let target = target.clone();
+            async move { crate::vfs::write_all(&target, &bytes).map_err(|e| e.to_string()) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => {
+                    this.refresh_active(Some(target), cx);
+                    this.notify(Notification::success(format!("Saved {name}")), window, cx);
+                }
+                Err(err) => this.notify(Notification::error(format!("{name}: {err}")), window, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Re-render every panel (cut entries are dimmed) and tell the workspace.
