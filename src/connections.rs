@@ -227,7 +227,13 @@ pub enum ConnectError {
 pub struct ConnectionManager {
     configs: Vec<ConnectionConfig>,
     status: HashMap<ConnId, Status>,
+    /// When each connection was last tried, so a failing one is not retried
+    /// in a loop by every panel reload.
+    last_attempt: HashMap<ConnId, std::time::Instant>,
 }
+
+/// A failed connection is tried again on demand at most this often.
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl EventEmitter<ConnectionEvent> for ConnectionManager {}
 
@@ -238,6 +244,7 @@ pub fn init(configs: Vec<ConnectionConfig>, cx: &mut App) -> Entity<ConnectionMa
     let manager = cx.new(|_| ConnectionManager {
         configs,
         status: HashMap::new(),
+        last_attempt: HashMap::new(),
     });
     cx.set_global(Handle(manager.clone()));
     manager
@@ -253,7 +260,11 @@ pub fn ensure(conn: &ConnId, cx: &mut App) -> Status {
     let manager = manager(cx);
     manager.update(cx, |this, cx| {
         let status = this.status(conn);
-        if status == Status::Disconnected || matches!(status, Status::Failed(_)) {
+        let retry_due = this
+            .last_attempt
+            .get(conn)
+            .is_none_or(|at| at.elapsed() >= RETRY_AFTER);
+        if status == Status::Disconnected || (matches!(status, Status::Failed(_)) && retry_due) {
             this.connect(conn, None, false, cx);
         }
         this.status(conn)
@@ -330,6 +341,8 @@ impl ConnectionManager {
             return;
         }
         self.status.insert(conn.clone(), Status::Connecting);
+        self.last_attempt
+            .insert(conn.clone(), std::time::Instant::now());
         cx.emit(ConnectionEvent::Changed(conn.clone()));
         cx.notify();
 
