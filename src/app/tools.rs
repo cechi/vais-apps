@@ -102,6 +102,18 @@ impl Workspace {
         }
     }
 
+    /// A grid for a tool that names its paths itself: the active tab when
+    /// it shows files, else the first file tab (an editor may be in front).
+    fn tool_any_grid(&self) -> Result<Entity<GridView>, ToolError> {
+        if let Ok((_, grid)) = self.tool_grid(None) {
+            return Ok(grid);
+        }
+        self.tabs
+            .iter()
+            .find_map(|t| t.grid_view().cloned())
+            .ok_or_else(|| ToolError::rejected("no file tab is open"))
+    }
+
     /// The panel `panel` (default the active one) of the grid.
     fn tool_panel(
         &self,
@@ -261,7 +273,7 @@ impl Workspace {
             .map(|p| crate::panel::expand_path(p.trim()))
             .collect();
         let dest = crate::panel::expand_path(arg_str(args, "dest")?.trim());
-        let (_, grid) = self.tool_grid(None)?;
+        let grid = self.tool_any_grid()?;
         let on_outcome = self.tool_outcome(reply, cx);
         grid.update(cx, |grid, cx| {
             grid.confirm_transfer_with(kind, sources, dest, Some(on_outcome), window, cx)
@@ -284,7 +296,7 @@ impl Workspace {
             return Err(ToolError::rejected("not the roots listing"));
         }
         let permanent = arg_bool(args, "permanent", false)?;
-        let (_, grid) = self.tool_grid(None)?;
+        let grid = self.tool_any_grid()?;
         let on_outcome = self.tool_outcome(reply, cx);
         grid.update(cx, |grid, cx| {
             grid.confirm_delete(
@@ -335,7 +347,7 @@ impl Workspace {
         let old_name = path
             .file_name()
             .ok_or_else(|| ToolError::invalid("no file name"))?;
-        let (_, grid) = self.tool_grid(None)?;
+        let grid = self.tool_any_grid()?;
         let renamed = grid
             .update(cx, |grid, cx| {
                 grid.rename_quiet(&base, &old_name, &new_name, cx)
@@ -352,7 +364,7 @@ impl Workspace {
         let name = path
             .file_name()
             .ok_or_else(|| ToolError::invalid("no directory name"))?;
-        let (_, grid) = self.tool_grid(None)?;
+        let grid = self.tool_any_grid()?;
         let created = grid
             .update(cx, |grid, cx| grid.make_dir_quiet(&base, &name, cx))
             .map_err(ToolError::rejected)?;

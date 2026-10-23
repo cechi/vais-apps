@@ -247,9 +247,10 @@ mod tests {
 
     #[test]
     fn tool_calls_need_the_app() {
-        // Without VAIS_BRIDGE the call fails as a tool error, not a crash.
+        // With no app behind the address the call fails as a tool error,
+        // not a crash.
         let mut session = Session::default();
-        unsafe { std::env::remove_var("VAIS_BRIDGE") };
+        unsafe { std::env::set_var("VAIS_BRIDGE", "unix:/nonexistent/vais-bridge.sock") };
         let reply = handle(
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_state","arguments":{}}}"#,
             &mut session,
