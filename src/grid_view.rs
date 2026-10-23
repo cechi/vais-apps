@@ -819,15 +819,25 @@ impl GridView {
         let bytes = std::sync::Arc::new(image.bytes);
         let view = cx.entity();
         let stem = stem_len(&default, false);
+        // Two buttons under the name: Enter on the input or the Save row
+        // saves, the Cancel row (or Esc) does nothing.
+        let rows = vec![
+            PaletteItem::new("Save").value("").icon(IconName::Check),
+            PaletteItem::new("Cancel").value("").icon(IconName::Close),
+        ];
+        const CANCEL_ROW: usize = 1;
         let palette = cx.new(|cx| {
             let (dest_for_confirm, hint) = (dest.clone(), format!("in {}", dest.display()));
-            Palette::new(Vec::new(), &default, "File name", window, cx)
+            Palette::new(rows, &default, "File name", window, cx)
                 .input_icon(Some(IconName::File))
                 .description(description)
                 .hint(hint)
                 .select_range(0..stem)
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
+                    if choice.item == Some(CANCEL_ROW) {
+                        return;
+                    }
                     let (view, dest, bytes) =
                         (view.clone(), dest_for_confirm.clone(), bytes.clone());
                     let name = choice.value.trim().to_string();

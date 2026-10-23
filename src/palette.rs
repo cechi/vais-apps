@@ -50,7 +50,6 @@ impl PaletteItem {
             danger: false,
         }
     }
-    #[allow(dead_code)] // part of the builder; the destination palette may use it later
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
         self
@@ -329,8 +328,11 @@ impl Palette {
             return;
         };
         let ix = visible[pos];
+        // A row without a value is a button under the input: it leaves the
+        // typed text alone.
         if self.mode == Mode::Value
             && let Some(input) = &self.input
+            && !self.items[ix].value.is_empty()
         {
             let value = self.items[ix].value.clone();
             input.update(cx, |input, cx| input.set_value(value, window, cx));
@@ -358,8 +360,15 @@ impl Palette {
         let Some(item) = self.items.get(ix) else {
             return;
         };
+        // In the value mode a row without a value of its own is a button
+        // acting on the typed text (Save / Cancel under a name input).
+        let value = if self.mode == Mode::Value && item.value.is_empty() {
+            self.query(cx)
+        } else {
+            item.value.clone()
+        };
         let choice = PaletteChoice {
-            value: item.value.clone(),
+            value,
             item: Some(ix),
         };
         self.confirm(choice, window, cx);
