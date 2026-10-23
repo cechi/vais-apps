@@ -136,6 +136,9 @@ pub struct TabConfig {
     /// panel's directory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// A colour tag (`#rrggbb`) shown on the tab and on a saved layout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub layout: LayoutConfig,
     pub panels: Vec<PanelConfig>,
 }
@@ -282,6 +285,7 @@ impl Config {
         vec![TabConfig {
             kind: TabKind::Grid,
             title: None,
+            color: None,
             layout: self.layout.clone().unwrap_or_default(),
             panels: self.panels.clone(),
         }]

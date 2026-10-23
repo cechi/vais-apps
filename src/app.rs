@@ -884,6 +884,97 @@ impl Workspace {
         palette::open("Rename tab".into(), palette, window, cx);
     }
 
+    /// The tab's context menu: a colour tag from the presets, a typed hex,
+    /// or none.
+    fn pick_tab_color(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(grid) = self.tabs.get(ix).and_then(|t| t.grid_view()).cloned() else {
+            return;
+        };
+        let current = grid.read(cx).color().map(str::to_string);
+        let mut items: Vec<PaletteItem> = crate::tab_color::PRESETS
+            .iter()
+            .map(|(name, hex)| {
+                PaletteItem::new(*name)
+                    .color(crate::tab_color::parse(hex))
+                    .checked(current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(hex)))
+            })
+            .collect();
+        let custom_ix = items.len();
+        let custom_now = current
+            .as_deref()
+            .filter(|c| crate::tab_color::preset_name(c).is_none())
+            .map(str::to_string);
+        items.push(
+            PaletteItem::new("Custom…")
+                .detail(custom_now.clone().unwrap_or_else(|| "#rrggbb".into()))
+                .color(custom_now.as_deref().and_then(crate::tab_color::parse))
+                .checked(custom_now.is_some()),
+        );
+        let none_ix = items.len();
+        items.push(PaletteItem::new("No color").checked(current.is_none()));
+
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::pick(items, cx)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let Some(item) = choice.item else {
+                        return;
+                    };
+                    let (grid, view) = (grid.clone(), view.clone());
+                    window.defer(cx, move |window, cx| {
+                        if item == custom_ix {
+                            view.update(cx, |this, cx| this.ask_tab_color(grid, window, cx));
+                            return;
+                        }
+                        let color = if item == none_ix {
+                            None
+                        } else {
+                            crate::tab_color::PRESETS
+                                .get(item)
+                                .map(|(_, hex)| hex.to_string())
+                        };
+                        grid.update(cx, |grid, cx| grid.set_color(color, cx));
+                    });
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Tab color".into(), palette, window, cx);
+    }
+
+    /// The hex input behind "Custom…".
+    fn ask_tab_color(&mut self, grid: Entity<GridView>, window: &mut Window, cx: &mut Context<Self>) {
+        let current = grid
+            .read(cx)
+            .color()
+            .map(str::to_string)
+            .unwrap_or_else(|| "#".into());
+        let len = current.len();
+        let palette = cx.new(|cx| {
+            Palette::new(Vec::new(), &current, "#rrggbb", window, cx)
+                .input_icon(None)
+                .hint("Three or six hex digits, with or without the #")
+                .select_range(1.min(len)..len)
+                .on_confirm(move |choice, window, cx| {
+                    match crate::tab_color::normalise(&choice.value) {
+                        Some(hex) => {
+                            window.close_dialog(cx);
+                            let grid = grid.clone();
+                            window.defer(cx, move |_, cx| {
+                                grid.update(cx, |grid, cx| grid.set_color(Some(hex), cx));
+                            });
+                        }
+                        None => window.push_notification(
+                            Notification::error(format!("{}: not a hex color", choice.value)),
+                            cx,
+                        ),
+                    }
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open("Custom tab color".into(), palette, window, cx);
+    }
+
     fn sync_layouts(&mut self, cx: &mut Context<Self>) {
         self.sidebar
             .update(cx, |s, cx| s.set_layouts(&self.favorite_layouts, cx));
@@ -1613,9 +1704,25 @@ impl Workspace {
         let tabs = self.tabs.iter().enumerate().map(|(ix, tab)| {
             let title = tab.title(cx);
             let active = ix == active_ix;
+            let color = tab
+                .grid_view()
+                .and_then(|g| g.read(cx).color().and_then(crate::tab_color::parse));
             h_flex()
                 .id(("tab", ix))
                 .h_full()
+                .relative()
+                // The colour tag: a stripe along the top edge.
+                .when_some(color, |d, color| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(3.))
+                            .bg(color),
+                    )
+                })
                 .pl_3()
                 .pr_2()
                 .gap_2()
@@ -1650,10 +1757,16 @@ impl Workspace {
                     let is_grid = tab.grid_view().is_some();
                     move |menu, _, _| {
                         let menu = if is_grid {
-                            let (ws_rename, ws_save) = (workspace.clone(), workspace.clone());
+                            let (ws_rename, ws_color, ws_save) =
+                                (workspace.clone(), workspace.clone(), workspace.clone());
                             menu.item(PopupMenuItem::new("Rename tab…").on_click(
                                 move |_, window, cx| {
                                     ws_rename.update(cx, |this, cx| this.rename_tab(ix, window, cx));
+                                },
+                            ))
+                            .item(PopupMenuItem::new("Tab color…").on_click(
+                                move |_, window, cx| {
+                                    ws_color.update(cx, |this, cx| this.pick_tab_color(ix, window, cx));
                                 },
                             ))
                             .item(PopupMenuItem::new("Add layout to favorites…").on_click(

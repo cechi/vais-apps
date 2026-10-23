@@ -20,6 +20,7 @@ mod settings;
 mod settings_view;
 mod sidebar;
 mod ssh_config;
+mod tab_color;
 mod tabs;
 mod theme;
 mod thumbs;

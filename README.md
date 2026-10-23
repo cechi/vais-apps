@@ -238,7 +238,9 @@ to a panel's path, or `Ctrl+D`, toggles the current one) and whole layouts (righ
 tab, "Add layout to favorites…", give it a name: the tab's grid and panel paths are saved
 and open as a new tab named after the layout when clicked). Right-click a favorite to
 remove it. "Rename tab…" in the same tab menu gives a tab a fixed title instead of the
-active panel's directory name (saved with the tab; empty goes back to the directory).
+active panel's directory name (saved with the tab; empty goes back to the directory), and
+"Tab color…" tags the tab with one of nine preset colours or any `#rrggbb`: a stripe
+along the top of the tab, and a thick left border on the layout once saved to Favorites.
 Below them a **Recent** group lists the last 10 directories the focused panel showed
 (newest first, remembered across restarts). Clicking a place navigates the active panel;
 the place matching the panel's directory is highlighted. The sidebar is resizable, its state is saved, and the tab bar, panels and

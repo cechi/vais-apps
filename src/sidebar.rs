@@ -37,6 +37,8 @@ pub struct Place {
     pub layout: Option<usize>,
     /// A favorite the context menu can remove.
     pub removable: bool,
+    /// A colour tag, drawn as a thick left border (saved layouts).
+    pub color: Option<Hsla>,
 }
 
 /// How many recently visited directories the sidebar lists.
@@ -83,6 +85,7 @@ impl Sidebar {
                 detail: None,
                 layout: None,
                 removable: false,
+                color: None,
             })
             .collect();
         self.volumes = platform::volumes()
@@ -94,6 +97,7 @@ impl Sidebar {
                 detail: None,
                 layout: None,
                 removable: false,
+                color: None,
             })
             .collect();
     }
@@ -115,6 +119,7 @@ impl Sidebar {
                     detail: parent.filter(|p| !p.is_empty()),
                     layout: None,
                     removable: true,
+                    color: None,
                 }
             })
             .collect();
@@ -136,6 +141,7 @@ impl Sidebar {
                 )),
                 layout: Some(ix),
                 removable: true,
+                color: saved.tab.color.as_deref().and_then(crate::tab_color::parse),
             })
             .collect();
         cx.notify();
@@ -158,6 +164,7 @@ impl Sidebar {
                     detail: parent.filter(|p| !p.is_empty()),
                     layout: None,
                     removable: false,
+                    color: None,
                 }
             })
             .collect();
@@ -192,6 +199,7 @@ impl Sidebar {
                 }),
                 layout: None,
                 removable: false,
+                color: None,
             })
             .collect();
         cx.notify();
@@ -234,6 +242,10 @@ impl Sidebar {
                     .w_full()
                     .h(rems(1.75))
                     .px_3()
+                    // A colour tag: a thick stripe at the left edge.
+                    .when_some(place.color, |d, color| {
+                        d.border_l_4().border_color(color).pl_2()
+                    })
                     .gap_2()
                     .cursor_pointer()
                     .text_sm()

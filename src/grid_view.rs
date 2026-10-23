@@ -48,6 +48,8 @@ pub struct GridView {
     panels: Vec<Entity<FilePanel>>,
     /// A title set by the user (Rename tab); `None` follows the active panel.
     title: Option<String>,
+    /// A colour tag (`#rrggbb`) for the tab.
+    color: Option<String>,
     layout: Layout,
     grid: GridState,
     active: usize,
@@ -108,6 +110,7 @@ impl GridView {
         Self {
             panels,
             title: cfg.title.clone(),
+            color: cfg.color.clone(),
             layout: cfg.layout.layout(),
             grid: GridState::new(cx),
             active: 0,
@@ -157,6 +160,18 @@ impl GridView {
         self.title.as_deref()
     }
 
+    pub fn color(&self) -> Option<&str> {
+        self.color.as_deref()
+    }
+
+    pub fn set_color(&mut self, color: Option<String>, cx: &mut Context<Self>) {
+        if self.color != color {
+            self.color = color;
+            cx.emit(GridEvent::Changed);
+            cx.notify();
+        }
+    }
+
     /// Give the tab a fixed title; `None` goes back to the directory name.
     pub fn set_title(&mut self, title: Option<String>, cx: &mut Context<Self>) {
         let title = title.filter(|t| !t.trim().is_empty());
@@ -176,6 +191,7 @@ impl GridView {
         TabConfig {
             kind: TabKind::Grid,
             title: self.title.clone(),
+            color: self.color.clone(),
             layout: LayoutConfig {
                 rows: self.layout.rows,
                 cols: self.layout.cols,

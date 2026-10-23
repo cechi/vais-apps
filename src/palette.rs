@@ -32,6 +32,8 @@ pub struct PaletteItem {
     /// What choosing the row puts into a value input. Defaults to the label.
     pub value: String,
     pub icon: Option<IconName>,
+    /// A colour swatch before the label.
+    pub color: Option<Hsla>,
     /// Shown with a check mark (the current theme).
     pub checked: bool,
     /// Shown in the danger colour (Overwrite, Delete permanently).
@@ -46,9 +48,15 @@ impl PaletteItem {
             label,
             detail: SharedString::default(),
             icon: None,
+            color: None,
             checked: false,
             danger: false,
         }
+    }
+
+    pub fn color(mut self, color: Option<Hsla>) -> Self {
+        self.color = color;
+        self
     }
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
@@ -434,6 +442,9 @@ impl Palette {
             .on_click(cx.listener(move |this, _, window, cx| this.confirm_row(ix, window, cx)))
             .when_some(item.icon.clone(), |row, icon| {
                 row.child(Icon::new(icon).text_color(theme.blue).flex_none())
+            })
+            .when_some(item.color, |row, color| {
+                row.child(div().size_3().flex_none().rounded_sm().bg(color))
             })
             .child(
                 div()
