@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod agents;
 mod app;
 mod bridge;
@@ -38,6 +40,14 @@ use crate::app::Workspace;
 use crate::config::Config;
 
 fn main() {
+    // A GUI program on Windows: no console window of its own. One that
+    // started us from a console (for the logs) is attached instead; the
+    // stdio pipes of `--mcp` are inherited either way.
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
     env_logger::init();
     // `vais-commander --mcp`: the MCP server a coding agent talks to; it
     // forwards every tool call to the running app.
