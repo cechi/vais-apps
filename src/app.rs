@@ -144,6 +144,9 @@ pub struct Workspace {
     side_split: Entity<ResizableState>,
     /// Finished operations to announce on the next render (needs the window).
     pending_notifications: Vec<(String, bool)>,
+    /// Ctrl+wheel distance not yet turned into a zoom step (touchpads send
+    /// many small deltas).
+    wheel_zoom: f32,
     window_cfg: Option<WindowConfig>,
     theme: ThemeChoice,
     scale: f32,
@@ -285,6 +288,7 @@ impl Workspace {
             ops_panel_open: false,
             main_split: cx.new(|_| ResizableState::default()),
             pending_notifications: Vec::new(),
+            wheel_zoom: 0.0,
             window_cfg: config.window,
             theme: config.theme.clone(),
             scale: 1.0,
@@ -441,6 +445,56 @@ impl Workspace {
         self.sync_settings(cx);
         self.schedule_save(cx);
         cx.notify();
+    }
+
+    /// Ctrl+wheel: one zoom step per wheel notch (a `Lines` delta, or a
+    /// pixel jump of a notch's size), or per 40 px of touchpad travel
+    /// (small `Pixels` deltas, accumulated).
+    fn wheel_zoom(&mut self, delta: &ScrollDelta, window: &mut Window, cx: &mut Context<Self>) {
+        const NOTCH: f32 = 40.0;
+        const WHEEL_JUMP: f32 = 60.0;
+        let dy = match delta {
+            ScrollDelta::Lines(lines) => lines.y.signum() * NOTCH,
+            ScrollDelta::Pixels(pixels) if pixels.y.as_f32().abs() >= WHEEL_JUMP => {
+                self.wheel_zoom = 0.0;
+                pixels.y.as_f32().signum() * NOTCH
+            }
+            ScrollDelta::Pixels(pixels) => pixels.y.as_f32(),
+        };
+        self.wheel_zoom += dy;
+        while self.wheel_zoom >= NOTCH {
+            self.wheel_zoom -= NOTCH;
+            self.step_scale(SCALE_STEP, window, cx);
+        }
+        while self.wheel_zoom <= -NOTCH {
+            self.wheel_zoom += NOTCH;
+            self.step_scale(-SCALE_STEP, window, cx);
+        }
+    }
+
+    /// An invisible element whose paint registers a capture-phase wheel
+    /// listener: Ctrl+wheel zooms and never reaches the lists below.
+    fn wheel_zoom_catcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let workspace = cx.entity();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _cx| {
+                let workspace = workspace.clone();
+                window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Capture || !event.modifiers.secondary() {
+                        return;
+                    }
+                    let delta = event.delta;
+                    log::debug!("ctrl+wheel {delta:?}");
+                    workspace.update(cx, |this, cx| this.wheel_zoom(&delta, window, cx));
+                    cx.stop_propagation();
+                });
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_0()
     }
 
     // ----- UI scale ------------------------------------------------------
@@ -2118,6 +2172,7 @@ impl Render for Workspace {
 
         v_flex()
             .key_context(WORKSPACE_CONTEXT)
+            .child(self.wheel_zoom_catcher(cx))
             .on_action(cx.listener(Self::on_new_tab))
             .on_action(cx.listener(Self::on_close_tab))
             .on_action(cx.listener(Self::on_next_tab))

@@ -120,7 +120,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+,` | Settings tab: theme, UI scale, file icons (desktop icon theme on Linux, shell icons on Windows, or generic; folders always use the built-in icon), sidebar, drag & drop behaviour, config and themes folders (also in the ☰ menu at the right of the tab bar, which lists the other app-level commands too) |
 | `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory); type to filter the list |
 | `Ctrl+Shift+D` | Toggle light / dark |
-| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar) |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar and Ctrl+mouse wheel) |
 | `Ctrl+Q` / `F10` | Quit |
 
 Mouse: click selects a row and focuses its panel, double-click opens, `Ctrl+click` toggles a
