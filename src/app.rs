@@ -135,6 +135,9 @@ pub struct Workspace {
     main_split: Entity<ResizableState>,
     sidebar: Entity<Sidebar>,
     sidebar_open: bool,
+    /// The sidebar's width as last dragged; it is laid out from this again
+    /// after being hidden.
+    sidebar_width: f32,
     /// Whether the sidebar's Favorites group starts with the system places.
     system_places: bool,
     command_line: Entity<CommandLine>,
@@ -345,6 +348,7 @@ impl Workspace {
             active_tab: 0,
             sidebar,
             sidebar_open: config.sidebar_open,
+            sidebar_width: SIDEBAR_WIDTH,
             system_places: config.system_places,
             command_line,
             command_line_open: config.command_line,
@@ -1523,7 +1527,9 @@ impl Workspace {
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.remember_side_widths(cx);
         self.sidebar_open = !self.sidebar_open;
+        self.reset_side_split(cx);
         if self.sidebar_open {
             self.sidebar.update(cx, |s, cx| {
                 s.refresh();
@@ -1594,19 +1600,43 @@ impl Workspace {
 
     // ----- agents panel ----------------------------------------------------
 
-    /// The panel's width as last laid out (the third resizable panel), else
+    /// The panel's width as last laid out (the last resizable panel), else
     /// the remembered one.
     fn current_agents_width(&self, cx: &App) -> f32 {
         if !self.agents_open {
             return self.agents_width;
         }
+        let ix = if self.sidebar_open { 2 } else { 1 };
         self.side_split
             .read(cx)
             .sizes()
-            .get(2)
+            .get(ix)
             .map(|w| w.as_f32())
             .filter(|w| *w >= 200.0)
             .unwrap_or(self.agents_width)
+    }
+
+    /// Keep the widths of the side panels as laid out, so they come back the
+    /// same after being hidden.
+    fn remember_side_widths(&mut self, cx: &App) {
+        self.agents_width = self.current_agents_width(cx);
+        if self.sidebar_open {
+            if let Some(w) = self.side_split.read(cx).sizes().first() {
+                if w.as_f32() >= 100.0 {
+                    self.sidebar_width = w.as_f32();
+                }
+            }
+        }
+    }
+
+    /// Start the side split from a fresh state. The resizable state keeps a
+    /// size per child, and a child that is hidden or added leaves the others'
+    /// stale (the kit never re-measures a panel it has measured once); a drag
+    /// then works from sizes that no longer add up to the window and the
+    /// divider runs away from the pointer. The hidden panels are left out of
+    /// the group and the state is rebuilt whenever their set changes.
+    fn reset_side_split(&mut self, cx: &mut Context<Self>) {
+        self.side_split = cx.new(|_| ResizableState::default());
     }
 
     fn lend_focus(&mut self, lent: bool, cx: &mut Context<Self>) {
@@ -1615,19 +1645,29 @@ impl Workspace {
         }
     }
 
+    /// Show the Agents panel (with the installed CLIs re-detected).
+    fn open_agents(&mut self, cx: &mut Context<Self>) {
+        self.remember_side_widths(cx);
+        self.agents_open = true;
+        self.reset_side_split(cx);
+        self.agents.update(cx, |panel, cx| panel.refresh(cx));
+        self.schedule_save(cx);
+        cx.notify();
+    }
+
     fn toggle_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.agents_open {
-            self.agents_width = self.current_agents_width(cx);
+            self.remember_side_widths(cx);
             self.agents_open = false;
+            self.reset_side_split(cx);
             self.focus_active_panel(window, cx);
+            self.schedule_save(cx);
+            cx.notify();
         } else {
-            self.agents_open = true;
-            self.agents.update(cx, |panel, cx| panel.refresh(cx));
+            self.open_agents(cx);
             let focus = self.agents.read(cx).focus_handle(cx);
             focus.focus(window, cx);
         }
-        self.schedule_save(cx);
-        cx.notify();
     }
 
     fn on_toggle_agents(&mut self, _: &ToggleAgents, window: &mut Window, cx: &mut Context<Self>) {
@@ -1642,9 +1682,7 @@ impl Workspace {
             return;
         }
         if !self.agents_open {
-            self.agents_open = true;
-            self.agents.update(cx, |panel, cx| panel.refresh(cx));
-            self.schedule_save(cx);
+            self.open_agents(cx);
         }
         focus.focus(window, cx);
         cx.notify();
@@ -1657,10 +1695,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if !self.agents_open {
-            self.agents_open = true;
-            self.agents.update(cx, |panel, cx| panel.refresh(cx));
-            self.schedule_save(cx);
-            cx.notify();
+            self.open_agents(cx);
         }
         self.agents
             .update(cx, |panel, cx| panel.choose_and_start(window, cx));
@@ -2385,6 +2420,27 @@ impl Render for Workspace {
             .when(show_command_line, |d| d.child(self.command_line.clone()))
             .child(key_bar);
 
+        // Hidden side panels are left out (see `reset_side_split`); the
+        // side panels keep their width while the window and the main column
+        // share the rest.
+        let mut side_panels: Vec<_> = Vec::with_capacity(3);
+        if self.sidebar_open {
+            side_panels.push(
+                resizable_panel()
+                    .size(px(self.sidebar_width))
+                    .fixed()
+                    .child(self.sidebar.clone()),
+            );
+        }
+        side_panels.push(resizable_panel().child(main_column));
+        if self.agents_open {
+            side_panels.push(
+                resizable_panel()
+                    .size(px(self.agents_width))
+                    .fixed()
+                    .child(self.agents.clone()),
+            );
+        }
         let sidebar_toggle = Button::new("sidebar-toggle")
             .ghost()
             .xsmall()
@@ -2439,19 +2495,7 @@ impl Render for Workspace {
                 div().flex_1().min_h_0().w_full().child(
                     h_resizable("side-split")
                         .with_state(&self.side_split)
-                        .child(
-                            resizable_panel()
-                                .size(px(SIDEBAR_WIDTH))
-                                .visible(self.sidebar_open)
-                                .child(self.sidebar.clone()),
-                        )
-                        .child(resizable_panel().child(main_column))
-                        .child(
-                            resizable_panel()
-                                .size(px(self.agents_width))
-                                .visible(self.agents_open)
-                                .child(self.agents.clone()),
-                        ),
+                        .children(side_panels),
                 ),
             )
             .child(
