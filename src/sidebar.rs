@@ -280,84 +280,87 @@ impl Sidebar {
                     )
                     .child(title),
             )
-            .when(!collapsed, |d| d.children(places.iter().enumerate().map(|(i, place)| {
-                let ix = offset + i;
-                let selected = place.layout.is_none() && self.current.as_ref() == Some(&place.path);
-                let path = place.path.clone();
-                let layout = place.layout;
-                let row = h_flex()
-                    .id(("place", ix))
-                    .w_full()
-                    .h(rems(1.75))
-                    .px_3()
-                    // A colour tag: a thick stripe at the left edge.
-                    .when_some(place.color, |d, color| {
-                        d.border_l_4().border_color(color).pl_2()
-                    })
-                    .gap_2()
-                    .cursor_pointer()
-                    .text_sm()
-                    .when(selected, |d| d.bg(c.accent).text_color(c.accent_foreground))
-                    .hover(|s| s.bg(c.hover))
-                    .on_click(cx.listener(move |_this, _, _window, cx| {
-                        cx.emit(match layout {
-                            Some(ix) => SidebarEvent::OpenLayout(ix),
-                            None => SidebarEvent::Open(path.clone()),
-                        });
-                    }))
-                    .child(
-                        Icon::new(place.icon.clone())
-                            .size_4()
-                            .flex_none()
-                            .text_color(if selected {
-                                c.accent_foreground
-                            } else {
-                                c.muted_foreground
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .max_w_full()
-                            .truncate()
-                            .child(place.name.clone()),
-                    )
-                    .when_some(place.detail.clone(), |row, detail| {
-                        row.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_xs()
+            .when(!collapsed, |d| {
+                d.children(places.iter().enumerate().map(|(i, place)| {
+                    let ix = offset + i;
+                    let selected =
+                        place.layout.is_none() && self.current.as_ref() == Some(&place.path);
+                    let path = place.path.clone();
+                    let layout = place.layout;
+                    let row = h_flex()
+                        .id(("place", ix))
+                        .w_full()
+                        .h(rems(1.75))
+                        .px_3()
+                        // A colour tag: a thick stripe at the left edge.
+                        .when_some(place.color, |d, color| {
+                            d.border_l_4().border_color(color).pl_2()
+                        })
+                        .gap_2()
+                        .cursor_pointer()
+                        .text_sm()
+                        .when(selected, |d| d.bg(c.accent).text_color(c.accent_foreground))
+                        .hover(|s| s.bg(c.hover))
+                        .on_click(cx.listener(move |_this, _, _window, cx| {
+                            cx.emit(match layout {
+                                Some(ix) => SidebarEvent::OpenLayout(ix),
+                                None => SidebarEvent::Open(path.clone()),
+                            });
+                        }))
+                        .child(
+                            Icon::new(place.icon.clone())
+                                .size_4()
+                                .flex_none()
                                 .text_color(if selected {
                                     c.accent_foreground
                                 } else {
                                     c.muted_foreground
-                                })
-                                .child(detail),
+                                }),
                         )
-                    });
-                if !place.removable {
-                    return row.into_any_element();
-                }
-                // Favorites: a context menu to drop them again.
-                let sidebar = cx.entity();
-                let path = place.path.clone();
-                row.context_menu(move |menu, _, _| {
-                    let (sidebar, path) = (sidebar.clone(), path.clone());
-                    menu.item(PopupMenuItem::new("Remove from favorites").on_click(
-                        move |_, _, cx| {
-                            sidebar.update(cx, |_, cx| {
-                                cx.emit(match layout {
-                                    Some(ix) => SidebarEvent::RemoveLayout(ix),
-                                    None => SidebarEvent::RemoveFavorite(path.clone()),
+                        .child(
+                            div()
+                                .flex_none()
+                                .max_w_full()
+                                .truncate()
+                                .child(place.name.clone()),
+                        )
+                        .when_some(place.detail.clone(), |row, detail| {
+                            row.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(if selected {
+                                        c.accent_foreground
+                                    } else {
+                                        c.muted_foreground
+                                    })
+                                    .child(detail),
+                            )
+                        });
+                    if !place.removable {
+                        return row.into_any_element();
+                    }
+                    // Favorites: a context menu to drop them again.
+                    let sidebar = cx.entity();
+                    let path = place.path.clone();
+                    row.context_menu(move |menu, _, _| {
+                        let (sidebar, path) = (sidebar.clone(), path.clone());
+                        menu.item(PopupMenuItem::new("Remove from favorites").on_click(
+                            move |_, _, cx| {
+                                sidebar.update(cx, |_, cx| {
+                                    cx.emit(match layout {
+                                        Some(ix) => SidebarEvent::RemoveLayout(ix),
+                                        None => SidebarEvent::RemoveFavorite(path.clone()),
+                                    });
                                 });
-                            });
-                        },
-                    ))
-                })
-                .into_any_element()
-            })))
+                            },
+                        ))
+                    })
+                    .into_any_element()
+                }))
+            })
     }
 }
 
@@ -465,23 +468,25 @@ impl Render for Sidebar {
                                 let offset = places.len() + volumes.len();
                                 self.render_section("Connections", &connections, offset, &c, cx)
                             })
-                            .when(!self.is_collapsed("Connections"), |d| d.child(
-                                h_flex()
-                                    .id("sidebar-manage-connections")
-                                    .w_full()
-                                    .h(rems(1.75))
-                                    .px_3()
-                                    .gap_2()
-                                    .cursor_pointer()
-                                    .text_sm()
-                                    .text_color(c.muted_foreground)
-                                    .hover(|s| s.bg(c.hover))
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        cx.emit(SidebarEvent::ManageConnections)
-                                    }))
-                                    .child(Icon::new(IconName::Plus).size_4().flex_none())
-                                    .child("Manage connections…"),
-                            ))
+                            .when(!self.is_collapsed("Connections"), |d| {
+                                d.child(
+                                    h_flex()
+                                        .id("sidebar-manage-connections")
+                                        .w_full()
+                                        .h(rems(1.75))
+                                        .px_3()
+                                        .gap_2()
+                                        .cursor_pointer()
+                                        .text_sm()
+                                        .text_color(c.muted_foreground)
+                                        .hover(|s| s.bg(c.hover))
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            cx.emit(SidebarEvent::ManageConnections)
+                                        }))
+                                        .child(Icon::new(IconName::Plus).size_4().flex_none())
+                                        .child("Manage connections…"),
+                                )
+                            })
                             .when(!recent.is_empty(), |d| {
                                 let offset = places.len() + volumes.len() + connections.len();
                                 d.child(self.render_section("Recent", &recent, offset, &c, cx))

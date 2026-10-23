@@ -857,7 +857,12 @@ impl Workspace {
     }
 
     /// Ctrl+D: bookmark the active panel's directory, or drop the bookmark.
-    fn on_toggle_favorite(&mut self, _: &ToggleFavorite, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_toggle_favorite(
+        &mut self,
+        _: &ToggleFavorite,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(grid) = self.active_tab().grid_view() else {
             return;
         };
@@ -931,7 +936,10 @@ impl Workspace {
                     let (view, config) = (view.clone(), config.clone());
                     window.defer(cx, move |window, cx| {
                         view.update(cx, |this, cx| {
-                            this.favorite_layouts.push(FavoriteLayout { name: name.clone(), tab: config });
+                            this.favorite_layouts.push(FavoriteLayout {
+                                name: name.clone(),
+                                tab: config,
+                            });
                             this.sync_layouts(cx);
                             this.notify(
                                 Notification::info(format!("Saved layout {name}")),
@@ -1004,7 +1012,11 @@ impl Workspace {
             .map(|(name, hex)| {
                 PaletteItem::new(*name)
                     .color(crate::tab_color::parse(hex))
-                    .checked(current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(hex)))
+                    .checked(
+                        current
+                            .as_deref()
+                            .is_some_and(|c| c.eq_ignore_ascii_case(hex)),
+                    )
             })
             .collect();
         let custom_ix = items.len();
@@ -1051,7 +1063,12 @@ impl Workspace {
     }
 
     /// The hex input behind "Custom…".
-    fn ask_tab_color(&mut self, grid: Entity<GridView>, window: &mut Window, cx: &mut Context<Self>) {
+    fn ask_tab_color(
+        &mut self,
+        grid: Entity<GridView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let current = grid
             .read(cx)
             .color()
@@ -1117,7 +1134,12 @@ impl Workspace {
     }
 
     /// Ctrl+Shift+P: every panel action by name, with its key.
-    fn on_command_palette(&mut self, _: &CommandPalette, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_command_palette(
+        &mut self,
+        _: &CommandPalette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let commands = crate::keymap::commands();
         let items: Vec<PaletteItem> = commands
             .iter()
@@ -1508,7 +1530,12 @@ impl Workspace {
     }
 
     /// The entry under the cursor of the active panel, as its name or path.
-    fn insert_into_command_line(&mut self, full_path: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn insert_into_command_line(
+        &mut self,
+        full_path: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(grid) = self.active_tab().grid_view() else {
             return;
         };
@@ -1533,11 +1560,21 @@ impl Workspace {
             .update(cx, |line, cx| line.insert(&text, window, cx));
     }
 
-    fn on_insert_name(&mut self, _: &InsertNameToCommandLine, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_insert_name(
+        &mut self,
+        _: &InsertNameToCommandLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.insert_into_command_line(false, window, cx);
     }
 
-    fn on_insert_path(&mut self, _: &InsertPathToCommandLine, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_insert_path(
+        &mut self,
+        _: &InsertPathToCommandLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.insert_into_command_line(true, window, cx);
     }
 
@@ -1640,7 +1677,9 @@ impl Workspace {
                 };
                 let text = format!("$ {command}\n{output}\n[exit {code}]\n");
                 let path = dir.join(format!("{name}.txt"));
-                if let Err(err) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
+                if let Err(err) =
+                    std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text))
+                {
                     self.notify(Notification::error(format!("{command}: {err}")), window, cx);
                     return;
                 }
@@ -1870,31 +1909,37 @@ impl Workspace {
                                 (workspace.clone(), workspace.clone(), workspace.clone());
                             menu.item(PopupMenuItem::new("Rename tab…").on_click(
                                 move |_, window, cx| {
-                                    ws_rename.update(cx, |this, cx| this.rename_tab(ix, window, cx));
+                                    ws_rename
+                                        .update(cx, |this, cx| this.rename_tab(ix, window, cx));
                                 },
                             ))
                             .item(PopupMenuItem::new("Tab color…").on_click(
                                 move |_, window, cx| {
-                                    ws_color.update(cx, |this, cx| this.pick_tab_color(ix, window, cx));
+                                    ws_color
+                                        .update(cx, |this, cx| this.pick_tab_color(ix, window, cx));
                                 },
                             ))
-                            .item(PopupMenuItem::new("Add layout to favorites…").on_click(
-                                move |_, window, cx| {
-                                    ws_save.update(cx, |this, cx| {
-                                        this.save_layout_favorite(ix, window, cx)
-                                    });
-                                },
-                            ))
+                            .item(
+                                PopupMenuItem::new("Add layout to favorites…").on_click(
+                                    move |_, window, cx| {
+                                        ws_save.update(cx, |this, cx| {
+                                            this.save_layout_favorite(ix, window, cx)
+                                        });
+                                    },
+                                ),
+                            )
                         } else {
                             menu
                         };
                         if closable {
                             let workspace = workspace.clone();
-                            menu.separator().item(PopupMenuItem::new("Close tab").on_click(
-                                move |_, window, cx| {
-                                    workspace.update(cx, |this, cx| this.close_tab(ix, window, cx));
-                                },
-                            ))
+                            menu.separator()
+                                .item(PopupMenuItem::new("Close tab").on_click(
+                                    move |_, window, cx| {
+                                        workspace
+                                            .update(cx, |this, cx| this.close_tab(ix, window, cx));
+                                    },
+                                ))
                         } else {
                             menu
                         }
@@ -2117,7 +2162,8 @@ impl Render for Workspace {
             .map(|v| v.read(cx).active_panel().read(cx).path().clone());
         self.note_visit(current.clone(), cx);
         if self.sidebar_open {
-            self.sidebar.update(cx, |s, cx| s.set_current(current.clone(), cx));
+            self.sidebar
+                .update(cx, |s, cx| s.set_current(current.clone(), cx));
         }
         let shift = window.modifiers().shift;
         let key_bar = self.render_key_bar(shift, cx);

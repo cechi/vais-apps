@@ -50,7 +50,9 @@ fn file_contains(loc: &Location, needle: &str) -> bool {
     if bytes.iter().take(8192).any(|&b| b == 0) {
         return false;
     }
-    String::from_utf8_lossy(&bytes).to_lowercase().contains(needle)
+    String::from_utf8_lossy(&bytes)
+        .to_lowercase()
+        .contains(needle)
 }
 
 /// Walk `root` depth first (sorted like the panel; only `root` itself when
@@ -175,7 +177,10 @@ mod tests {
             &cancel,
         );
         let names: Vec<_> = found.iter().map(|e| e.name.clone()).collect();
-        assert_eq!(names, [rel(&["a", "notes.txt"]), rel(&["a", "inner", "deep.txt"])]);
+        assert_eq!(
+            names,
+            [rel(&["a", "notes.txt"]), rel(&["a", "inner", "deep.txt"])]
+        );
         let (found, _) = search_tree(
             &Location::local(root.join("a")),
             ReadOptions::default(),

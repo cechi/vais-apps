@@ -60,7 +60,11 @@ fn string_parent(path: &str) -> Option<String> {
 }
 
 fn string_join(path: &str, name: &str) -> String {
-    format!("{}/{}", path.trim_end_matches('/'), name.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        path.trim_end_matches('/'),
+        name.trim_start_matches('/')
+    )
 }
 
 fn string_starts_with(path: &str, base: &str) -> bool {

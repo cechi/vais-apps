@@ -28,7 +28,8 @@ use crate::config::PanelConfig;
 use crate::fs::format::{format_mode, format_time, human_size, owner_name};
 use crate::fs::search::search_tree;
 use crate::fs::{
-    Entry, EntryKind, ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots, read_tree,
+    Entry, EntryKind, ReadOptions, Sort, SortDir, SortKey, extension, parent_entry, read_roots,
+    read_tree,
 };
 use crate::keymap::*;
 use crate::platform;
@@ -479,7 +480,9 @@ impl FilePanel {
         } else if entry.is_dir() {
             let path = entry.location.clone();
             self.navigate(path, None, cx);
-        } else if entry.kind == EntryKind::File && crate::vfs::archive::kind_of(&entry.name).is_some() {
+        } else if entry.kind == EntryKind::File
+            && crate::vfs::archive::kind_of(&entry.name).is_some()
+        {
             // An archive opens as a directory; Shift+Enter hands it to the app.
             let path = Location::archive(entry.location.clone(), "/");
             self.navigate(path, None, cx);
@@ -740,9 +743,7 @@ impl FilePanel {
         let recursive = filter.recursive;
         let task = cx.background_spawn({
             let root = root.clone();
-            async move {
-                search_tree(&root, opts, &needle, recursive, Self::SEARCH_LIMIT, &cancel)
-            }
+            async move { search_tree(&root, opts, &needle, recursive, Self::SEARCH_LIMIT, &cancel) }
         });
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let (results, truncated) = task.await;
@@ -885,7 +886,6 @@ impl FilePanel {
     /// The path as clickable segments; a click in the space after the last
     /// segment switches to the text editor (same as Ctrl+L).
     fn render_breadcrumbs(&self, active: bool, c: &Colors, cx: &mut Context<Self>) -> AnyElement {
-
         let path = &self.state.path;
         let crumbs = crumbs_for(path);
         let last = crumbs.len().saturating_sub(1);
@@ -2089,7 +2089,10 @@ fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
                 crumbs.push((segment.to_string(), acc.clone()));
             }
         }
-        Location::Archive { archive, path: inner } => {
+        Location::Archive {
+            archive,
+            path: inner,
+        } => {
             // The archive file's own crumbs, the last one leading into it.
             crumbs = crumbs_for(archive);
             let mut acc = Location::archive((**archive).clone(), "/");

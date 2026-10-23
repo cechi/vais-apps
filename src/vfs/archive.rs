@@ -38,7 +38,9 @@ pub enum Kind {
 pub fn kind_of(name: &str) -> Option<Kind> {
     let lower = name.to_ascii_lowercase();
     let ends = |suffixes: &[&str]| suffixes.iter().any(|s| lower.ends_with(s));
-    if ends(&[".zip", ".jar", ".war", ".ear", ".apk", ".ipa", ".xpi", ".whl", ".crx"]) {
+    if ends(&[
+        ".zip", ".jar", ".war", ".ear", ".apk", ".ipa", ".xpi", ".whl", ".crx",
+    ]) {
         Some(Kind::Zip)
     } else if ends(&[".tar.gz", ".tgz"]) {
         Some(Kind::Tar(Compression::Gzip))
@@ -268,16 +270,18 @@ impl ArchiveBackend {
                     use chrono::TimeZone;
                     chrono::Local.from_local_datetime(&naive).earliest()
                 })
-                .map(|local| {
-                    UNIX_EPOCH + Duration::from_secs(local.timestamp().max(0) as u64)
-                });
+                .map(|local| UNIX_EPOCH + Duration::from_secs(local.timestamp().max(0) as u64));
             let mode = entry.unix_mode().or(Some(match kind {
                 EntryKind::Dir => 0o040755,
                 _ => 0o100644,
             }));
             let node = Node {
                 kind,
-                size: if kind == EntryKind::Dir { 0 } else { entry.size() },
+                size: if kind == EntryKind::Dir {
+                    0
+                } else {
+                    entry.size()
+                },
                 modified,
                 mode,
                 index: Some(index),
@@ -323,7 +327,11 @@ impl ArchiveBackend {
             }
             let node = Node {
                 kind,
-                size: if kind == EntryKind::Dir { 0 } else { header.size().unwrap_or(0) },
+                size: if kind == EntryKind::Dir {
+                    0
+                } else {
+                    header.size().unwrap_or(0)
+                },
                 modified: header
                     .mtime()
                     .ok()
