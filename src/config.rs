@@ -60,6 +60,10 @@ pub struct Config {
     pub sidebar_collapsed: Vec<String>,
     /// Whether the command line under the panels is shown.
     pub command_line: bool,
+    /// Whether the Favorites group starts with the system places (home, Desktop,
+    /// Documents…); off, it holds only the user's own favorites and is hidden
+    /// while there are none.
+    pub system_places: bool,
     /// Whether the Agents panel at the right is shown, and how wide it is.
     pub agents_open: bool,
     pub agents_width: f32,
@@ -100,6 +104,7 @@ impl Default for Config {
             sidebar_open: false,
             sidebar_collapsed: Vec::new(),
             command_line: true,
+            system_places: true,
             agents_open: false,
             agents_width: 520.0,
             command_history: Vec::new(),

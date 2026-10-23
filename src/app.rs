@@ -135,6 +135,8 @@ pub struct Workspace {
     main_split: Entity<ResizableState>,
     sidebar: Entity<Sidebar>,
     sidebar_open: bool,
+    /// Whether the sidebar's Favorites group starts with the system places.
+    system_places: bool,
     command_line: Entity<CommandLine>,
     command_line_open: bool,
     /// Where the bridge for agents listens (`None` when it could not start).
@@ -260,7 +262,8 @@ impl Workspace {
             }),
         );
 
-        let sidebar = cx.new(|cx| Sidebar::new(config.sidebar_collapsed.clone(), cx));
+        let sidebar =
+            cx.new(|cx| Sidebar::new(config.sidebar_collapsed.clone(), config.system_places, cx));
         sidebar.update(cx, |s, cx| {
             s.set_recent(&config.recent, cx);
             s.set_favorites(&config.favorites, cx);
@@ -342,6 +345,7 @@ impl Workspace {
             active_tab: 0,
             sidebar,
             sidebar_open: config.sidebar_open,
+            system_places: config.system_places,
             command_line,
             command_line_open: config.command_line,
             bridge_addr,
@@ -718,6 +722,7 @@ impl Workspace {
             font_family: self.font_family.clone(),
             scale: self.scale,
             sidebar_open: self.sidebar_open,
+            system_places: self.system_places,
             command_line: self.command_line_open,
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
@@ -900,6 +905,15 @@ impl Workspace {
             SettingsEvent::Sidebar(open) => {
                 if self.sidebar_open != *open {
                     self.toggle_sidebar(cx);
+                }
+            }
+            SettingsEvent::SystemPlaces(show) => {
+                if self.system_places != *show {
+                    self.system_places = *show;
+                    self.sidebar
+                        .update(cx, |s, cx| s.set_system_places(*show, cx));
+                    self.schedule_save(cx);
+                    cx.notify();
                 }
             }
             SettingsEvent::CommandLine(open) => {
@@ -1537,6 +1551,7 @@ impl Workspace {
             ui_scale: (self.scale * 100.0).round() / 100.0,
             sidebar_open: self.sidebar_open,
             sidebar_collapsed: self.sidebar.read(cx).collapsed().to_vec(),
+            system_places: self.system_places,
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
             window: self.window_cfg,

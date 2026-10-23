@@ -26,6 +26,7 @@ pub enum SettingsEvent {
     ChooseFont,
     Scale(f32),
     Sidebar(bool),
+    SystemPlaces(bool),
     CommandLine(bool),
     DropAction(DropAction),
     FileIcons(FileIcons),
@@ -40,6 +41,8 @@ pub struct SettingsValues {
     pub font_family: Option<String>,
     pub scale: f32,
     pub sidebar_open: bool,
+    /// Home, Desktop, Documents… at the top of the sidebar's Favorites.
+    pub system_places: bool,
     pub command_line: bool,
     pub drop_action: DropAction,
     pub file_icons: FileIcons,
@@ -325,6 +328,19 @@ impl Render for SettingsView {
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.values.sidebar_open = *checked;
                                 cx.emit(SettingsEvent::Sidebar(*checked));
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        "System places in Favorites",
+                        "Home, Desktop, Documents… above your own favorites; off, the group shows only while you have some",
+                        muted,
+                        Checkbox::new("settings-system-places")
+                            .checked(self.values.system_places)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.values.system_places = *checked;
+                                cx.emit(SettingsEvent::SystemPlaces(*checked));
                                 cx.notify();
                             }))
                             .into_any_element(),

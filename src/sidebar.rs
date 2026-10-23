@@ -62,12 +62,14 @@ pub struct Sidebar {
     scroll: ScrollHandle,
     /// Titles of the folded groups.
     collapsed: Vec<String>,
+    /// Whether the Favorites group lists the system places (home, Desktop…).
+    system_places: bool,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
 
 impl Sidebar {
-    pub fn new(collapsed: Vec<String>, _cx: &mut Context<Self>) -> Self {
+    pub fn new(collapsed: Vec<String>, system_places: bool, _cx: &mut Context<Self>) -> Self {
         let mut this = Self {
             places: Vec::new(),
             favorites: Vec::new(),
@@ -78,25 +80,39 @@ impl Sidebar {
             current: None,
             scroll: ScrollHandle::new(),
             collapsed,
+            system_places,
         };
         this.refresh();
         this
     }
 
+    /// Show or hide the system places at the top of the Favorites group.
+    pub fn set_system_places(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.system_places != show {
+            self.system_places = show;
+            self.refresh();
+            cx.notify();
+        }
+    }
+
     /// Re-read user folders and mounts (cheap; called when the sidebar opens).
     pub fn refresh(&mut self) {
-        self.places = platform::user_places()
-            .into_iter()
-            .map(|(name, path, icon)| Place {
-                name,
-                path: Location::Local(path),
-                icon,
-                detail: None,
-                layout: None,
-                removable: false,
-                color: None,
-            })
-            .collect();
+        self.places = if self.system_places {
+            platform::user_places()
+                .into_iter()
+                .map(|(name, path, icon)| Place {
+                    name,
+                    path: Location::Local(path),
+                    icon,
+                    detail: None,
+                    layout: None,
+                    removable: false,
+                    color: None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.volumes = platform::volumes()
             .into_iter()
             .map(|(name, path)| Place {
@@ -454,7 +470,11 @@ impl Render for Sidebar {
                             .w_full()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
-                            .child(self.render_section("Favorites", &places, 0, &c, cx))
+                            // Without the system places the group exists only
+                            // while the user has favorites of their own.
+                            .when(!places.is_empty(), |d| {
+                                d.child(self.render_section("Favorites", &places, 0, &c, cx))
+                            })
                             .when(!volumes.is_empty(), |d| {
                                 d.child(self.render_section(
                                     "Volumes",

@@ -278,7 +278,9 @@ The Favorites group also holds your own entries of two kinds: directories (the s
 to a panel's path, or `Ctrl+D`, toggles the current one) and whole layouts (right-click a
 tab, "Add layout to favorites…", give it a name: the tab's grid and panel paths are saved
 and open as a new tab named after the layout when clicked). Right-click a favorite to
-remove it. "Rename tab…" in the same tab menu gives a tab a fixed title instead of the
+remove it. "System places in Favorites" in Settings (`system_places` in the config) turns
+the home and user folders off; the group then holds only your own favorites and is not
+shown at all while there are none. "Rename tab…" in the same tab menu gives a tab a fixed title instead of the
 active panel's directory name (saved with the tab; empty goes back to the directory), and
 "Tab color…" tags the tab with one of nine preset colours or any `#rrggbb`: a stripe
 along the top of the tab, and a thick left border on the layout once saved to Favorites.
