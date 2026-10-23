@@ -2174,10 +2174,9 @@ impl Render for FilePanel {
             yellow: theme.yellow,
             blue: theme.blue,
         };
-        let (bg, border, accent, title_bar, list_head, status_bar, danger) = (
+        let (bg, border, title_bar, list_head, status_bar, danger) = (
             theme.background,
             theme.border,
-            theme.primary,
             theme.title_bar,
             theme.list_head,
             theme.status_bar,
@@ -2355,8 +2354,9 @@ impl Render for FilePanel {
                     .min_h_0()
                     .overflow_hidden()
                     .border_1()
+                    // The same colour as the cursor row's outline.
                     .border_color(if active || self.highlighted {
-                        accent
+                        colors.list_active_border
                     } else {
                         transparent_black()
                     })
