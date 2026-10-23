@@ -49,7 +49,224 @@ pub fn specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
         },
+        ToolSpec {
+            name: "set_layout",
+            description: "Set the grid of a file tab: rows x cols of panels (1..3 each).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "rows": { "type": "integer", "minimum": 1, "maximum": 3 },
+                    "cols": { "type": "integer", "minimum": 1, "maximum": 3 },
+                    "tab": { "type": "integer", "description": "Tab index, default the active tab" }
+                },
+                "required": ["rows", "cols"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "new_tab",
+            description: "Open a new file tab (a copy of the active tab's layout), optionally showing `path` in its first panel; it becomes the active tab.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "activate_tab",
+            description: "Switch to tab `index`.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "index": { "type": "integer" } },
+                "required": ["index"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "close_tab",
+            description: "Close tab `index` (the last tab cannot be closed; an editor with unsaved changes asks the user).",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "index": { "type": "integer" } },
+                "required": ["index"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "select",
+            description: "Mark entries in a panel: by exact `names`, or by a `pattern` (glob with * and ?, or a substring); `mode` replace (default), add, or clear (clears every mark).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "names": { "type": "array", "items": { "type": "string" } },
+                    "pattern": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["replace", "add", "clear"] },
+                    "cursor": { "type": "string", "description": "Also put the cursor on this entry" },
+                    "tab": { "type": "integer" },
+                    "panel": { "type": "integer" }
+                },
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "copy",
+            description: "Copy files or directories into `dest` as the user would with F5. Existing files make the user choose (overwrite / skip / cancel); the call waits for the operation to finish.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "sources": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "dest": { "type": "string", "description": "Destination directory" }
+                },
+                "required": ["sources", "dest"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "move",
+            description: "Move files or directories into `dest` as the user would with F6 (same rules as copy).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "sources": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "dest": { "type": "string" }
+                },
+                "required": ["sources", "dest"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "rename",
+            description: "Rename one entry (`new_name` is a name, not a path); never overwrites.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "new_name": { "type": "string" }
+                },
+                "required": ["path", "new_name"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "mkdir",
+            description: "Create a directory (parents included).",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "delete",
+            description: "Delete entries: to the trash unless `permanent`. The user confirms in the app; the call waits for the answer and the operation.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "permanent": { "type": "boolean" }
+                },
+                "required": ["paths"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "search",
+            description: "Find entries below `root`: by name (`query` is a glob with * and ? or a substring) or, with `contents`, by text inside files. Up to `limit` results (default 200).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "root": { "type": "string" },
+                    "query": { "type": "string" },
+                    "recursive": { "type": "boolean", "description": "Default true" },
+                    "contents": { "type": "boolean", "description": "Search file contents instead of names" },
+                    "show_hidden": { "type": "boolean" },
+                    "limit": { "type": "integer" }
+                },
+                "required": ["root", "query"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "open_file",
+            description: "Open a text file in an editor tab (read-only by default).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "readonly": { "type": "boolean", "description": "Default true" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "add_favorite",
+            description: "Bookmark a directory in the sidebar's Favorites.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "save_layout",
+            description: "Save a file tab (its grid and panel directories) as a named layout favorite in the sidebar.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "tab": { "type": "integer" }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "set_tab_title",
+            description: "Give a file tab a fixed title (null returns to the directory name).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": ["string", "null"] },
+                    "tab": { "type": "integer" }
+                },
+                "required": ["title"],
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "set_tab_color",
+            description: "Tag a file tab with a colour (`#rrggbb`, or null to remove it).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "color": { "type": ["string", "null"] },
+                    "tab": { "type": "integer" }
+                },
+                "required": ["color"],
+                "additionalProperties": false
+            }),
+        },
     ]
+}
+
+pub fn arg_str_list(args: &Value, name: &str) -> Result<Vec<String>, ToolError> {
+    let list = args
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| ToolError::invalid(format!("`{name}` (array of strings) is required")))?;
+    let items: Vec<String> = list
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if items.is_empty() {
+        return Err(ToolError::invalid(format!("`{name}` must not be empty")));
+    }
+    Ok(items)
 }
 
 /// The catalogue as MCP's `tools/list` wants it.

@@ -1,5 +1,6 @@
 //! The workspace: tabs (each with its own content), theme and persistence.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use futures::StreamExt as _;
@@ -33,7 +34,7 @@ use crate::grid_view::{GridEvent, GridView};
 use crate::keymap::*;
 use crate::layout::Layout;
 use crate::ops::OpKind;
-use crate::ops::manager::{ManagerEvent, OperationsManager, summary};
+use crate::ops::manager::{ManagerEvent, OperationId, OperationsManager, summary};
 use crate::ops_panel::{OperationsPanel, PanelEvent as OpsPanelEvent};
 use crate::palette::{self, Palette, PaletteItem};
 use crate::rename::view::{RenameEvent, RenameView};
@@ -138,6 +139,8 @@ pub struct Workspace {
     command_line_open: bool,
     /// Where the bridge for agents listens (`None` when it could not start).
     bridge_addr: Option<BridgeAddr>,
+    /// Tool calls waiting for an operation to finish.
+    bridge_waits: HashMap<OperationId, crate::bridge::Reply>,
     /// The Agents panel at the right edge (terminals with coding agents).
     agents: Entity<AgentsPanel>,
     agents_open: bool,
@@ -242,6 +245,7 @@ impl Workspace {
                         .as_ref()
                         .is_some_and(|r| !r.errors.is_empty() || r.cancelled);
                     this.pending_notifications.push((summary(op), failed));
+                    this.tool_operation_finished(op);
                 }
                 cx.notify();
             }
@@ -332,6 +336,7 @@ impl Workspace {
             command_line,
             command_line_open: config.command_line,
             bridge_addr,
+            bridge_waits: HashMap::new(),
             agents,
             agents_open: config.agents_open,
             agents_width: if config.agents_width.is_finite() && config.agents_width >= 200.0 {
