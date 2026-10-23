@@ -1662,7 +1662,8 @@ impl FilePanel {
         let is_marked = self.state.marked.contains(&ix);
         let is_cut = cx.global::<FileClipboard>().is_cut(&entry.location);
         let (bg, outline) = if is_cursor && active {
-            (c.primary.alpha(0.28), c.list_active_border)
+            // One colour for the row and its outline, so the two always match.
+            (c.list_active_border.alpha(0.22), c.list_active_border)
         } else if is_cursor {
             (
                 c.muted_foreground.alpha(0.18),
