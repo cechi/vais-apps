@@ -2,6 +2,7 @@
 //! agents (or a plain shell) in an embedded terminal, one per tab.
 
 pub mod detect;
+pub mod launch;
 
 use std::path::PathBuf;
 
@@ -14,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::palette::{self, Palette, PaletteItem};
-use crate::terminal::{Launch, TerminalEvent, TerminalView};
+use crate::terminal::{TerminalEvent, TerminalView};
 use crate::ui::{h_flex, v_flex};
 use detect::{Agent, AgentKind};
 
@@ -75,7 +76,7 @@ impl AgentsPanel {
 
     /// Start `agent` in a new session tab and focus it.
     pub fn start(&mut self, agent: &Agent, window: &mut Window, cx: &mut Context<Self>) {
-        let launch = launch_for(agent, self.default_cwd.clone(), &self.bridge_env);
+        let launch = launch::plan(agent, self.default_cwd.clone(), &self.bridge_env);
         let view = cx.new(|cx| TerminalView::new(launch, cx));
         let subscription = cx.subscribe(
             &view,
@@ -169,21 +170,6 @@ impl AgentsPanel {
         } else {
             format!("{base}: {}{state}", view.title())
         }
-    }
-}
-
-/// How to run an installed agent: the program itself, in the active panel's
-/// directory. The MCP server is wired in the launcher step.
-fn launch_for(agent: &Agent, cwd: Option<PathBuf>, bridge_env: &[(String, String)]) -> Launch {
-    let mut args = Vec::new();
-    if agent.kind == AgentKind::Shell && cfg!(target_os = "macos") {
-        args.push("-l".to_string());
-    }
-    Launch {
-        program: agent.path.to_string_lossy().into_owned(),
-        args,
-        cwd: cwd.or_else(|| Some(crate::config::home_dir())),
-        env: bridge_env.to_vec(),
     }
 }
 

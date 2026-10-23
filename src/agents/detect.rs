@@ -43,7 +43,6 @@ impl AgentKind {
     }
 
     /// Whether the CLI can be given our MCP server for a session.
-    #[allow(dead_code)] // the launcher (next steps) decides by it
     pub fn supports_mcp(self) -> bool {
         !matches!(self, AgentKind::Shell)
     }
