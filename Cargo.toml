@@ -2,7 +2,7 @@
 name = "vais-commander"
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.93"
 description = "Keyboard-driven file manager with a configurable grid of panels"
 license = "MIT"
 build = "build.rs"
@@ -41,6 +41,8 @@ flate2 = "1"
 bzip2 = "0.6"
 zstd = "0.14"
 liblzma = { version = "0.4", features = ["static"] }
+# 7z archives (pure Rust); encrypted ones are reported, not opened.
+sevenz-rust2 = { version = "0.24", default-features = false, features = ["bzip2", "deflate", "ppmd", "zstd"] }
 alacritty_terminal = { version = "0.26", default-features = false }
 serde_json = "1"
 

@@ -260,13 +260,14 @@ Writes into archives are refused. An agent started outside the app can use the s
 
 ## Archives
 
-Enter on a zip (also jar, apk, whl…), tar, tar.gz / tgz, tar.bz2, tar.xz or tar.zst
+Enter on a zip (also jar, apk, whl…), 7z, tar, tar.gz / tgz, tar.bz2, tar.xz or tar.zst
 file opens it like a directory: browse, expand, copy files out (F5, Ctrl+C, drag), view
 them with F3 and show thumbnails. The path reads `archive.zip!/dir/file`; Backspace from
 the root goes back to the archive file. Archives are read-only: delete, rename, new
 folder and copying into one are refused. Zip entries are extracted on first use, a tar
-is unpacked when opened; both go under `~/.cache/vais-commander/archives` (cleaned of
-entries unused for a week). Archives on a connection are fetched first. `Shift+Enter`
+or a 7z is unpacked when opened (7z: LZMA, LZMA2, PPMd, BZip2, Deflate and Zstandard;
+encrypted ones are refused with a message); all of them go under
+`~/.cache/vais-commander/archives` (cleaned of entries unused for a week). Archives on a connection are fetched first. `Shift+Enter`
 hands the archive to the default application instead.
 
 Right-click an archive and choose **Extract…** to unpack it: the chooser offers every
@@ -322,7 +323,7 @@ src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
 src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
-src/vfs/           Location (local path, connection + path, or path in an archive) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar
+src/vfs/           Location (local path, connection + path, or path in an archive) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar/7z
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab
 src/ssh_config.rs  reader for ~/.ssh/config (aliases, HostName, Port, User, IdentityFile, Include)

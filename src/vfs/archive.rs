@@ -1,8 +1,9 @@
-//! Archives (zip, tar and compressed tar) browsed as directories: a
+//! Archives (zip, tar, compressed tar and 7z) browsed as directories: a
 //! read-only [`Backend`] over one archive file. A zip is indexed from its
 //! central directory and entries are extracted into the cache when first
 //! read; a tar has no index, so it is unpacked into the cache in the one pass
-//! that lists it.
+//! that lists it, and so is a 7z (usually solid: one entry cannot be read
+//! without decoding everything before it).
 //!
 //! Opened archives are kept in a process-wide table keyed by the archive's
 //! location and invalidated when its size or modification time changes.
@@ -32,6 +33,7 @@ pub enum Compression {
 pub enum Kind {
     Zip,
     Tar(Compression),
+    SevenZ,
 }
 
 /// File name endings of the formats we read (lowercase).
@@ -55,6 +57,7 @@ const SUFFIXES: &[(&str, Kind)] = &[
     (".tar.zst", Kind::Tar(Compression::Zstd)),
     (".tzst", Kind::Tar(Compression::Zstd)),
     (".tar", Kind::Tar(Compression::None)),
+    (".7z", Kind::SevenZ),
 ];
 
 /// The matching ending of `name` (its length in bytes) and the format.
@@ -231,12 +234,18 @@ impl ArchiveBackend {
         match kind {
             Kind::Zip => this.index_zip(&file)?,
             Kind::Tar(compression) => this.unpack_tar(&file, compression)?,
+            Kind::SevenZ => this.unpack_7z(&file)?,
         }
-        for node in this.nodes.values_mut() {
+        this.sort_children();
+        Ok(this)
+    }
+
+    /// Every directory lists each child once, in name order.
+    fn sort_children(&mut self) {
+        for node in self.nodes.values_mut() {
             node.children.sort();
             node.children.dedup();
         }
-        Ok(this)
     }
 
     /// Insert an entry (and the directories above it) into the tree.
@@ -379,6 +388,87 @@ impl ArchiveBackend {
         Ok(())
     }
 
+    fn unpack_7z(&mut self, file: &Path) -> io::Result<()> {
+        use sevenz_rust2::{ArchiveReader, Error as SevenZError, Password};
+        let describe = |err: SevenZError| match err {
+            SevenZError::PasswordRequired | SevenZError::MaybeBadPassword(_) => {
+                io::Error::other("encrypted 7z archives are not supported")
+            }
+            // Built without AES: an encrypted archive shows up as a method.
+            SevenZError::UnsupportedCompressionMethod(method) if method.starts_with("AES") => {
+                io::Error::other("encrypted 7z archives are not supported")
+            }
+            SevenZError::UnsupportedCompressionMethod(method) => {
+                io::Error::other(format!("unsupported 7z compression: {method}"))
+            }
+            other => io::Error::other(other.to_string()),
+        };
+        let mut reader = ArchiveReader::open(file, Password::empty()).map_err(describe)?;
+        let mut found: Vec<(Vec<String>, Node)> = Vec::new();
+        let cache_dir = self.cache_dir.clone();
+        let outer = self.outer.display();
+        reader
+            .for_each_entries(|entry, data| {
+                // Names use `/`; archives made on Windows may carry `\`.
+                let name = entry.name.replace('\\', "/");
+                let parts = match normalise(Path::new(&name)) {
+                    Some(parts) if !entry.is_anti_item => parts,
+                    _ => {
+                        io::copy(data, &mut io::sink())?;
+                        return Ok(true);
+                    }
+                };
+                // The high 16 bits carry a Unix mode when bit 0x8000 says so.
+                let unix_mode = (entry.has_windows_attributes
+                    && entry.windows_attributes & 0x8000 != 0)
+                    .then_some(entry.windows_attributes >> 16);
+                let is_symlink = unix_mode.is_some_and(|m| m & 0o170000 == 0o120000);
+                let kind = if entry.is_directory {
+                    EntryKind::Dir
+                } else if is_symlink {
+                    EntryKind::Symlink { to_dir: false }
+                } else {
+                    EntryKind::File
+                };
+                let target = cache_dir.join(parts.join("/"));
+                let written = match kind {
+                    EntryKind::Dir => {
+                        io::copy(data, &mut io::sink())?;
+                        std::fs::create_dir_all(&target)
+                    }
+                    _ => write_7z_entry(&target, data, is_symlink),
+                };
+                if let Err(err) = written {
+                    log::warn!("{outer}: {}: {err}", parts.join("/"));
+                    return Ok(true);
+                }
+                let node = Node {
+                    kind,
+                    size: if kind == EntryKind::Dir {
+                        0
+                    } else {
+                        entry.size
+                    },
+                    modified: entry
+                        .has_last_modified_date
+                        .then(|| SystemTime::from(entry.last_modified_date)),
+                    mode: Some(unix_mode.map(|m| m & 0o177777).unwrap_or(match kind {
+                        EntryKind::Dir => 0o040755,
+                        _ => 0o100644,
+                    })),
+                    index: None,
+                    children: Vec::new(),
+                };
+                found.push((parts, node));
+                Ok(true)
+            })
+            .map_err(describe)?;
+        for (parts, node) in found {
+            self.insert(&parts, node);
+        }
+        Ok(())
+    }
+
     fn node<'a>(&'a self, loc: &'a Location) -> io::Result<(&'a str, &'a Node)> {
         let inner = inner_path(&self.outer, loc).ok_or_else(not_found)?;
         self.nodes
@@ -412,6 +502,25 @@ impl ArchiveBackend {
         std::fs::rename(&partial, &target)?;
         Ok(target)
     }
+}
+
+/// One 7z entry into the cache: the data as a file, or (a Unix symlink) the
+/// data as the link target.
+fn write_7z_entry(target: &Path, data: &mut dyn Read, symlink: bool) -> io::Result<()> {
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    if symlink {
+        let mut link = String::new();
+        data.read_to_string(&mut link)?;
+        let _ = std::fs::remove_file(target);
+        return std::os::unix::fs::symlink(link, target);
+    }
+    let _ = symlink;
+    let mut out = File::create(target)?;
+    io::copy(data, &mut out)?;
+    out.flush()
 }
 
 impl Backend for ArchiveBackend {
@@ -491,7 +600,80 @@ impl Backend for ArchiveBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{Compression, Kind, kind_of, stem};
+    use super::{ArchiveBackend, Compression, Kind, Node, kind_of, stem};
+    use crate::fs::EntryKind;
+    use crate::vfs::Location;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    /// A backend over a fixture with its cache in a fresh temp directory.
+    fn sevenz_backend(fixture: &str) -> (ArchiveBackend, PathBuf, std::io::Result<()>) {
+        let cache =
+            std::env::temp_dir().join(format!("vais-7z-test-{}-{fixture}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&cache);
+        std::fs::create_dir_all(&cache).unwrap();
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/vfs/testdata")
+            .join(fixture);
+        let mut backend = ArchiveBackend {
+            outer: Location::Local(file.clone()),
+            cache_dir: cache.clone(),
+            nodes: HashMap::from([(String::new(), Node::dir())]),
+            zip: None,
+        };
+        let result = backend.unpack_7z(&file);
+        backend.sort_children();
+        (backend, cache, result)
+    }
+
+    #[test]
+    fn sevenz_is_unpacked_with_its_tree() {
+        let (backend, cache, result) = sevenz_backend("sample.7z");
+        result.unwrap();
+        let root = &backend.nodes[""];
+        assert_eq!(root.children, ["photos"]);
+        let readme = &backend.nodes["photos/readme.txt"];
+        assert_eq!(readme.kind, EntryKind::File);
+        assert_eq!(readme.size, 9);
+        assert!(readme.modified.is_some());
+        assert_eq!(readme.mode, Some(0o100644));
+        assert_eq!(
+            std::fs::read_to_string(cache.join("photos/readme.txt")).unwrap(),
+            "hello 7z\n"
+        );
+        // Empty files have no stream of their own; names keep their accents.
+        assert_eq!(
+            std::fs::metadata(cache.join("photos/empty.txt"))
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            std::fs::read_to_string(cache.join("photos/sub/příliš.txt")).unwrap(),
+            "žluťoučký kůň\n"
+        );
+        assert_eq!(backend.nodes["photos/sub"].kind, EntryKind::Dir);
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                backend.nodes["photos/link.txt"].kind,
+                EntryKind::Symlink { to_dir: false }
+            );
+            assert_eq!(
+                std::fs::read_link(cache.join("photos/link.txt")).unwrap(),
+                Path::new("readme.txt")
+            );
+        }
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn encrypted_sevenz_is_reported() {
+        let (_, cache, result) = sevenz_backend("locked.7z");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("encrypted"), "{err}");
+        std::fs::remove_dir_all(cache).unwrap();
+    }
 
     #[test]
     fn stems_drop_the_whole_format_ending() {
@@ -503,6 +685,8 @@ mod tests {
         assert_eq!(stem("notes.txt"), None);
         assert_eq!(stem(".zip"), None);
         assert_eq!(kind_of("a.TAR.XZ"), Some(Kind::Tar(Compression::Xz)));
+        assert_eq!(kind_of("Photos.7Z"), Some(Kind::SevenZ));
+        assert_eq!(stem("photos.7z"), Some("photos"));
     }
 
     #[test]
