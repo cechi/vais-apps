@@ -112,6 +112,18 @@ pub enum PanelEvent {
     },
     /// The star next to the path: bookmark this directory, or drop the bookmark.
     ToggleFavorite(Location),
+    /// Pick mode: Enter or a double click on a file (an archive counts as a
+    /// file); the picker decides what that means.
+    Activated(Location),
+}
+
+/// What the portal picker is choosing with this panel. Files are reported
+/// as [`PanelEvent::Activated`] instead of being opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickMode {
+    Files,
+    Directory,
+    Save,
 }
 
 pub struct FilePanel {
@@ -141,6 +153,8 @@ pub struct FilePanel {
     highlighted: bool,
     /// Keep the active look while the focus is lent to the Agents panel.
     focus_lent: bool,
+    /// Set by the portal picker: files are reported, not opened.
+    pick: Option<PickMode>,
     view: ViewMode,
     columns: Columns,
     /// Entries per line in a grid view (1 in the full view); measured from
@@ -251,6 +265,7 @@ impl FilePanel {
             marquee: None,
             highlighted: false,
             focus_lent: false,
+            pick: None,
             view: cfg.view,
             columns: cfg.columns,
             per_row: 1,
@@ -473,6 +488,38 @@ impl FilePanel {
         self.navigate(path, None, cx);
     }
 
+    /// Like [`Self::navigate_to`], with the cursor on `select` once loaded.
+    pub fn navigate_to_select(
+        &mut self,
+        path: Location,
+        select: Option<Location>,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigate(path, select, cx);
+    }
+
+    /// Make the panel a picker's: see [`PickMode`].
+    pub fn set_pick_mode(&mut self, mode: Option<PickMode>) {
+        self.pick = mode;
+    }
+
+    pub fn pick_mode(&self) -> Option<PickMode> {
+        self.pick
+    }
+
+    /// The caller's file filter (pick mode): names a file must match to be
+    /// listed; directories are always shown. Empty lists everything.
+    pub fn set_pick_filter(
+        &mut self,
+        matchers: Vec<crate::fs::filter::Matcher>,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.pick_filter = matchers;
+        let select = self.state.current().map(|e| e.location.clone());
+        self.state.refilter(select.as_ref());
+        cx.notify();
+    }
+
     fn navigate(&mut self, path: Location, select: Option<Location>, cx: &mut Context<Self>) {
         if path != self.state.path {
             let current = self.state.path.clone();
@@ -493,11 +540,14 @@ impl FilePanel {
             let path = entry.location.clone();
             self.navigate(path, None, cx);
         } else if entry.kind == EntryKind::File
+            && self.pick.is_none()
             && crate::vfs::archive::kind_of(&entry.name).is_some()
         {
             // An archive opens as a directory; Shift+Enter hands it to the app.
             let path = Location::archive(entry.location.clone(), "/");
             self.navigate(path, None, cx);
+        } else if self.pick.is_some() {
+            cx.emit(PanelEvent::Activated(entry.location.clone()));
         } else {
             self.open_with_app(cx);
         }
@@ -1467,7 +1517,10 @@ impl FilePanel {
         }
     }
     fn on_open_with_app(&mut self, _: &OpenWithApp, _: &mut Window, cx: &mut Context<Self>) {
-        self.open_with_app(cx);
+        // A picker only reports choices; it never launches applications.
+        if self.pick.is_none() {
+            self.open_with_app(cx);
+        }
     }
 
     fn on_open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {

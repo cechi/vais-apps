@@ -106,6 +106,8 @@ impl GridView {
                     PanelEvent::ToggleFavorite(path) => {
                         cx.emit(GridEvent::ToggleFavorite(path.clone()));
                     }
+                    // Only a picker's panel reports activations.
+                    PanelEvent::Activated(_) => {}
                 },
             ));
         }

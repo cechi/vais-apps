@@ -38,6 +38,9 @@ pub struct PanelState {
     /// The displayed rows: `all_entries` after the filter. Cursor and marks index these.
     pub entries: Vec<Entry>,
     pub filter: Option<Filter>,
+    /// The portal picker's file filter (any of these must match a file's
+    /// name); directories always pass. Kept across navigation.
+    pub pick_filter: Vec<Matcher>,
     /// A recursive search stopped at its result limit.
     pub search_truncated: bool,
     pub cursor: usize,
@@ -66,6 +69,7 @@ impl PanelState {
             all_entries: Vec::new(),
             entries: Vec::new(),
             filter: None,
+            pick_filter: Vec::new(),
             search_truncated: false,
             cursor: 0,
             marked: BTreeSet::new(),
@@ -276,7 +280,7 @@ impl PanelState {
     }
 
     fn filtered_rows(&self) -> Vec<Entry> {
-        match &self.filter {
+        let rows = match &self.filter {
             // Recursive results arrive already matched; the live filter matches names.
             Some(filter) if !filter.is_search() && !filter.matcher().is_all() => {
                 let matcher = filter.matcher();
@@ -287,7 +291,15 @@ impl PanelState {
                     .collect()
             }
             _ => self.all_entries.clone(),
+        };
+        if self.pick_filter.is_empty() {
+            return rows;
         }
+        rows.into_iter()
+            .filter(|e| {
+                e.is_parent || e.is_dir() || self.pick_filter.iter().any(|m| m.matches(&e.name))
+            })
+            .collect()
     }
 
     /// Rebuild `entries`. The cursor goes to `select` when found; otherwise a
@@ -464,6 +476,29 @@ mod tests {
         assert_eq!(s.entries.len(), 5);
         assert_eq!(s.cursor, 3);
         assert_eq!(s.marked.iter().copied().collect::<Vec<_>>(), vec![3]);
+    }
+
+    #[test]
+    fn pick_filter_hides_files_but_not_directories() {
+        let mut s = state(4);
+        s.all_entries[1].kind = crate::fs::EntryKind::Dir; // f0 is a directory
+        s.pick_filter = vec![Matcher::Glob("f2".chars().collect())];
+        s.refilter(None);
+        let names: Vec<_> = s.entries.iter().map(|e| e.name.clone()).collect();
+        assert_eq!(names, ["..", "f0", "f2"]);
+        // The live filter narrows further; the pick filter stays.
+        s.filter = Some(Filter {
+            query: "f0".into(),
+            recursive: false,
+            content: false,
+        });
+        s.refilter(None);
+        let names: Vec<_> = s.entries.iter().map(|e| e.name.clone()).collect();
+        assert_eq!(names, ["..", "f0"]);
+        s.pick_filter.clear();
+        s.filter = None;
+        s.refilter(None);
+        assert_eq!(s.entries.len(), 5);
     }
 
     #[test]
