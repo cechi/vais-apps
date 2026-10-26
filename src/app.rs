@@ -302,6 +302,9 @@ impl Workspace {
                     this.toggle_favorite(path.clone(), window, cx)
                 }
                 SidebarEvent::RemoveLayout(ix) => this.remove_layout(*ix, window, cx),
+                SidebarEvent::MoveFavorite { layout, from, to } => {
+                    this.move_favorite(*layout, *from, *to, cx)
+                }
                 SidebarEvent::RenameFavorite(id) => this.rename_favorite(id.clone(), window, cx),
                 SidebarEvent::ColorFavorite(id) => this.pick_favorite_color(id.clone(), window, cx),
                 SidebarEvent::ManageConnections => this.open_connections(window, cx),
@@ -1397,6 +1400,25 @@ impl Workspace {
         self.push_grid_tab(&config, window, cx);
         let last = self.tabs.len() - 1;
         self.activate_tab(last, window, cx);
+        self.schedule_save(cx);
+    }
+
+    /// Put a favorite directory (or, with `layout`, a saved layout) at a new
+    /// position of its list.
+    fn move_favorite(&mut self, layout: bool, from: usize, to: usize, cx: &mut Context<Self>) {
+        let moved = if layout {
+            move_item(&mut self.favorite_layouts, from, to)
+        } else {
+            move_item(&mut self.favorites, from, to)
+        };
+        if !moved {
+            return;
+        }
+        if layout {
+            self.sync_layouts(cx);
+        } else {
+            self.sync_favorites(cx);
+        }
         self.schedule_save(cx);
     }
 
@@ -2795,4 +2817,32 @@ fn run_shell(command: &str, dir: &Path) -> Result<(i32, String), String> {
         text.push_str(&err);
     }
     Ok((output.status.code().unwrap_or(-1), text))
+}
+
+/// Move the item at `from` so that it ends up at `to` (clamped to the
+/// list); whether anything moved.
+fn move_item<T>(items: &mut Vec<T>, from: usize, to: usize) -> bool {
+    let to = to.min(items.len().saturating_sub(1));
+    if from >= items.len() || from == to {
+        return false;
+    }
+    let item = items.remove(from);
+    items.insert(to, item);
+    true
+}
+
+#[cfg(test)]
+mod move_tests {
+    #[test]
+    fn move_item_reorders_within_bounds() {
+        let mut v = vec!['a', 'b', 'c', 'd'];
+        assert!(super::move_item(&mut v, 0, 2));
+        assert_eq!(v, ['b', 'c', 'a', 'd']);
+        assert!(super::move_item(&mut v, 3, 0));
+        assert_eq!(v, ['d', 'b', 'c', 'a']);
+        assert!(super::move_item(&mut v, 1, 99));
+        assert_eq!(v, ['d', 'c', 'a', 'b']);
+        assert!(!super::move_item(&mut v, 2, 2));
+        assert!(!super::move_item(&mut v, 9, 0));
+    }
 }

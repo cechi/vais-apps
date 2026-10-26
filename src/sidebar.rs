@@ -27,10 +27,43 @@ pub enum SidebarEvent {
     RenameFavorite(FavoriteId),
     /// Ask for a colour tag for a favorite.
     ColorFavorite(FavoriteId),
+    /// Put the favorite at `from` at position `to` of its list (the
+    /// directories or the saved layouts).
+    MoveFavorite {
+        layout: bool,
+        from: usize,
+        to: usize,
+    },
     /// Open the connection manager.
     ManageConnections,
     /// A group was folded or unfolded (worth saving).
     Changed,
+}
+
+/// A favorite being dragged to another position of its list.
+struct DragFavorite {
+    layout: bool,
+    index: usize,
+}
+
+struct FavoriteDragPreview {
+    name: SharedString,
+}
+
+impl Render for FavoriteDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .px_3()
+            .py_1()
+            .rounded_md()
+            .bg(theme.sidebar_accent)
+            .text_color(theme.sidebar_accent_foreground)
+            .border_1()
+            .border_color(theme.border)
+            .text_sm()
+            .child(self.name.clone())
+    }
 }
 
 /// One of the user's own favorites: a bookmarked directory or a saved layout
@@ -388,7 +421,57 @@ impl Sidebar {
                     if !place.removable {
                         return row.into_any_element();
                     }
-                    // Favorites: a context menu to rename, colour or drop them.
+                    // Its position in its own list: drag it onto another
+                    // favorite of the same kind, or use the menu, to move it.
+                    let is_layout = layout.is_some();
+                    let c_drop = c.drop;
+                    let index = match layout {
+                        Some(ix) => ix,
+                        None => self
+                            .favorites
+                            .iter()
+                            .position(|f| f.path == place.path)
+                            .unwrap_or(0),
+                    };
+                    let count = if is_layout {
+                        self.layouts.len()
+                    } else {
+                        self.favorites.len()
+                    };
+                    let name: SharedString = place.name.clone().into();
+                    let row = row
+                        .on_drag(
+                            DragFavorite {
+                                layout: is_layout,
+                                index,
+                            },
+                            move |_drag, _offset, _window, cx| {
+                                let name = name.clone();
+                                cx.new(|_| FavoriteDragPreview { name })
+                            },
+                        )
+                        // The line shows where the favorite lands: under this
+                        // row when it comes from above, over it otherwise.
+                        .drag_over::<DragFavorite>(move |style, drag, _, _| {
+                            if drag.layout != is_layout || drag.index == index {
+                                style
+                            } else if drag.index < index {
+                                style.border_b_2().border_color(c_drop)
+                            } else {
+                                style.border_t_2().border_color(c_drop)
+                            }
+                        })
+                        .on_drop(cx.listener(move |_this, drag: &DragFavorite, _, cx| {
+                            if drag.layout == is_layout && drag.index != index {
+                                cx.emit(SidebarEvent::MoveFavorite {
+                                    layout: is_layout,
+                                    from: drag.index,
+                                    to: index,
+                                });
+                            }
+                        }));
+                    // Favorites: a context menu to rename, colour, move or
+                    // drop them.
                     let sidebar = cx.entity();
                     let id = match layout {
                         Some(ix) => FavoriteId::Layout(ix),
@@ -401,23 +484,47 @@ impl Sidebar {
                                 sidebar.update(cx, |_, cx| cx.emit(event(id.clone())));
                             }
                         };
-                        menu.item(
-                            PopupMenuItem::new("Rename…")
-                                .on_click(emit(SidebarEvent::RenameFavorite)),
-                        )
-                        .item(
-                            PopupMenuItem::new("Color…")
-                                .on_click(emit(SidebarEvent::ColorFavorite)),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Remove from favorites").on_click(emit(
+                        let move_to = |to: usize| {
+                            let sidebar = sidebar.clone();
+                            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                sidebar.update(cx, |_, cx| {
+                                    cx.emit(SidebarEvent::MoveFavorite {
+                                        layout: is_layout,
+                                        from: index,
+                                        to,
+                                    })
+                                });
+                            }
+                        };
+                        let mut menu = menu
+                            .item(
+                                PopupMenuItem::new("Rename…")
+                                    .on_click(emit(SidebarEvent::RenameFavorite)),
+                            )
+                            .item(
+                                PopupMenuItem::new("Color…")
+                                    .on_click(emit(SidebarEvent::ColorFavorite)),
+                            );
+                        if count > 1 {
+                            menu = menu.separator();
+                            if index > 0 {
+                                menu = menu.item(
+                                    PopupMenuItem::new("Move up").on_click(move_to(index - 1)),
+                                );
+                            }
+                            if index + 1 < count {
+                                menu = menu.item(
+                                    PopupMenuItem::new("Move down").on_click(move_to(index + 1)),
+                                );
+                            }
+                        }
+                        menu.separator()
+                            .item(PopupMenuItem::new("Remove from favorites").on_click(emit(
                                 |id| match id {
                                     FavoriteId::Layout(ix) => SidebarEvent::RemoveLayout(ix),
                                     FavoriteId::Path(path) => SidebarEvent::RemoveFavorite(path),
                                 },
-                            )),
-                        )
+                            )))
                     })
                     .into_any_element()
                 }))
@@ -439,6 +546,8 @@ struct Colors {
     accent: Hsla,
     accent_foreground: Hsla,
     hover: Hsla,
+    /// The line where a dragged favorite would land.
+    drop: Hsla,
 }
 
 impl Render for Sidebar {
@@ -449,6 +558,7 @@ impl Render for Sidebar {
             accent: theme.sidebar_accent,
             accent_foreground: theme.sidebar_accent_foreground,
             hover: theme.list_hover,
+            drop: theme.primary,
         };
         let (bg, fg, border) = (
             theme.sidebar,

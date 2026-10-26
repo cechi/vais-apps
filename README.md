@@ -330,7 +330,10 @@ tab, "Add layout to favorites…", give it a name: the tab's grid and panel path
 and open as a new tab named after the layout when clicked). Right-click a favorite to
 rename it (a directory gets a fixed name instead of its own, a layout a new name), to tag
 it with a colour (the same presets and custom hex as a tab, drawn as a thick left border;
-a layout's colour is also the colour of the tabs opened from it), or to remove it.
+a layout's colour is also the colour of the tabs opened from it), to move it up or down,
+or to remove it. Dragging a favorite onto another one of the same kind moves it there (a
+line shows where it lands); directories and saved layouts keep their own order, the system
+places stay on top.
 "System places in Favorites" in Settings (`system_places` in the config) turns
 the home and user folders off; the group then holds only your own favorites and is not
 shown at all while there are none. "Rename tab…" in the same tab menu gives a tab a fixed title instead of the
