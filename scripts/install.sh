@@ -17,3 +17,4 @@ command -v update-desktop-database >/dev/null && update-desktop-database "$app_d
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 echo "installed to $bin_dir/vais-commander (make sure ~/.local/bin is in your PATH)"
+echo "to use it as the system file picker (xdg-desktop-portal): $here/install-portal.sh"

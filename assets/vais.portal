@@ -1,0 +1,4 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.vais
+Interfaces=org.freedesktop.impl.portal.FileChooser;
+UseIn=niri;sway;Hyprland;wlroots;river;i3;gnome;kde;X-Generic
