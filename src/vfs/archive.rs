@@ -34,27 +34,50 @@ pub enum Kind {
     Tar(Compression),
 }
 
+/// File name endings of the formats we read (lowercase).
+const SUFFIXES: &[(&str, Kind)] = &[
+    (".zip", Kind::Zip),
+    (".jar", Kind::Zip),
+    (".war", Kind::Zip),
+    (".ear", Kind::Zip),
+    (".apk", Kind::Zip),
+    (".ipa", Kind::Zip),
+    (".xpi", Kind::Zip),
+    (".whl", Kind::Zip),
+    (".crx", Kind::Zip),
+    (".tar.gz", Kind::Tar(Compression::Gzip)),
+    (".tgz", Kind::Tar(Compression::Gzip)),
+    (".tar.bz2", Kind::Tar(Compression::Bzip2)),
+    (".tbz2", Kind::Tar(Compression::Bzip2)),
+    (".tbz", Kind::Tar(Compression::Bzip2)),
+    (".tar.xz", Kind::Tar(Compression::Xz)),
+    (".txz", Kind::Tar(Compression::Xz)),
+    (".tar.zst", Kind::Tar(Compression::Zstd)),
+    (".tzst", Kind::Tar(Compression::Zstd)),
+    (".tar", Kind::Tar(Compression::None)),
+];
+
+/// The matching ending of `name` (its length in bytes) and the format.
+fn suffix_of(name: &str) -> Option<(usize, Kind)> {
+    let lower = name.to_ascii_lowercase();
+    SUFFIXES
+        .iter()
+        .find(|(suffix, _)| lower.ends_with(suffix))
+        .map(|(suffix, kind)| (suffix.len(), *kind))
+}
+
 /// The archive format a file name says it is, if any.
 pub fn kind_of(name: &str) -> Option<Kind> {
-    let lower = name.to_ascii_lowercase();
-    let ends = |suffixes: &[&str]| suffixes.iter().any(|s| lower.ends_with(s));
-    if ends(&[
-        ".zip", ".jar", ".war", ".ear", ".apk", ".ipa", ".xpi", ".whl", ".crx",
-    ]) {
-        Some(Kind::Zip)
-    } else if ends(&[".tar.gz", ".tgz"]) {
-        Some(Kind::Tar(Compression::Gzip))
-    } else if ends(&[".tar.bz2", ".tbz2", ".tbz"]) {
-        Some(Kind::Tar(Compression::Bzip2))
-    } else if ends(&[".tar.xz", ".txz"]) {
-        Some(Kind::Tar(Compression::Xz))
-    } else if ends(&[".tar.zst", ".tzst"]) {
-        Some(Kind::Tar(Compression::Zstd))
-    } else if ends(&[".tar"]) {
-        Some(Kind::Tar(Compression::None))
-    } else {
-        None
-    }
+    suffix_of(name).map(|(_, kind)| kind)
+}
+
+/// The name of an archive without its format ending (`site.tar.gz` →
+/// `site`): the folder its contents go into. `None` for other files and for
+/// a bare ending (`.zip`).
+pub fn stem(name: &str) -> Option<&str> {
+    let (len, _) = suffix_of(name)?;
+    let stem = &name[..name.len() - len];
+    (!stem.is_empty()).then_some(stem)
 }
 
 /// One entry of the archive, keyed by its inner path without a leading
@@ -468,7 +491,19 @@ impl Backend for ArchiveBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{Compression, Kind, kind_of};
+    use super::{Compression, Kind, kind_of, stem};
+
+    #[test]
+    fn stems_drop_the_whole_format_ending() {
+        assert_eq!(stem("site.tar.gz"), Some("site"));
+        assert_eq!(stem("Backup.2026.TGZ"), Some("Backup.2026"));
+        assert_eq!(stem("app.zip"), Some("app"));
+        assert_eq!(stem("x.tar.zst"), Some("x"));
+        assert_eq!(stem("plain.tar"), Some("plain"));
+        assert_eq!(stem("notes.txt"), None);
+        assert_eq!(stem(".zip"), None);
+        assert_eq!(kind_of("a.TAR.XZ"), Some(Kind::Tar(Compression::Xz)));
+    }
 
     #[test]
     fn recognises_archive_names() {

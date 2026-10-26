@@ -269,6 +269,13 @@ is unpacked when opened; both go under `~/.cache/vais-commander/archives` (clean
 entries unused for a week). Archives on a connection are fetched first. `Shift+Enter`
 hands the archive to the default application instead.
 
+Right-click an archive and choose **Extract…** to unpack it: the chooser offers every
+panel of the layout twice, its directory and a folder named after the archive in it
+(`site.tar.gz` → `site`), with the archive's own panel and folder preselected; the panel a
+row points at is highlighted, and any typed path works too (missing folders are created).
+The contents of the archive's root are copied there as one operation in the operations
+panel, and files that exist already are asked about like with any copy.
+
 ## Sidebar
 
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:

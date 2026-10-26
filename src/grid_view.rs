@@ -344,6 +344,157 @@ impl GridView {
         palette::open(title, palette, window, cx);
     }
 
+    /// The archive under the cursor, else the first marked one.
+    fn archive_at_cursor(&self, cx: &App) -> Option<(Location, String)> {
+        let panel = self.active_panel().read(cx);
+        let is_archive = |l: &Location| {
+            l.file_name()
+                .and_then(|n| crate::vfs::archive::stem(&n).map(str::to_string))
+        };
+        panel
+            .current_path()
+            .into_iter()
+            .chain(panel.selected_paths())
+            .find_map(|l| is_archive(&l).map(|stem| (l, stem)))
+    }
+
+    /// The entry menu's "Extract…": choose where the archive's contents go.
+    /// Every panel of the layout offers its directory and a new folder named
+    /// after the archive in it (the archive's own panel included); a typed
+    /// path works too. The archive's own panel with the new folder is the
+    /// default, so nothing is spilled loose by accident.
+    pub fn start_extract(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((archive, stem)) = self.archive_at_cursor(cx) else {
+            self.notify(
+                Notification::warning("No archive under the cursor"),
+                window,
+                cx,
+            );
+            return;
+        };
+        let title = format!(
+            "Extract {}",
+            archive.file_name().unwrap_or_else(|| stem.clone())
+        );
+
+        // Two rows per panel in reading order; `panel_of[row]` maps a row
+        // back to its panel for the highlight.
+        let mut panel_of = Vec::new();
+        let mut items = Vec::new();
+        let mut default = String::new();
+        for ix in 0..self.layout.count() {
+            let dir = self.panels[ix].read(cx).path().clone();
+            let label = format!("Panel {}", ix + 1);
+            let here = dir.display();
+            let folder = dir.join(&stem).display();
+            if ix == self.active {
+                default = folder.clone();
+            }
+            items.push(
+                PaletteItem::new(here)
+                    .detail(label.clone())
+                    .icon(IconName::Folder),
+            );
+            items.push(
+                PaletteItem::new(folder)
+                    .detail(format!("{label}, own folder"))
+                    .icon(IconName::FolderOpen),
+            );
+            panel_of.extend([ix, ix]);
+        }
+
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            let (confirm_view, select_view, cancel_view) = (view.clone(), view.clone(), view);
+            let panel_of = Rc::new(panel_of);
+            Palette::new(items, &default, "Destination directory", window, cx)
+                .on_select(move |row, _window, cx| {
+                    let target = row.and_then(|row| panel_of.get(row).copied());
+                    select_view.update(cx, |this, cx| this.set_highlight(target, cx));
+                })
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let (view, archive) = (confirm_view.clone(), archive.clone());
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.set_highlight(None, cx);
+                            let dest = crate::panel::expand_path(&choice.value);
+                            this.extract_to(archive, dest, window, cx);
+                        });
+                    });
+                })
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    cancel_view.update(cx, |this, cx| this.set_highlight(None, cx));
+                })
+        });
+        let initial = palette
+            .read(cx)
+            .selected()
+            .map(|row| row / 2)
+            .filter(|&ix| ix < self.layout.count());
+        self.set_highlight(initial, cx);
+        palette::open(title, palette, window, cx);
+    }
+
+    /// Copy everything at the archive's root into `dest`, creating `dest`
+    /// when it does not exist yet; existing files are asked about as with
+    /// any copy.
+    fn extract_to(
+        &mut self,
+        archive: Location,
+        dest: Location,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if dest.is_archive() {
+            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            return;
+        }
+        // Listing the root unpacks a tar or reads the zip index: not on the
+        // UI thread.
+        let root = Location::archive(archive.clone(), "/");
+        let listing = cx.background_spawn(async move {
+            backend_for(&root).and_then(|backend| backend.read_dir(&root, true))
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let entries = listing.await;
+            this.update_in(cx, |this, window, cx| {
+                let sources: Vec<Location> = match entries {
+                    Ok(entries) => entries
+                        .into_iter()
+                        .filter(|e| !e.is_parent)
+                        .map(|e| e.location)
+                        .collect(),
+                    Err(err) => {
+                        let message = format!("{}: {err}", archive.display());
+                        this.notify(Notification::error(message), window, cx);
+                        return;
+                    }
+                };
+                if sources.is_empty() {
+                    let message = format!("{} is empty", archive.display());
+                    this.notify(Notification::info(message), window, cx);
+                    return;
+                }
+                let exists = backend_for(&dest).and_then(|b| b.stat(&dest)).is_ok();
+                if !exists {
+                    if let Err(err) = backend_for(&dest).and_then(|b| b.mkdir_all(&dest)) {
+                        let message = format!("{}: {err}", dest.display());
+                        this.notify(Notification::error(message), window, cx);
+                        return;
+                    }
+                    if let Some(parent) = dest.parent() {
+                        this.refresh_dir(&parent, cx);
+                    }
+                }
+                this.confirm_transfer(OpKind::Copy, sources, dest, window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Mark `target` as the panel the destination palette points at.
     fn set_highlight(&mut self, target: Option<usize>, cx: &mut Context<Self>) {
         if self.highlight == target {
@@ -891,6 +1042,9 @@ impl GridView {
     fn on_move(&mut self, _: &MoveFiles, window: &mut Window, cx: &mut Context<Self>) {
         self.start_transfer(OpKind::Move, window, cx);
     }
+    fn on_extract(&mut self, _: &ExtractArchive, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_extract(window, cx);
+    }
     fn on_copy_to_clipboard(
         &mut self,
         _: &CopyToClipboard,
@@ -1199,6 +1353,7 @@ impl Render for GridView {
             .key_context(GRID_CONTEXT)
             .on_action(cx.listener(Self::on_copy))
             .on_action(cx.listener(Self::on_move))
+            .on_action(cx.listener(Self::on_extract))
             .on_action(cx.listener(Self::on_rename))
             .on_action(cx.listener(Self::on_view_file))
             .on_action(cx.listener(Self::on_edit_file))

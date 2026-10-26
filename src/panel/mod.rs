@@ -1545,7 +1545,13 @@ impl FilePanel {
     }
 
     /// Right-click menu for an entry; actions go to this panel's focus handle.
-    fn entry_menu(menu: PopupMenu, focus: FocusHandle, is_parent: bool, is_dir: bool) -> PopupMenu {
+    fn entry_menu(
+        menu: PopupMenu,
+        focus: FocusHandle,
+        is_parent: bool,
+        is_dir: bool,
+        is_archive: bool,
+    ) -> PopupMenu {
         let menu = menu.action_context(focus);
         if is_parent {
             return menu
@@ -1557,11 +1563,16 @@ impl FilePanel {
         menu.menu(
             if is_dir {
                 "Open"
+            } else if is_archive {
+                "Browse archive"
             } else {
                 "Open with default app"
             },
             Box::new(Open),
         )
+        .when(is_archive, |menu| {
+            menu.menu("Extract…", Box::new(ExtractArchive))
+        })
         .separator()
         .menu("Copy to other panel…", Box::new(CopyFiles))
         .menu("Move to other panel…", Box::new(MoveFiles))
@@ -1856,7 +1867,9 @@ impl FilePanel {
         .context_menu({
             let focus = self.focus_handle.clone();
             let (is_parent, is_dir) = (entry.is_parent, entry.is_dir());
-            move |menu, _, _| Self::entry_menu(menu, focus.clone(), is_parent, is_dir)
+            let is_archive = entry.kind == EntryKind::File
+                && crate::vfs::archive::kind_of(&entry.name).is_some();
+            move |menu, _, _| Self::entry_menu(menu, focus.clone(), is_parent, is_dir, is_archive)
         })
         .into_any_element()
     }

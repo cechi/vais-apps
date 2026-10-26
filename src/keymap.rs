@@ -63,6 +63,8 @@ actions!(
         // Grid: file operations
         CopyFiles,
         MoveFiles,
+        /// The entry menu of an archive: unpack it into a panel's directory.
+        ExtractArchive,
         CopyToClipboard,
         CutToClipboard,
         PasteFromClipboard,
