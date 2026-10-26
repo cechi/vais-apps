@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{IconName, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -28,6 +29,7 @@ pub enum SettingsEvent {
     Sidebar(bool),
     SystemPlaces(bool),
     CommandLine(bool),
+    KeyBar(bool),
     DropAction(DropAction),
     FileIcons(FileIcons),
     Close,
@@ -44,6 +46,8 @@ pub struct SettingsValues {
     /// Home, Desktop, Documents… at the top of the sidebar's Favorites.
     pub system_places: bool,
     pub command_line: bool,
+    /// The function key bar at the bottom.
+    pub key_bar: bool,
     pub drop_action: DropAction,
     pub file_icons: FileIcons,
 }
@@ -51,6 +55,8 @@ pub struct SettingsValues {
 pub struct SettingsView {
     values: SettingsValues,
     slider: Entity<SliderState>,
+    /// Scroll position of the form, for its scrollbar.
+    scroll: ScrollHandle,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -79,6 +85,7 @@ impl SettingsView {
         Self {
             values,
             slider,
+            scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: vec![subscription],
         }
@@ -357,6 +364,19 @@ impl Render for SettingsView {
                                 cx.notify();
                             }))
                             .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        "Function key bar",
+                        "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)",
+                        muted,
+                        Checkbox::new("settings-key-bar")
+                            .checked(self.values.key_bar)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.values.key_bar = *checked;
+                                cx.emit(SettingsEvent::KeyBar(*checked));
+                                cx.notify();
+                            }))
+                            .into_any_element(),
                     )),
             )
             .child(Self::section("Files", muted, border).child(Self::row(
@@ -425,17 +445,29 @@ impl Render for SettingsView {
                     ),
             );
 
+        // The scrollbar overlays its parent, which must be a flex column with
+        // the scrolling area as its growing child (as in the sidebar).
         v_flex()
             .id("settings")
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::on_close))
+            .relative()
             .size_full()
             .min_h_0()
-            .overflow_y_scroll()
-            .items_center()
             .bg(bg)
             .text_color(fg)
-            .child(form)
+            .child(
+                v_flex()
+                    .id("settings-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .items_center()
+                    .child(form),
+            )
+            .child(Scrollbar::vertical(&self.scroll).viewport_from_layout())
     }
 }

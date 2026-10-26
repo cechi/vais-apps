@@ -60,6 +60,8 @@ pub struct Config {
     pub sidebar_collapsed: Vec<String>,
     /// Whether the command line under the panels is shown.
     pub command_line: bool,
+    /// Whether the function key bar (F2 Rename … F10 Quit) is shown.
+    pub key_bar: bool,
     /// Whether the Favorites group starts with the system places (home, Desktop,
     /// Documents…); off, it holds only the user's own favorites and is hidden
     /// while there are none.
@@ -104,6 +106,7 @@ impl Default for Config {
             sidebar_open: false,
             sidebar_collapsed: Vec::new(),
             command_line: true,
+            key_bar: true,
             system_places: true,
             agents_open: false,
             agents_width: 520.0,

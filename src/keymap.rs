@@ -44,6 +44,10 @@ actions!(
         NewAgentSession,
         ToggleFavorite,
         FocusCommandLine,
+        /// Show or hide the command line (the ☰ menu; no default key).
+        ToggleCommandLine,
+        /// Show or hide the function key bar (the ☰ menu; no default key).
+        ToggleKeyBar,
         InsertNameToCommandLine,
         InsertPathToCommandLine,
         CommandHistoryPrev,

@@ -160,6 +160,8 @@ pub struct Workspace {
     system_places: bool,
     command_line: Entity<CommandLine>,
     command_line_open: bool,
+    /// Whether the function key bar is shown.
+    key_bar_open: bool,
     /// Where the bridge for agents listens (`None` when it could not start).
     bridge_addr: Option<BridgeAddr>,
     /// Tool calls waiting for an operation to finish.
@@ -372,6 +374,7 @@ impl Workspace {
             system_places: config.system_places,
             command_line,
             command_line_open: config.command_line,
+            key_bar_open: config.key_bar,
             bridge_addr,
             bridge_waits: HashMap::new(),
             agents,
@@ -731,6 +734,7 @@ impl Workspace {
             sidebar_open: self.sidebar_open,
             system_places: self.system_places,
             command_line: self.command_line_open,
+            key_bar: self.key_bar_open,
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
         }
@@ -925,9 +929,12 @@ impl Workspace {
             }
             SettingsEvent::CommandLine(open) => {
                 if self.command_line_open != *open {
-                    self.command_line_open = *open;
-                    self.schedule_save(cx);
-                    cx.notify();
+                    self.toggle_command_line(cx);
+                }
+            }
+            SettingsEvent::KeyBar(open) => {
+                if self.key_bar_open != *open {
+                    self.toggle_key_bar(cx);
                 }
             }
             SettingsEvent::DropAction(action) => {
@@ -1753,6 +1760,7 @@ impl Workspace {
             font_family: self.font_family.clone(),
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
+            key_bar: self.key_bar_open,
             command_history: self.command_line.read(cx).history().to_vec(),
             agents_open: self.agents_open,
             agents_width: self.current_agents_width(cx),
@@ -2126,6 +2134,33 @@ impl Workspace {
     fn on_toggle_sidebar(&mut self, _: &ToggleSidebar, _: &mut Window, cx: &mut Context<Self>) {
         self.toggle_sidebar(cx);
     }
+
+    fn toggle_command_line(&mut self, cx: &mut Context<Self>) {
+        self.command_line_open = !self.command_line_open;
+        self.schedule_save(cx);
+        self.sync_settings(cx);
+        cx.notify();
+    }
+
+    fn on_toggle_command_line(
+        &mut self,
+        _: &ToggleCommandLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_command_line(cx);
+    }
+
+    fn toggle_key_bar(&mut self, cx: &mut Context<Self>) {
+        self.key_bar_open = !self.key_bar_open;
+        self.schedule_save(cx);
+        self.sync_settings(cx);
+        cx.notify();
+    }
+
+    fn on_toggle_key_bar(&mut self, _: &ToggleKeyBar, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_key_bar(cx);
+    }
     fn on_quit(&mut self, _: &Quit, _: &mut Window, cx: &mut Context<Self>) {
         cx.quit();
     }
@@ -2375,6 +2410,8 @@ impl Workspace {
         let sidebar_open = self.sidebar_open;
         let ops_open = self.ops_panel_open;
         let agents_open = self.agents_open;
+        let command_line_open = self.command_line_open;
+        let key_bar_open = self.key_bar_open;
         let app_menu = Button::new("app-menu")
             .ghost()
             .small()
@@ -2394,6 +2431,12 @@ impl Workspace {
                         Box::new(ToggleOperationsPanel),
                     )
                     .menu_with_check("Agents panel", agents_open, Box::new(ToggleAgents))
+                    .menu_with_check(
+                        "Command line",
+                        command_line_open,
+                        Box::new(ToggleCommandLine),
+                    )
+                    .menu_with_check("Function key bar", key_bar_open, Box::new(ToggleKeyBar))
                     .separator()
                     .menu("New tab", Box::new(NewTab))
                     .menu("Close tab", Box::new(CloseTab))
@@ -2550,7 +2593,7 @@ impl Render for Workspace {
                 .update(cx, |s, cx| s.set_current(current.clone(), cx));
         }
         let shift = window.modifiers().shift;
-        let key_bar = self.render_key_bar(shift, cx);
+        let key_bar = self.key_bar_open.then(|| self.render_key_bar(shift, cx));
         if self.agents_open {
             let cwd = current
                 .as_ref()
@@ -2598,7 +2641,7 @@ impl Render for Workspace {
                 ),
             )
             .when(show_command_line, |d| d.child(self.command_line.clone()))
-            .child(key_bar);
+            .children(key_bar);
 
         // Hidden side panels are left out (see `reset_side_split`); the
         // side panels keep their width while the window and the main column
@@ -2655,6 +2698,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_zoom_reset))
             .on_action(cx.listener(Self::on_toggle_ops_panel))
             .on_action(cx.listener(Self::on_toggle_sidebar))
+            .on_action(cx.listener(Self::on_toggle_command_line))
+            .on_action(cx.listener(Self::on_toggle_key_bar))
             .on_action(cx.listener(Self::on_focus_command_line))
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_toggle_agents))
