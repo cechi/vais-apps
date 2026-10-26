@@ -96,11 +96,6 @@ impl Reply {
             let _ = sender.send(result);
         }
     }
-
-    /// Whether an answer is still awaited.
-    pub fn is_pending(&self) -> bool {
-        self.0.lock().map(|slot| slot.is_some()).unwrap_or(false)
-    }
 }
 
 /// From the D-Bus thread to the GUI.
@@ -126,10 +121,11 @@ impl VaisChooser {
     /// Hand the request to the GUI and wait for the user.
     async fn ask(&self, token: HandleToken, spec: PickSpec) -> Result<PickResult> {
         log::info!(
-            "portal: {} for {:?}: {:?}",
+            "portal: {} for {:?}: {:?} (start dir {:?})",
             spec.method(),
             spec.app_id,
-            spec.title
+            spec.title,
+            spec.start_dir
         );
         let (tx, rx) = oneshot::channel();
         self.tx

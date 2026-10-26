@@ -90,6 +90,7 @@ fn glob_matcher(pattern: &str) -> Matcher {
 }
 
 /// Whether `name` passes any of the matchers.
+#[cfg(test)]
 pub fn matches_any(matchers: &[Matcher], name: &str) -> bool {
     matchers.iter().any(|m| m.matches(name))
 }

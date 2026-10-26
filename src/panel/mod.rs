@@ -503,10 +503,6 @@ impl FilePanel {
         self.pick = mode;
     }
 
-    pub fn pick_mode(&self) -> Option<PickMode> {
-        self.pick
-    }
-
     /// The caller's file filter (pick mode): names a file must match to be
     /// listed; directories are always shown. Empty lists everything.
     pub fn set_pick_filter(

@@ -5,6 +5,7 @@
 //! it has been idle for a while (D-Bus starts it again on the next request),
 //! when another instance takes the bus name, or when the bus goes away.
 
+mod picker;
 mod service;
 mod uri;
 
@@ -29,8 +30,7 @@ pub const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.vais";
 const DEFAULT_IDLE: Duration = Duration::from_secs(600);
 
 struct State {
-    #[allow(dead_code)] // the picker windows (next step) read it
-    config: Config,
+    config: picker::PickerConfig,
     /// The open picker windows by request.
     windows: HashMap<ashpd::desktop::HandleToken, AnyWindowHandle>,
     /// The pending idle exit, while no window is open.
@@ -55,13 +55,24 @@ pub fn run(config: Config) -> i32 {
     application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
+            // gpui would quit with the last window; the service lives on.
+            cx.set_quit_mode(QuitMode::Explicit);
             crate::init_app(&config, cx);
             crate::theme::load_bundled(cx);
             let state = Rc::new(RefCell::new(State {
-                config,
+                config: picker::PickerConfig::from(&config),
                 windows: HashMap::new(),
                 idle: None,
             }));
+            // The user's own themes load in the background: windows open
+            // before that get the theme once it is in.
+            let theme_state = state.clone();
+            crate::theme::watch(cx, move |cx| {
+                let cfg = &theme_state.borrow().config;
+                for window in cx.windows() {
+                    let _ = window.update(cx, |_, window, cx| cfg.apply_theme(window, cx));
+                }
+            });
             arm_idle(&state, cx);
             let loop_state = state.clone();
             cx.spawn(async move |cx| {
@@ -112,10 +123,20 @@ impl Spawn for ThreadSpawner {
 fn handle(msg: PortalMsg, state: &Rc<RefCell<State>>, cx: &mut App) {
     match msg {
         PortalMsg::Pick { token, spec, reply } => {
-            // The picker window comes in the next step.
-            log::info!("portal: no picker yet for {token}: {}", spec.method());
-            let _ = &state;
-            reply.send(PickResult::Cancelled);
+            // Windows the compositor closed meanwhile are forgotten.
+            let open: Vec<AnyWindowHandle> = cx.windows();
+            let mut st = state.borrow_mut();
+            st.windows.retain(|_, w| open.contains(w));
+            match picker::open(spec, reply.clone(), &st.config, cx) {
+                Ok(window) => {
+                    st.windows.insert(token, window);
+                    st.idle = None;
+                }
+                Err(err) => {
+                    log::error!("portal: cannot open the picker window: {err:#}");
+                    reply.send(PickResult::Closed);
+                }
+            }
         }
         PortalMsg::Close(token) => {
             let window = state.borrow_mut().windows.remove(&token);
