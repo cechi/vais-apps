@@ -329,6 +329,7 @@ version = "0.13.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb8421aaa9644a5faf26735f258b669b15f063313ef8f8e2bdb28912a1a6f111"
 dependencies = [
+ "async-trait",
  "enumflags2",
  "futures-channel",
  "futures-util",
@@ -7397,6 +7398,7 @@ version = "0.3.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
+ "ashpd",
  "bzip2",
  "chrono",
  "directories",

@@ -425,19 +425,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Unscaled font sizes of the active theme: what its config declares, or
-    /// the kit defaults (16 / 13 px).
     fn base_font_sizes(cx: &App) -> (Pixels, Pixels) {
-        let theme = cx.theme();
-        let config = if theme.is_dark() {
-            &theme.dark_theme
-        } else {
-            &theme.light_theme
-        };
-        (
-            config.font_size.map(px).unwrap_or(px(16.)),
-            config.mono_font_size.map(px).unwrap_or(px(13.)),
-        )
+        theme::base_font_sizes(cx)
     }
 
     /// Re-apply the scale when something (a theme reload) reset the font size.
@@ -616,13 +605,7 @@ impl Workspace {
     }
 
     fn apply_scale(&self, cx: &mut App) {
-        let (base, base_mono) = Self::base_font_sizes(cx);
-        let (font, mono) = (base * self.scale, base_mono * self.scale);
-        Theme::update(cx, |theme| {
-            theme.font_size = font;
-            theme.mono_font_size = mono;
-        });
-        theme::apply_font(self.font_family.as_deref(), cx);
+        theme::apply_scale(self.scale, self.font_family.as_deref(), cx);
     }
 
     fn step_scale(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {

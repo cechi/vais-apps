@@ -38,6 +38,8 @@ pub struct IconTheme {
     by_ext: HashMap<String, String>,
     /// Literal file names (`Makefile`) → MIME type.
     by_name: HashMap<String, String>,
+    /// MIME type → its glob patterns (for the portal picker's MIME filters).
+    globs_by_mime: HashMap<String, Vec<String>>,
     /// MIME type → icon name overrides from the `icons` file.
     mime_icons: HashMap<String, String>,
     /// MIME type → generic icon name.
@@ -113,6 +115,12 @@ pub fn file_icon(cx: &App, name: &str) -> Option<ImageSource> {
     cx.global::<IconTheme>().file_icon(name)
 }
 
+/// The glob patterns of a MIME type from the shared MIME database (`image/*`
+/// collects every type under `image/`); empty when nothing is known.
+pub fn globs_for_mime(cx: &App, mime: &str) -> Vec<String> {
+    cx.global::<IconTheme>().globs_for_mime(mime)
+}
+
 impl IconTheme {
     pub fn load() -> Self {
         if !cfg!(target_os = "linux") {
@@ -133,6 +141,22 @@ impl IconTheme {
             this.by_ext.len()
         );
         this
+    }
+
+    pub fn globs_for_mime(&self, mime: &str) -> Vec<String> {
+        let mime = mime.trim().to_lowercase();
+        if let Some(prefix) = mime.strip_suffix("/*") {
+            let mut globs: Vec<String> = self
+                .globs_by_mime
+                .iter()
+                .filter(|(m, _)| m.starts_with(prefix) && m[prefix.len()..].starts_with('/'))
+                .flat_map(|(_, g)| g.iter().cloned())
+                .collect();
+            globs.sort();
+            globs.dedup();
+            return globs;
+        }
+        self.globs_by_mime.get(&mime).cloned().unwrap_or_default()
     }
 
     pub fn file_icon(&self, name: &str) -> Option<ImageSource> {
@@ -314,6 +338,10 @@ impl IconTheme {
                 continue;
             };
             let pattern = pattern.split(':').next().unwrap_or(pattern);
+            let globs = self.globs_by_mime.entry(mime.to_string()).or_default();
+            if !globs.iter().any(|g| g == pattern) {
+                globs.push(pattern.to_string());
+            }
             if let Some(ext) = pattern.strip_prefix("*.") {
                 if !ext.contains(['*', '?', '[']) {
                     self.by_ext

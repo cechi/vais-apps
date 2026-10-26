@@ -74,6 +74,47 @@ scripts/install-desktop.sh debug  # same, but linking the debug binary
 Installs for the current user only (`~/.local/...`). The binary is a symlink into
 `target/`, so a rebuild updates what the launcher starts.
 
+## System file picker (Linux)
+
+VAIS Commander can be the dialog other applications open to pick or save files. On Linux
+that goes through [xdg-desktop-portal](https://flatpak.github.io/xdg-desktop-portal/): an
+application asks the portal for a file chooser, the portal asks the backend named in
+`portals.conf`, and `vais-commander --portal` is such a backend (interface
+`org.freedesktop.impl.portal.FileChooser`, bus name `org.freedesktop.impl.portal.desktop.vais`).
+
+```sh
+scripts/install-portal.sh           # repo checkout; or ./install-portal.sh from a release archive
+scripts/install-portal.sh --force   # also when portals.conf names another backend already
+scripts/install-portal.sh --uninstall
+```
+
+The script installs a D-Bus service file (`~/.local/share/dbus-1/services/`, so the backend
+starts on demand), the `vais.portal` description (`~/.local/share/xdg-desktop-portal/portals/`;
+`--system` puts it into `/usr/share` with sudo for xdg-desktop-portal older than 1.17), sets
+`org.freedesktop.impl.portal.FileChooser=vais;gtk;` under `[preferred]` in
+`~/.config/xdg-desktop-portal/portals.conf` and restarts the portal. The backend reads the
+normal config (theme, font, UI scale, favorites, system places) and never writes it; it stays
+resident for ten minutes after its last window and is started again by D-Bus when needed.
+
+Which applications ask the portal is up to them:
+
+- Firefox: `widget.use-xdg-desktop-portal.file-picker` = `1` in `about:config` (the default
+  `2` means "only when sandboxed or `GTK_USE_PORTAL=1`").
+- GTK 3/4 applications, Chromium and Electron apps: start them with `GTK_USE_PORTAL=1` (per
+  application; setting it globally makes GTK's own portal backends loop).
+- Qt applications: `QT_QPA_PLATFORMTHEME=xdgdesktopportal`.
+- Flatpak and Snap applications use the portal anyway.
+
+The picker is a Places sidebar plus one panel with the usual keys: `Enter` (or a double
+click) chooses a file or enters a directory, `Space` / `Insert` mark several files when the
+caller allows it, `Ctrl+Enter` or the button accepts the marks, the entry under the cursor or,
+when choosing a folder, the current directory, `Ctrl+H` shows hidden files, `Esc` cancels.
+Saving shows a name field (prefilled, the extension kept) and asks before replacing a file. The
+caller's filters are a dropdown in the bottom bar; glob patterns match case-insensitively, MIME
+types through the desktop's MIME database. Limits: only local paths can be returned (no
+connections or archives), the window is not modal to the calling application (Wayland has no
+way to parent it), and the caller's extra choice boxes are answered with their defaults.
+
 ## Keys
 
 Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
@@ -338,6 +379,7 @@ src/agents/        the Agents panel: sessions in tabs, detection of installed CL
 src/terminal/      the embedded terminal: alacritty_terminal session (pty.rs), grid painting (element.rs), key encoding (keys.rs), colours
 src/bridge/        the socket other processes drive the app through, and the tool catalogue; src/app/tools.rs carries the tools out
 src/mcp.rs         `vais-commander --mcp`: the MCP server on stdio, forwarding to the bridge
+src/portal/        `vais-commander --portal`: the xdg-desktop-portal file chooser backend (ashpd service, picker window, URIs and filters)
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
 src/editor_view.rs  the file editor tab (view / edit)

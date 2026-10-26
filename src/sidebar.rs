@@ -76,6 +76,8 @@ pub struct Sidebar {
     collapsed: Vec<String>,
     /// Whether the Favorites group lists the system places (home, Desktop…).
     system_places: bool,
+    /// Whether the Connections group is shown (not in the portal picker).
+    show_connections: bool,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -93,9 +95,15 @@ impl Sidebar {
             scroll: ScrollHandle::new(),
             collapsed,
             system_places,
+            show_connections: true,
         };
         this.refresh();
         this
+    }
+
+    /// Hide the Connections group (the portal picker returns local paths only).
+    pub fn set_show_connections(&mut self, show: bool) {
+        self.show_connections = show;
     }
 
     /// Show or hide the system places at the top of the Favorites group.
@@ -521,29 +529,38 @@ impl Render for Sidebar {
                                     cx,
                                 ))
                             })
-                            .child({
+                            .when(self.show_connections, |d| {
                                 let offset = places.len() + volumes.len();
-                                self.render_section("Connections", &connections, offset, &c, cx)
+                                d.child(self.render_section(
+                                    "Connections",
+                                    &connections,
+                                    offset,
+                                    &c,
+                                    cx,
+                                ))
                             })
-                            .when(!self.is_collapsed("Connections"), |d| {
-                                d.child(
-                                    h_flex()
-                                        .id("sidebar-manage-connections")
-                                        .w_full()
-                                        .h(rems(1.75))
-                                        .px_3()
-                                        .gap_2()
-                                        .cursor_pointer()
-                                        .text_sm()
-                                        .text_color(c.muted_foreground)
-                                        .hover(|s| s.bg(c.hover))
-                                        .on_click(cx.listener(|_, _, _, cx| {
-                                            cx.emit(SidebarEvent::ManageConnections)
-                                        }))
-                                        .child(Icon::new(IconName::Plus).size_4().flex_none())
-                                        .child("Manage connections…"),
-                                )
-                            })
+                            .when(
+                                self.show_connections && !self.is_collapsed("Connections"),
+                                |d| {
+                                    d.child(
+                                        h_flex()
+                                            .id("sidebar-manage-connections")
+                                            .w_full()
+                                            .h(rems(1.75))
+                                            .px_3()
+                                            .gap_2()
+                                            .cursor_pointer()
+                                            .text_sm()
+                                            .text_color(c.muted_foreground)
+                                            .hover(|s| s.bg(c.hover))
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.emit(SidebarEvent::ManageConnections)
+                                            }))
+                                            .child(Icon::new(IconName::Plus).size_4().flex_none())
+                                            .child("Manage connections…"),
+                                    )
+                                },
+                            )
                             .when(!recent.is_empty(), |d| {
                                 let offset = places.len() + volumes.len() + connections.len();
                                 d.child(self.render_section("Recent", &recent, offset, &c, cx))

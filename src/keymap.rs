@@ -22,6 +22,8 @@ pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
 pub const EDITOR_CONTEXT: &str = "FileEditor";
 pub const CONNECTIONS_CONTEXT: &str = "ConnectionsForm";
+/// The portal picker window around its file panel.
+pub const PICKER_CONTEXT: &str = "Picker";
 
 actions!(
     vais,
@@ -126,6 +128,9 @@ actions!(
         // Batch rename form
         ApplyRename,
         CancelRename,
+        // Portal picker
+        PickerAccept,
+        PickerCancel,
     ]
 );
 
@@ -318,6 +323,10 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("down", PaletteDown, Some(PALETTE_CONTEXT)),
         KeyBinding::new("enter", PaletteConfirm, Some(PALETTE_CONTEXT)),
         KeyBinding::new("escape", PaletteCancel, Some(PALETTE_CONTEXT)),
+        // Portal picker: Enter and Escape inside the panel are the panel's own
+        // (Open / CancelOrClear, reported to the picker); these cover the rest.
+        KeyBinding::new("ctrl-enter", PickerAccept, Some(PICKER_CONTEXT)),
+        KeyBinding::new("escape", PickerCancel, Some(PICKER_CONTEXT)),
         KeyBinding::new("secondary-enter", ApplyRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("escape", CancelRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),

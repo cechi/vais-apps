@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::theme::{Theme, ThemeMode, ThemeRegistry};
 use gpui_kit::*;
 
@@ -45,6 +46,33 @@ pub fn watch(cx: &mut App, on_load: impl Fn(&mut App) + 'static) {
 
 /// Apply the user's font family on top of the theme (themes are shared,
 /// fonts are personal). `None` keeps what the theme or the kit sets.
+/// Unscaled font sizes of the active theme: what its config declares, or
+/// the kit defaults (16 / 13 px).
+pub fn base_font_sizes(cx: &App) -> (Pixels, Pixels) {
+    let theme = cx.theme();
+    let config = if theme.is_dark() {
+        &theme.dark_theme
+    } else {
+        &theme.light_theme
+    };
+    (
+        config.font_size.map(px).unwrap_or(px(16.)),
+        config.mono_font_size.map(px).unwrap_or(px(13.)),
+    )
+}
+
+/// The UI scale: the theme's font sizes times `scale`, with the font family
+/// applied again (the theme's sizes are the base, so this is idempotent).
+pub fn apply_scale(scale: f32, family: Option<&str>, cx: &mut App) {
+    let (base, base_mono) = base_font_sizes(cx);
+    let (font, mono) = (base * scale, base_mono * scale);
+    Theme::update(cx, |theme| {
+        theme.font_size = font;
+        theme.mono_font_size = mono;
+    });
+    apply_font(family, cx);
+}
+
 pub fn apply_font(family: Option<&str>, cx: &mut App) {
     let Some(family) = family.filter(|f| !f.trim().is_empty()) else {
         return;
