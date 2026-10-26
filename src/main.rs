@@ -20,6 +20,8 @@ mod ops_panel;
 mod palette;
 mod panel;
 mod platform;
+#[cfg(target_os = "linux")]
+mod portal;
 mod rename;
 mod settings;
 mod settings_view;
@@ -55,23 +57,20 @@ fn main() {
         std::process::exit(mcp::run());
     }
     let config = Config::load();
+    // `vais-commander --portal`: the file chooser backend of xdg-desktop-portal
+    // (a separate process without a main window).
+    if std::env::args().nth(1).as_deref() == Some("--portal") {
+        #[cfg(target_os = "linux")]
+        std::process::exit(portal::run(config));
+        #[cfg(not(target_os = "linux"))]
+        {
+            eprintln!("--portal is available on Linux only");
+            std::process::exit(2);
+        }
+    }
 
     application().with_assets(assets::Assets).run(move |cx| {
-        init(cx);
-        settings::init(&config, cx);
-        clipboard::init(cx);
-        thumbs::init(cx);
-        icons::init(cx);
-        connections::init(config.connections.clone(), cx);
-        watch::init(cx);
-        cx.background_spawn(async { vfs::archive::prune_cache() })
-            .detach();
-        cx.bind_keys(keymap::bindings());
-        // File lists are long; keep their scrollbars visible instead of fading out.
-        gpui_kit::component::theme::Theme::set_scrollbar_mode(
-            gpui_kit::component::scroll::ScrollbarMode::Always,
-            cx,
-        );
+        init_app(&config, cx);
 
         let window_bounds = config.window.map(|w| {
             let bounds = Bounds {
@@ -115,4 +114,24 @@ fn main() {
         })
         .detach();
     });
+}
+
+/// The globals every window of the app needs (the main window and the portal
+/// picker alike).
+pub(crate) fn init_app(config: &Config, cx: &mut App) {
+    init(cx);
+    settings::init(config, cx);
+    clipboard::init(cx);
+    thumbs::init(cx);
+    icons::init(cx);
+    connections::init(config.connections.clone(), cx);
+    watch::init(cx);
+    cx.background_spawn(async { vfs::archive::prune_cache() })
+        .detach();
+    cx.bind_keys(keymap::bindings());
+    // File lists are long; keep their scrollbars visible instead of fading out.
+    gpui_kit::component::theme::Theme::set_scrollbar_mode(
+        gpui_kit::component::scroll::ScrollbarMode::Always,
+        cx,
+    );
 }
