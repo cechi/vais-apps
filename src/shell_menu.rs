@@ -42,7 +42,8 @@ thread_local! {
 
 /// The native handle of a GPUI window, the owner of the menu.
 pub fn hwnd(window: &gpui_kit::Window) -> Option<isize> {
-    match window.window_handle().ok()?.as_raw() {
+    // GPUI's own `window_handle()` is another thing; ask the trait.
+    match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
         _ => None,
     }
