@@ -16,6 +16,12 @@ out = os.path.join(root, "assets", "themes", "cechi.json")
 d = json.load(open(src))
 
 
+def darken(color, amount):
+    """`color` (#rrggbb) moved `amount` (0-1) of the way to black."""
+    rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(v * (1 - amount)):02x}" for v in rgb)
+
+
 def theme(name, mode, c, d16):
     dark = mode == "dark"
     fg_on_accent = c["on_primary"]
@@ -152,7 +158,8 @@ def theme(name, mode, c, d16):
     }
     highlight = {
         "editor.foreground": c["on_surface"],
-        "editor.background": c["surface"],
+        # A shade under the panels in the dark theme, so the editor stands out.
+        "editor.background": darken(c["surface"], 0.45) if dark else c["surface"],
         "editor.active_line.background": c["surface_container_low"],
         "editor.line_number": c["outline"],
         "editor.active_line_number": c["on_surface"],
@@ -166,6 +173,18 @@ def theme(name, mode, c, d16):
         "warning": d16["color3"],
         "syntax": syntax,
     }
+    # gpui-kit 0.8 built with syntect instead of tree-sitter reads these keys
+    # spelled with underscores (its stub style struct lacks the renames), so
+    # the editor colours are written both ways.
+    for key, alias in (
+        ("editor.background", "editor_background"),
+        ("editor.foreground", "editor_foreground"),
+        ("editor.active_line.background", "editor_active_line"),
+        ("editor.line_number", "editor_line_number"),
+        ("editor.active_line_number", "editor_active_line_number"),
+        ("editor.invisible", "editor_invisible"),
+    ):
+        highlight[alias] = highlight[key]
     return {
         "name": name,
         "mode": mode,

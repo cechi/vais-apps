@@ -393,7 +393,10 @@ palette (`scripts/cechi-theme.py` regenerates `assets/themes/cechi.json`; the Ce
 also carry syntax colours for the editor). Any other [gpui-kit theme file](https://gpui-kit.com/component/theme)
 (JSON, a `themes` array with `name`, `mode`, `colors`, optional `highlight`, fonts and radius)
 placed in `~/.config/vais-commander/themes/` is loaded and watched, so edits apply while
-the app runs. `Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"`
+the app runs. The editor colours in `highlight` are read with underscores in this build
+(`editor_background`, `editor_foreground`, `editor_active_line`, `editor_line_number`,
+`editor_active_line_number`, `editor_invisible`); the dotted spellings from the kit's docs
+are ignored, so write both to be safe. `Ctrl+Shift+T` opens the picker; the choice is stored as `theme = "<name>"`
 in the config (`light`, `dark` and `system` select the kit defaults). Fonts are personal
 rather than part of a theme: the Font row in Settings (any installed family, or "Theme
 default") is stored as `font_family = "MesloLGS Nerd Font"` in the config and applies

@@ -20,6 +20,9 @@ What changed in each release of VAIS Commander, newest first.
 
 - In a narrow full view the names keep their width; the columns on the right
   are cut off instead.
+- Cechi Dark: the editor has a darker background than the panels. The
+  editor colours of the Cechi themes now take effect at all (they were
+  ignored, leaving the editor a light grey).
 
 ## 0.4.1 - 2026-10-27
 

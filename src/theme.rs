@@ -130,3 +130,22 @@ pub fn apply(choice: &ThemeChoice, window: Option<&mut Window>, cx: &mut App) ->
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::highlighter::HighlightThemeStyle;
+
+    use super::BUNDLED;
+
+    /// The editor colours of the bundled themes reach the kit (they are
+    /// silently dropped when spelled in a way the kit build does not read).
+    #[test]
+    fn bundled_themes_set_the_editor_background() {
+        let set: serde_json::Value = serde_json::from_str(BUNDLED).unwrap();
+        for theme in set["themes"].as_array().unwrap() {
+            let style: HighlightThemeStyle =
+                serde_json::from_value(theme["highlight"].clone()).unwrap();
+            assert!(style.editor_background.is_some(), "{}", theme["name"]);
+        }
+    }
+}
