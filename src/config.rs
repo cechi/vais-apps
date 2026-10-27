@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::connections::ConnectionConfig;
 use crate::fs::SortKey;
 use crate::layout::{Layout, MAX_PANELS};
-use crate::panel::view::{Columns, ViewMode};
+use crate::panel::view::{Columns, PreviewMode, ViewMode};
 use crate::settings::{DropAction, FileIcons};
 use crate::vfs::Location;
 
@@ -297,6 +297,9 @@ pub struct PanelConfig {
     pub sort_desc: bool,
     pub view: ViewMode,
     pub columns: Columns,
+    /// The preview of the entry under the cursor, and its share of the panel.
+    pub preview: PreviewMode,
+    pub preview_size: f32,
 }
 
 impl Default for PanelConfig {
@@ -308,6 +311,8 @@ impl Default for PanelConfig {
             sort_desc: false,
             view: ViewMode::Full,
             columns: Columns::default(),
+            preview: PreviewMode::Off,
+            preview_size: 0.4,
         }
     }
 }
@@ -387,6 +392,23 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_preview_round_trips() {
+        let panel = PanelConfig {
+            preview: PreviewMode::Right,
+            preview_size: 0.3,
+            ..Default::default()
+        };
+        let text = toml::to_string(&panel).unwrap();
+        assert!(text.contains("preview = \"right\""));
+        let back: PanelConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.preview, PreviewMode::Right);
+        assert_eq!(back.preview_size, 0.3);
+        // Older files have neither field.
+        let old: PanelConfig = toml::from_str("show_hidden = true").unwrap();
+        assert_eq!(old.preview, PreviewMode::Off);
+    }
 
     #[test]
     fn favorites_read_bare_paths_and_tables() {

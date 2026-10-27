@@ -1,5 +1,6 @@
 //! One file panel: a directory listing with cursor, marks and a path bar.
 
+pub mod preview;
 pub mod state;
 pub mod view;
 
@@ -16,6 +17,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
@@ -35,8 +37,9 @@ use crate::keymap::*;
 use crate::platform;
 use crate::settings::FileIcons;
 use crate::ui::{h_flex, v_flex};
+use preview::PreviewPane;
 use state::{Filter, PanelState};
-use view::{Column, Columns, ViewMode};
+use view::{Column, Columns, PreviewMode, ViewMode};
 
 /// Row height in rems, so the list follows the UI scale.
 pub const ROW_HEIGHT_REMS: f32 = 1.5;
@@ -157,6 +160,15 @@ pub struct FilePanel {
     pick: Option<PickMode>,
     view: ViewMode,
     columns: Columns,
+    /// The preview of the cursor entry: where, and its share of the panel.
+    preview: PreviewMode,
+    preview_size: f32,
+    /// The divider between the list and the preview.
+    preview_split: Entity<ResizableState>,
+    /// `preview_size` still has to be applied to a fresh split.
+    preview_size_pending: bool,
+    /// Created when the preview is first shown.
+    preview_pane: Option<Entity<PreviewPane>>,
     /// Entries per line in a grid view (1 in the full view); measured from
     /// the body width at the last render.
     per_row: usize,
@@ -268,6 +280,11 @@ impl FilePanel {
             pick: None,
             view: cfg.view,
             columns: cfg.columns,
+            preview: cfg.preview,
+            preview_size: clamp_preview_size(cfg.preview_size),
+            preview_split: cx.new(|_| ResizableState::default()),
+            preview_size_pending: true,
+            preview_pane: None,
             per_row: 1,
             pending_scroll: false,
             _subscriptions: subscriptions,
@@ -335,6 +352,8 @@ impl FilePanel {
             sort_desc: self.state.sort.dir == SortDir::Desc,
             view: self.view,
             columns: self.columns,
+            preview: self.preview,
+            preview_size: (self.preview_size * 100.0).round() / 100.0,
         }
     }
 
@@ -357,6 +376,108 @@ impl FilePanel {
 
     fn on_set_view(&mut self, action: &SetView, _: &mut Window, cx: &mut Context<Self>) {
         self.set_view(action.mode, cx);
+    }
+
+    fn on_set_preview(&mut self, action: &SetPreview, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_preview(action.mode, cx);
+    }
+
+    fn on_cycle_preview(&mut self, _: &CyclePreview, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_preview(self.preview.next(), cx);
+    }
+
+    /// Show the preview at `mode`'s side (or hide it). The split starts from
+    /// a fresh state: the kit keeps the sizes it measured once, and they would
+    /// be stale for the other axis.
+    pub fn set_preview(&mut self, mode: PreviewMode, cx: &mut Context<Self>) {
+        if self.preview == mode {
+            return;
+        }
+        self.preview = mode;
+        self.preview_split = cx.new(|_| ResizableState::default());
+        self.preview_size_pending = true;
+        cx.emit(PanelEvent::Changed);
+        cx.notify();
+    }
+
+    /// The list (with its column header) alone, or split with the preview.
+    fn with_preview(
+        &mut self,
+        column_header: Option<impl IntoElement>,
+        body: impl IntoElement,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let list = v_flex()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .size_full()
+            .children(column_header)
+            .child(body);
+        if self.preview == PreviewMode::Off {
+            return list.into_any_element();
+        }
+        let pane = match &self.preview_pane {
+            Some(pane) => pane.clone(),
+            None => {
+                let panel = cx.entity().downgrade();
+                let pane = cx.new(|_| PreviewPane::new(panel));
+                self.preview_pane = Some(pane.clone());
+                pane
+            }
+        };
+        let current = self.state.current().cloned();
+        let show_hidden = self.state.show_hidden;
+        pane.update(cx, |pane, cx| {
+            pane.set_target(current.as_ref(), show_hidden, window, cx)
+        });
+
+        // The saved share, once the split has been laid out.
+        if self.preview_size_pending {
+            let state = self.preview_split.read(cx);
+            if state.container_size() > px(0.) && state.sizes().len() == 2 {
+                self.preview_size_pending = false;
+                let fractions = [1.0 - self.preview_size, self.preview_size];
+                crate::layout::grid::apply_fractions_to(
+                    &self.preview_split,
+                    &fractions,
+                    window,
+                    cx,
+                );
+            }
+        }
+
+        let group = match self.preview {
+            PreviewMode::Right => h_resizable(("preview-split", self.index)),
+            _ => v_resizable(("preview-split", self.index)),
+        };
+        group
+            .with_state(&self.preview_split)
+            .on_resize(cx.listener(|this, state: &Entity<ResizableState>, _, cx| {
+                if let Some(fractions) = crate::layout::grid::fractions_of(state.read(cx), 2) {
+                    this.preview_size = clamp_preview_size(fractions[1]);
+                    cx.emit(PanelEvent::Changed);
+                }
+            }))
+            .child(
+                resizable_panel()
+                    .size_range(px(60.)..Pixels::MAX)
+                    .child(list),
+            )
+            .child(
+                resizable_panel().size_range(px(60.)..Pixels::MAX).child(
+                    div()
+                        .size_full()
+                        .border_color(cx.theme().border)
+                        .map(|d| match self.preview {
+                            PreviewMode::Right => d.border_l_1(),
+                            _ => d.border_t_1(),
+                        })
+                        .child(pane),
+                ),
+            )
+            .into_any_element()
     }
 
     fn on_toggle_column(&mut self, action: &ToggleColumn, _: &mut Window, cx: &mut Context<Self>) {
@@ -1701,7 +1822,13 @@ impl FilePanel {
     }
 
     /// Right-click menu for the empty part of the panel.
-    fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort, view: ViewMode) -> PopupMenu {
+    fn panel_menu(
+        menu: PopupMenu,
+        focus: FocusHandle,
+        sort: Sort,
+        view: ViewMode,
+        preview: PreviewMode,
+    ) -> PopupMenu {
         let menu = menu
             .action_context(focus)
             .menu(t!("Paste"), Box::new(PasteFromClipboard))
@@ -1724,6 +1851,7 @@ impl FilePanel {
         let menu = ViewMode::ALL.iter().fold(menu, |menu, &mode| {
             menu.menu_with_check(mode.menu_label(), mode == view, Box::new(SetView { mode }))
         });
+        let menu = Self::preview_items(menu.separator(), preview);
         SortKey::ALL
             .iter()
             .fold(menu.separator(), |menu, &key| {
@@ -1737,6 +1865,17 @@ impl FilePanel {
             .menu(t!("Go up"), Box::new(GoUp))
             .menu(t!("Back"), Box::new(GoBack))
             .menu(t!("Forward"), Box::new(GoForward))
+    }
+
+    /// The preview choices (off, bottom, right) of the view menus.
+    fn preview_items(menu: PopupMenu, current: PreviewMode) -> PopupMenu {
+        PreviewMode::ALL.iter().fold(menu, |menu, &mode| {
+            menu.menu_with_check(
+                mode.menu_label(),
+                mode == current,
+                Box::new(SetPreview { mode }),
+            )
+        })
     }
 
     /// Right-click menu of the column header: which columns to show.
@@ -1788,7 +1927,7 @@ impl FilePanel {
             });
         cell = match width {
             Some(w) => cell.w(rems(w)).flex_none(),
-            None => cell.flex_1().min_w_0(),
+            None => cell.flex_1().min_w(rems(NAME_MIN_REMS)),
         };
         if right {
             cell = cell.justify_end();
@@ -2145,6 +2284,7 @@ impl FilePanel {
             .id(("row", ix))
             .h(rems(ROW_HEIGHT_REMS))
             .w_full()
+            .overflow_hidden()
             .pl_1()
             .pr_2()
             .gap_2()
@@ -2159,7 +2299,13 @@ impl FilePanel {
             .child(div().flex_none().w(rems(entry.depth as f32)))
             .child(chevron)
             .child(div().size_4().flex_none().child(icon))
-            .child(div().flex_1().min_w_0().truncate().child(name))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(rems(NAME_MIN_REMS))
+                    .truncate()
+                    .child(name),
+            )
             .children(self.columns.shown().map(|column| {
                 let (text, color) = column_value(column, entry, &look, c);
                 div()
@@ -2419,6 +2565,7 @@ impl Render for FilePanel {
                 h_flex()
                     .id(("column-header", self.index))
                     .h(rems(1.375))
+                    .overflow_hidden()
                     .flex_none()
                     .px_2()
                     .gap_2()
@@ -2485,6 +2632,8 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_toggle_filter_recursive))
             .on_action(cx.listener(Self::on_toggle_filter_content))
             .on_action(cx.listener(Self::on_set_view))
+            .on_action(cx.listener(Self::on_set_preview))
+            .on_action(cx.listener(Self::on_cycle_preview))
             .on_action(cx.listener(Self::on_toggle_column))
             .size_full()
             .min_w_0()
@@ -2579,8 +2728,9 @@ impl Render for FilePanel {
                                     .dropdown_menu({
                                         let focus = self.focus_handle.clone();
                                         let current = self.view;
+                                        let preview = self.preview;
                                         move |menu, _, _| {
-                                            ViewMode::ALL.iter().fold(
+                                            let menu = ViewMode::ALL.iter().fold(
                                                 menu.action_context(focus.clone()),
                                                 |menu, &mode| {
                                                     menu.menu_with_check(
@@ -2589,63 +2739,76 @@ impl Render for FilePanel {
                                                         Box::new(SetView { mode }),
                                                     )
                                                 },
-                                            )
+                                            );
+                                            Self::preview_items(menu.separator(), preview)
                                         }
                                     }),
                             ),
                     )
                     .children(filter_bar)
-                    .children(column_header)
                     .child(
-                        div()
-                            .id(("panel-body", self.index))
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .child(list)
-                            .child(Scrollbar::vertical(&self.scroll).viewport_from_layout())
-                            .children(self.render_marquee(marquee_color))
-                            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_body_mouse_down))
-                            .when(marquee_allowed, |d| {
-                                d.on_drag(MarqueeDrag { panel: self.index }, |_, _, _, cx| {
-                                    cx.new(|_| EmptyPreview)
+                        self.with_preview(
+                            column_header,
+                            div()
+                                .id(("panel-body", self.index))
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .child(list)
+                                .child(Scrollbar::vertical(&self.scroll).viewport_from_layout())
+                                .children(self.render_marquee(marquee_color))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(Self::on_body_mouse_down),
+                                )
+                                .when(marquee_allowed, |d| {
+                                    d.on_drag(MarqueeDrag { panel: self.index }, |_, _, _, cx| {
+                                        cx.new(|_| EmptyPreview)
+                                    })
                                 })
-                            })
-                            .on_drag_move(cx.listener(
-                                |this, ev: &DragMoveEvent<MarqueeDrag>, window, cx| {
-                                    if ev.drag(cx).panel == this.index {
-                                        this.on_marquee_move(ev.event.position, window, cx);
+                                .on_drag_move(cx.listener(
+                                    |this, ev: &DragMoveEvent<MarqueeDrag>, window, cx| {
+                                        if ev.drag(cx).panel == this.index {
+                                            this.on_marquee_move(ev.event.position, window, cx);
+                                        }
+                                    },
+                                ))
+                                // A plain click (no drag) must not leave a press behind.
+                                .on_mouse_up(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _window, _cx| this.pending_press = None),
+                                )
+                                .on_drop(cx.listener(|this, _: &MarqueeDrag, _window, cx| {
+                                    this.end_marquee(cx);
+                                }))
+                                .on_mouse_up_out(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _window, cx| this.end_marquee(cx)),
+                                )
+                                .drag_over::<DragEntries>(move |style, _, _, _| {
+                                    style.bg(body_drop_bg)
+                                })
+                                .on_drop(cx.listener(|this, drag: &DragEntries, _window, cx| {
+                                    cx.emit(PanelEvent::Dropped {
+                                        paths: drag.paths.clone(),
+                                        dest: this.state.path.clone(),
+                                    });
+                                }))
+                                .context_menu({
+                                    let focus = self.focus_handle.clone();
+                                    let sort = self.state.sort;
+                                    let view = self.view;
+                                    let preview = self.preview;
+                                    move |menu, _, _| {
+                                        Self::panel_menu(menu, focus.clone(), sort, view, preview)
                                     }
-                                },
-                            ))
-                            // A plain click (no drag) must not leave a press behind.
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _window, _cx| this.pending_press = None),
-                            )
-                            .on_drop(cx.listener(|this, _: &MarqueeDrag, _window, cx| {
-                                this.end_marquee(cx);
-                            }))
-                            .on_mouse_up_out(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _window, cx| this.end_marquee(cx)),
-                            )
-                            .drag_over::<DragEntries>(move |style, _, _, _| style.bg(body_drop_bg))
-                            .on_drop(cx.listener(|this, drag: &DragEntries, _window, cx| {
-                                cx.emit(PanelEvent::Dropped {
-                                    paths: drag.paths.clone(),
-                                    dest: this.state.path.clone(),
-                                });
-                            }))
-                            .context_menu({
-                                let focus = self.focus_handle.clone();
-                                let sort = self.state.sort;
-                                let view = self.view;
-                                move |menu, _, _| Self::panel_menu(menu, focus.clone(), sort, view)
-                            }),
+                                }),
+                            window,
+                            cx,
+                        ),
                     )
                     // Errors are only reported here, so they show even with the
                     // status bars turned off.
@@ -2664,6 +2827,19 @@ impl Render for FilePanel {
                         )
                     }),
             )
+    }
+}
+
+/// The name column keeps this width in a narrow panel (a preview beside
+/// the list); the columns on the right are cut off instead.
+const NAME_MIN_REMS: f32 = 8.;
+
+/// The preview's share of the panel, within reason.
+fn clamp_preview_size(size: f32) -> f32 {
+    if size.is_finite() {
+        size.clamp(0.1, 0.9)
+    } else {
+        0.4
     }
 }
 

@@ -11,6 +11,15 @@ What changed in each release of VAIS Commander, newest first.
   the release archives as `CHANGELOG.md`.
 - The status bars under the panels can be turned off for all panels
   (Settings, or the ☰ menu).
+- Preview of the entry under the cursor at the bottom or the right of a
+  panel, with a resizable divider (the view button's menu, or Ctrl+Shift+Q):
+  images, the start of text files with syntax highlighting, and an
+  information card for directories and other files.
+
+### Changed
+
+- In a narrow full view the names keep their width; the columns on the right
+  are cut off instead.
 
 ## 0.4.1 - 2026-10-27
 

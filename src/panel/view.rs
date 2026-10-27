@@ -53,6 +53,40 @@ impl ViewMode {
     }
 }
 
+/// Where a panel shows the preview of the entry under the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewMode {
+    #[default]
+    Off,
+    /// Under the list.
+    Bottom,
+    /// Beside the list.
+    Right,
+}
+
+impl PreviewMode {
+    pub const ALL: [PreviewMode; 3] = [PreviewMode::Off, PreviewMode::Bottom, PreviewMode::Right];
+
+    /// The label in the view menus.
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            PreviewMode::Off => t!("No preview"),
+            PreviewMode::Bottom => t!("Preview at the bottom"),
+            PreviewMode::Right => t!("Preview on the right"),
+        }
+    }
+
+    /// Off → bottom → right → off (Ctrl+Shift+Q).
+    pub fn next(self) -> Self {
+        match self {
+            PreviewMode::Off => PreviewMode::Bottom,
+            PreviewMode::Bottom => PreviewMode::Right,
+            PreviewMode::Right => PreviewMode::Off,
+        }
+    }
+}
+
 /// Which columns the full view shows besides the name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -177,7 +211,19 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
-    use super::{Column, Columns, ViewMode};
+    use super::{Column, Columns, PreviewMode, ViewMode};
+
+    #[test]
+    fn preview_cycles_off_bottom_right() {
+        let mut mode = PreviewMode::default();
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            seen.push(mode);
+            mode = mode.next();
+        }
+        assert_eq!(seen, PreviewMode::ALL);
+        assert_eq!(mode, PreviewMode::Off);
+    }
 
     #[test]
     fn default_columns_and_toggle() {

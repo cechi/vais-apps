@@ -390,7 +390,7 @@ impl Render for EditorView {
 }
 
 /// The highlighter language for a file, by extension or well-known name.
-fn language_for(file_name: &str) -> Option<&'static str> {
+pub(crate) fn language_for(file_name: &str) -> Option<&'static str> {
     let name = file_name.to_lowercase();
     let by_name = match name.as_str() {
         "makefile" | "gnumakefile" => Some("make"),

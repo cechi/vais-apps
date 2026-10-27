@@ -56,15 +56,15 @@ impl GridState {
                 return false;
             }
         }
-        apply_to(&self.rows, rows, window, cx);
+        apply_fractions_to(&self.rows, rows, window, cx);
         for (r, col_fracs) in cols.iter().enumerate().take(layout.rows as usize) {
-            apply_to(&self.cols[r], col_fracs, window, cx);
+            apply_fractions_to(&self.cols[r], col_fracs, window, cx);
         }
         true
     }
 }
 
-fn fractions_of(state: &ResizableState, n: usize) -> Option<Vec<f32>> {
+pub(crate) fn fractions_of(state: &ResizableState, n: usize) -> Option<Vec<f32>> {
     let container = state.container_size();
     if container <= px(0.) || state.sizes().len() != n {
         return None;
@@ -78,7 +78,13 @@ fn fractions_of(state: &ResizableState, n: usize) -> Option<Vec<f32>> {
     )
 }
 
-fn apply_to(state: &Entity<ResizableState>, fractions: &[f32], window: &mut Window, cx: &mut App) {
+/// Resize the panels of `state` to `fractions` of its container.
+pub(crate) fn apply_fractions_to(
+    state: &Entity<ResizableState>,
+    fractions: &[f32],
+    window: &mut Window,
+    cx: &mut App,
+) {
     let container = state.read(cx).container_size();
     let n = fractions.len();
     // Resizing panel `i` moves the boundary between `i` and `i + 1`, so going

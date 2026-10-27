@@ -159,6 +159,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Shift+B` / `` Ctrl+` `` / `Ctrl+Shift+N` | Agents panel: toggle / focus it or go back to the files / new session |
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
+| `Ctrl+Shift+Q` | Preview of the entry under the cursor: off → bottom → right (also in the view button's menu). See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting. With no files waiting, `Ctrl+V` saves an image from the system clipboard (a screenshot, a copied picture) into the directory, asking for the file name first |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
@@ -226,6 +227,15 @@ Each panel has its own view, saved with the tab:
 - **Thumbnails** (`Ctrl+F3`): a grid with image previews (png, jpg, gif, webp, bmp,
   tiff, ico, qoi, svg) and large icons for everything else. Previews are generated in the
   background and cached under the user cache directory (`~/.cache/vais-commander/thumbs`).
+
+Any view can show a **preview** of the entry under the cursor at the bottom or the right of
+the panel, with a divider to resize it: the second section of the view button's menu (and
+of the panel's context menu), or `Ctrl+Shift+Q` to cycle off → bottom → right. Images show
+whole (from a connection or an archive as their thumbnail), text files show their first
+512 KiB read-only with syntax highlighting (click back into the list after selecting text
+there), and directories and other files get a card with type, size (the entry count for a
+directory), dates, permissions and owner. The side and share are saved with the panel. In
+a narrow list the name keeps its width and the columns on the right are cut off.
 
 ## Editor
 
@@ -397,7 +407,7 @@ src/app.rs         Workspace: tabs, tab bar, theme, persistence
 src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
-src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns)
+src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns, preview side), preview.rs (the preview pane)
 src/vfs/           Location (local path, connection + path, or path in an archive) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar/7z
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab

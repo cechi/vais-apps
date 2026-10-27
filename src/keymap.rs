@@ -4,7 +4,7 @@ use gpui_kit::*;
 
 use crate::fs::SortKey;
 use crate::layout::Layout;
-use crate::panel::view::{Column, ViewMode};
+use crate::panel::view::{Column, PreviewMode, ViewMode};
 
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
@@ -57,6 +57,8 @@ actions!(
         CommandHistoryNext,
         CommandLineCancel,
         CloseSettings,
+        /// The panel preview: off → bottom → right.
+        CyclePreview,
         /// Open the What's new tab (the ☰ menu; no default key).
         ShowChangelog,
         CloseChangelog,
@@ -175,6 +177,14 @@ pub struct SortBy {
 #[action(namespace = vais, no_json)]
 pub struct SetView {
     pub mode: ViewMode,
+}
+
+/// Show the preview of the entry under the cursor at the bottom or the right
+/// of the panel, or hide it.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = vais, no_json)]
+pub struct SetPreview {
+    pub mode: PreviewMode,
 }
 
 /// Show or hide a column of the full view.
@@ -314,6 +324,8 @@ pub fn bindings() -> Vec<KeyBinding> {
             },
             p,
         ),
+        // Not `secondary`: Cmd+Shift+Q logs out on macOS.
+        KeyBinding::new("ctrl-shift-q", CyclePreview, p),
         // Sorting: Ctrl+Shift+F3 name, F4 type, F5 time, F6 size.
         KeyBinding::new("ctrl-shift-f3", SortBy { key: SortKey::Name }, p),
         KeyBinding::new("ctrl-shift-f4", SortBy { key: SortKey::Type }, p),
@@ -485,6 +497,8 @@ fn action_detail(action: &dyn Action) -> Option<(String, bool)> {
     if let Some(a) = any.downcast_ref::<SortBy>() {
         Some((format!("{:?}", a.key), true))
     } else if let Some(a) = any.downcast_ref::<SetView>() {
+        Some((format!("{:?}", a.mode), true))
+    } else if let Some(a) = any.downcast_ref::<SetPreview>() {
         Some((format!("{:?}", a.mode), true))
     } else if let Some(a) = any.downcast_ref::<ToggleColumn>() {
         Some((format!("{:?}", a.column), true))
