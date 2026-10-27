@@ -7413,6 +7413,7 @@ dependencies = [
  "log",
  "notify",
  "open",
+ "raw-window-handle",
  "regex",
  "resvg 0.46.0",
  "serde",

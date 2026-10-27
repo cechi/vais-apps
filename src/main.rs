@@ -25,6 +25,8 @@ mod portal;
 mod rename;
 mod settings;
 mod settings_view;
+#[cfg(windows)]
+mod shell_menu;
 mod sidebar;
 mod ssh_config;
 mod tab_color;

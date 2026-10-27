@@ -118,6 +118,10 @@ actions!(
         Reload,
         CopyPath,
         OpenTerminal,
+        /// Windows: the Explorer context menu of the selection.
+        WindowsContextMenu,
+        /// Windows: the Explorer context menu of the panel's directory.
+        WindowsFolderMenu,
         ExpandEntry,
         CollapseEntry,
         OpenFilter,
@@ -335,6 +339,10 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("escape", CancelRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),
     ];
+    if cfg!(windows) {
+        // As in Explorer, Shift+F10 is the full shell menu.
+        v.push(KeyBinding::new("shift-f10", WindowsContextMenu, p));
+    }
     if mac {
         // Finder habits: Cmd+Up goes to the parent, Cmd+Down opens.
         v.push(KeyBinding::new("secondary-up", GoUp, p));

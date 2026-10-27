@@ -1593,6 +1593,59 @@ impl FilePanel {
         }
     }
 
+    fn on_windows_context_menu(
+        &mut self,
+        _: &WindowsContextMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self.selected_paths();
+        self.windows_menu(items, window, cx);
+    }
+    fn on_windows_folder_menu(
+        &mut self,
+        _: &WindowsFolderMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.windows_menu(Vec::new(), window, cx);
+    }
+
+    /// The Explorer context menu for `items`, or for the directory itself
+    /// when there are none.
+    #[cfg(windows)]
+    fn windows_menu(&mut self, items: Vec<Location>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.path.is_roots() && items.is_empty() {
+            return;
+        }
+        let local = |l: &Location| l.as_local().map(Path::to_path_buf);
+        let (Some(dir), Some(items)) = (
+            local(&self.state.path),
+            items.iter().map(local).collect::<Option<Vec<_>>>(),
+        ) else {
+            self.state.error = Some("context menu: not a local file".into());
+            cx.notify();
+            return;
+        };
+        let Some(hwnd) = crate::shell_menu::hwnd(window) else {
+            return;
+        };
+        // The menu's modal loop runs outside this update, where GPUI's window
+        // procedure can borrow the app as usual.
+        cx.spawn(async move |this, cx| {
+            if let Err(err) = crate::shell_menu::show(hwnd, &dir, &items) {
+                this.update(cx, |this, cx| {
+                    this.state.error = Some(format!("context menu: {err}"));
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+    #[cfg(not(windows))]
+    fn windows_menu(&mut self, _: Vec<Location>, _: &mut Window, _: &mut Context<Self>) {}
+
     /// Right-click menu for an entry; actions go to this panel's focus handle.
     fn entry_menu(
         menu: PopupMenu,
@@ -1607,7 +1660,11 @@ impl FilePanel {
                 .menu("Go up", Box::new(GoUp))
                 .separator()
                 .menu("New folder…", Box::new(MakeDir))
-                .menu("Open terminal here", Box::new(OpenTerminal));
+                .menu("Open terminal here", Box::new(OpenTerminal))
+                .when(cfg!(windows), |menu| {
+                    menu.separator()
+                        .menu("Windows context menu", Box::new(WindowsFolderMenu))
+                });
         }
         menu.menu(
             if is_dir {
@@ -1640,6 +1697,10 @@ impl FilePanel {
         .menu("Copy path", Box::new(CopyPath))
         .menu("New folder…", Box::new(MakeDir))
         .menu("Open terminal here", Box::new(OpenTerminal))
+        .when(cfg!(windows), |menu| {
+            menu.separator()
+                .menu("Windows context menu", Box::new(WindowsContextMenu))
+        })
     }
 
     /// Right-click menu for the empty part of the panel.
@@ -1651,6 +1712,9 @@ impl FilePanel {
             .menu("New folder…", Box::new(MakeDir))
             .menu("Open terminal here", Box::new(OpenTerminal))
             .menu("Copy directory path", Box::new(CopyPath))
+            .when(cfg!(windows), |menu| {
+                menu.menu("Windows context menu", Box::new(WindowsFolderMenu))
+            })
             .separator()
             .menu("Mark all", Box::new(MarkAll))
             .menu("Clear marks", Box::new(CancelOrClear))
@@ -2406,6 +2470,11 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_sort_by))
             .on_action(cx.listener(Self::on_copy_path))
             .on_action(cx.listener(Self::on_open_terminal))
+            .when(cfg!(windows), |panel| {
+                panel
+                    .on_action(cx.listener(Self::on_windows_context_menu))
+                    .on_action(cx.listener(Self::on_windows_folder_menu))
+            })
             .on_action(cx.listener(Self::on_expand))
             .on_action(cx.listener(Self::on_collapse))
             .on_action(cx.listener(Self::on_open_filter))

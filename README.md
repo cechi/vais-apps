@@ -60,6 +60,11 @@ Linux is the developed and tested platform. macOS and Windows are supported in c
   `Cmd+Up` / `Cmd+Down` go up / open.
 - Hidden files: dot-prefix on Unix, the hidden attribute (or dot-prefix) on Windows.
 - Windows drive roots: `..` above `C:\` opens a "Computer" listing of mounted drives.
+- Windows context menu: **Windows context menu** at the end of the entry and panel context
+  menus (or `Shift+F10`) opens Explorer's own menu for the marked entries (or the cursor
+  entry), or for the directory from empty space or `..`; shell extensions, Send to, Open
+  with and Properties included, Shift adds the extended verbs. Local files only. Linux has
+  no shared equivalent, and macOS has no public API for Finder's menu.
 - Packaging (`scripts/install-desktop.sh`) is Linux-only; a macOS `.app` bundle and a Windows
   shortcut/icon are still to do.
 - CI (`.github/workflows/ci.yml`) builds and tests on Ubuntu, macOS and Windows.
@@ -388,6 +393,7 @@ src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.
 src/settings_view.rs  the settings tab
 src/editor_view.rs  the file editor tab (view / edit)
 src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
+src/shell_menu.rs  Windows: Explorer's context menu (IContextMenu) for the selection or a directory
 src/config.rs      TOML config
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)
