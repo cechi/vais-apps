@@ -33,6 +33,8 @@ cp -a --reflink=always target .claude/worktrees/<task>/target   # btrfs: seconds
 - The main session merges a finished branch into `master` (`cargo fmt`, tests, a check in a
   nested niri), then removes the worktree: `git worktree remove .claude/worktrees/<task>`.
 - When only one task is running, work in the main checkout; no worktree is needed.
+- `/task-start` (`.claude/skills/task-start/`) does all of this: worktree, reflinked
+  `target/`, a herdr tab with its own Claude session and the brief; `--close` cleans up.
 
 ## Shared code
 
