@@ -77,6 +77,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Release notes (the version's CHANGELOG.md section)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v h="## $version - " 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' \
+            CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          cat release-notes.md
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -86,5 +97,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: release-notes.md
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

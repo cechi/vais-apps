@@ -41,6 +41,7 @@
 "Themes directory" = "Тека тем"
 "JSON theme files here are watched and offered in the theme chooser" = "Файли тем JSON у цій теці відстежуються й пропонуються під час вибору теми"
 "About" = "Про програму"
+"What's new" = "Що нового"
 "VAIS = vibecoded AI slop · MIT licence" = "VAIS = vibecoded AI slop · ліцензія MIT"
 
 # ----- Command palette (action names and their data) -----------------------

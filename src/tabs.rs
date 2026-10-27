@@ -2,6 +2,7 @@
 
 use gpui_kit::*;
 
+use crate::changelog_view::ChangelogView;
 use crate::config::TabConfig;
 use crate::connections_view::ConnectionsView;
 use crate::editor_view::EditorView;
@@ -19,6 +20,8 @@ pub enum TabContent {
     Editor(Entity<EditorView>),
     /// The connection manager.
     Connections(Entity<ConnectionsView>),
+    /// What's new: the changelog.
+    Changelog(Entity<ChangelogView>),
 }
 
 pub struct Tab {
@@ -53,6 +56,19 @@ impl Tab {
     pub fn connections(view: Entity<ConnectionsView>) -> Self {
         Self {
             content: TabContent::Connections(view),
+        }
+    }
+
+    pub fn changelog(view: Entity<ChangelogView>) -> Self {
+        Self {
+            content: TabContent::Changelog(view),
+        }
+    }
+
+    pub fn changelog_view(&self) -> Option<&Entity<ChangelogView>> {
+        match &self.content {
+            TabContent::Changelog(view) => Some(view),
+            _ => None,
         }
     }
 
@@ -100,6 +116,7 @@ impl Tab {
             TabContent::Settings(view) => view.read(cx).focus_handle(),
             TabContent::Editor(view) => view.read(cx).focus_handle(),
             TabContent::Connections(view) => view.read(cx).focus_handle(),
+            TabContent::Changelog(view) => view.read(cx).focus_handle(),
         }
     }
 
@@ -110,6 +127,7 @@ impl Tab {
             TabContent::Settings(view) => view.read(cx).title(),
             TabContent::Editor(view) => view.read(cx).title(),
             TabContent::Connections(_) => t!("Connections").to_string(),
+            TabContent::Changelog(view) => view.read(cx).title(),
         }
     }
 
@@ -120,6 +138,7 @@ impl Tab {
             TabContent::Settings(view) => view.read(cx).focus_handle().focus(window, cx),
             TabContent::Editor(view) => view.update(cx, |editor, cx| editor.focus(window, cx)),
             TabContent::Connections(view) => view.read(cx).focus_handle().focus(window, cx),
+            TabContent::Changelog(view) => view.read(cx).focus_handle().focus(window, cx),
         }
     }
 
@@ -138,6 +157,7 @@ impl Tab {
             TabContent::Settings(view) => view.clone().into_any_element(),
             TabContent::Editor(view) => view.clone().into_any_element(),
             TabContent::Connections(view) => view.clone().into_any_element(),
+            TabContent::Changelog(view) => view.clone().into_any_element(),
         }
     }
 }

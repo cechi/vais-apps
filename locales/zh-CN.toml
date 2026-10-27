@@ -41,6 +41,7 @@
 "Themes directory" = "主题文件夹"
 "JSON theme files here are watched and offered in the theme chooser" = "此文件夹中的 JSON 主题文件会被监视，并显示在主题选择器中"
 "About" = "关于"
+"What's new" = "新功能"
 "VAIS = vibecoded AI slop · MIT licence" = "VAIS = vibecoded AI slop · MIT 许可证"
 
 # ----- Command palette (action names and their data) -----------------------

@@ -41,6 +41,7 @@
 "Themes directory" = "テーマフォルダー"
 "JSON theme files here are watched and offered in the theme chooser" = "このフォルダー内の JSON テーマファイルは監視され、テーマの選択肢に表示されます"
 "About" = "バージョン情報"
+"What's new" = "新機能"
 "VAIS = vibecoded AI slop · MIT licence" = "VAIS = vibecoded AI slop · MIT ライセンス"
 
 # ----- Command palette (action names and their data) -----------------------

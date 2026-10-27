@@ -43,12 +43,17 @@ libx11 openssl zstd vulkan-icd-loader` plus your GPU's Vulkan ICD.
 
 ## Releasing
 
-1. Bump `version` in `Cargo.toml`, commit.
+1. Bump `version` in `Cargo.toml`, and in `CHANGELOG.md` rename `## Unreleased` to
+   `## 0.x.y - YYYY-MM-DD` (a test fails while the version has no section). Commit.
 2. `git tag -a v0.x.y -m "VAIS Commander 0.x.y"` and `git push origin master v0.x.y`.
 3. The `Release` workflow builds Linux, macOS (arm64 + x86_64) and Windows packages
    (`scripts/package.sh`), checks the tag against `Cargo.toml`, and publishes a GitHub release
-   with generated notes and `SHA256SUMS`. A tag containing `-` (e.g. `v0.2.0-beta.1`) becomes a
-   pre-release.
+   with the version's `CHANGELOG.md` section as its notes and `SHA256SUMS`. A tag containing
+   `-` (e.g. `v0.2.0-beta.1`) becomes a pre-release.
+
+Changes go under `## Unreleased` at the top of `CHANGELOG.md` as they land. The changelog is
+built into the binary: the first start of a new version opens it in a **What's new** tab (also
+in the ☰ menu and Settings → About), and the release archives carry it as well.
 
 ## Platforms
 
@@ -409,6 +414,7 @@ src/mcp.rs         `vais-commander --mcp`: the MCP server on stdio, forwarding t
 src/portal/        `vais-commander --portal`: the xdg-desktop-portal file chooser backend (ashpd service, picker window, URIs and filters)
 src/rename/        batch rename: rules and preview (mod.rs), the form tab (view.rs)
 src/settings_view.rs  the settings tab
+src/changelog_view.rs the What's new tab (CHANGELOG.md, built in)
 src/editor_view.rs  the file editor tab (view / edit)
 src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
 src/shell_menu.rs  Windows: Explorer's context menu (IContextMenu) for the selection or a directory

@@ -41,6 +41,7 @@
 "Themes directory" = "Carpeta de temas"
 "JSON theme files here are watched and offered in the theme chooser" = "Los archivos de tema JSON de esta carpeta se vigilan y se ofrecen en el selector de temas"
 "About" = "Acerca de"
+"What's new" = "Novedades"
 "VAIS = vibecoded AI slop · MIT licence" = "VAIS = vibecoded AI slop · licencia MIT"
 
 # ----- Command palette (action names and their data) -----------------------

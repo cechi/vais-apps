@@ -80,6 +80,8 @@ pub struct Config {
     pub font_family: Option<String>,
     /// Interface language (a code such as `cs`); `None` follows the system.
     pub language: Option<String>,
+    /// The version that ran last; a newer one opens the What's new tab.
+    pub last_version: Option<String>,
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
@@ -97,6 +99,9 @@ pub struct Config {
     /// Version 1 panels; read for migration, never written.
     #[serde(skip_serializing)]
     pub panels: Vec<PanelConfig>,
+    /// Read from an existing file, not a first start.
+    #[serde(skip)]
+    pub from_file: bool,
 }
 
 impl Default for Config {
@@ -117,6 +122,7 @@ impl Default for Config {
             file_icons: FileIcons::System,
             font_family: None,
             language: None,
+            last_version: None,
             window: None,
             active_tab: 0,
             tabs: Vec::new(),
@@ -126,6 +132,7 @@ impl Default for Config {
             connections: Vec::new(),
             layout: None,
             panels: Vec::new(),
+            from_file: false,
         }
     }
 }
@@ -322,7 +329,10 @@ impl Config {
         };
         match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str::<Config>(&text) {
-                Ok(cfg) => cfg,
+                Ok(cfg) => Self {
+                    from_file: true,
+                    ..cfg
+                },
                 Err(err) => {
                     log::warn!("ignoring invalid config {}: {err}", path.display());
                     Self::default()
@@ -346,6 +356,13 @@ impl Config {
         std::fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, &path).with_context(|| format!("renaming to {}", path.display()))?;
         Ok(())
+    }
+
+    /// Whether this version is new to the user: an older one ran before
+    /// (or one from before `last_version` was saved), and it is not the
+    /// first start.
+    pub fn upgraded(&self) -> bool {
+        self.from_file && self.last_version.as_deref() != Some(env!("CARGO_PKG_VERSION"))
     }
 
     /// The tabs to open: the saved ones, a version 1 config migrated into a

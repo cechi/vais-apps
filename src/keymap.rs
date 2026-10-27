@@ -22,6 +22,7 @@ pub const RENAME_CONTEXT: &str = "RenameForm";
 pub const SETTINGS_CONTEXT: &str = "SettingsForm";
 pub const EDITOR_CONTEXT: &str = "FileEditor";
 pub const CONNECTIONS_CONTEXT: &str = "ConnectionsForm";
+pub const CHANGELOG_CONTEXT: &str = "Changelog";
 /// The portal picker window around its file panel.
 pub const PICKER_CONTEXT: &str = "Picker";
 
@@ -54,6 +55,9 @@ actions!(
         CommandHistoryNext,
         CommandLineCancel,
         CloseSettings,
+        /// Open the What's new tab (the ☰ menu; no default key).
+        ShowChangelog,
+        CloseChangelog,
         // Files in the editor tab
         ViewFile,
         EditFile,
@@ -225,6 +229,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-k", OpenConnections, wt),
         KeyBinding::new("escape", CloseConnections, Some(CONNECTIONS_CONTEXT)),
         KeyBinding::new("escape", CloseSettings, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("escape", CloseChangelog, Some(CHANGELOG_CONTEXT)),
         KeyBinding::new("secondary-s", SaveFile, Some(EDITOR_CONTEXT)),
         KeyBinding::new("secondary-shift-e", ToggleReadOnly, Some(EDITOR_CONTEXT)),
         KeyBinding::new("secondary-=", ZoomIn, w),

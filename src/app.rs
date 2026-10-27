@@ -25,6 +25,7 @@ mod tools;
 
 use crate::agents::{AgentsEvent, AgentsPanel};
 use crate::bridge::BridgeAddr;
+use crate::changelog_view::{ChangelogEvent, ChangelogView};
 use crate::command_line::{CommandLine, CommandLineEvent};
 use crate::config::{
     CONFIG_VERSION, Config, Favorite, FavoriteLayout, TabConfig, ThemeChoice, WindowConfig,
@@ -417,6 +418,9 @@ impl Workspace {
         }
         this.active_tab = config.active_tab.min(this.tabs.len() - 1);
         this.sync_connections(cx);
+        if config.upgraded() {
+            this.open_changelog(window, cx);
+        }
         this
     }
 
@@ -742,6 +746,21 @@ impl Workspace {
                     },
                 ));
             }
+            if let Some(view) = tab.changelog_view() {
+                subscriptions.push(cx.subscribe_in(
+                    view,
+                    window,
+                    |this, view, ChangelogEvent::Close, window, cx| {
+                        if let Some(ix) = this
+                            .tabs
+                            .iter()
+                            .position(|tab| tab.changelog_view() == Some(view))
+                        {
+                            this.close_tab(ix, window, cx);
+                        }
+                    },
+                ));
+            }
             if let Some(view) = tab.connections_view() {
                 subscriptions.push(cx.subscribe_in(
                     view,
@@ -960,6 +979,28 @@ impl Workspace {
         self.activate_tab(ix, window, cx);
     }
 
+    /// Open the What's new tab (or switch to it when it is already open).
+    fn open_changelog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ix) = self.tabs.iter().position(|t| t.changelog_view().is_some()) {
+            self.activate_tab(ix, window, cx);
+            return;
+        }
+        let view = cx.new(ChangelogView::new);
+        let ix = self.active_tab + 1;
+        self.tabs.insert(ix, Tab::changelog(view));
+        self.resubscribe(window, cx);
+        self.activate_tab(ix, window, cx);
+    }
+
+    fn on_show_changelog(
+        &mut self,
+        _: &ShowChangelog,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_changelog(window, cx);
+    }
+
     fn on_settings_event(
         &mut self,
         view: &Entity<SettingsView>,
@@ -971,6 +1012,7 @@ impl Workspace {
             SettingsEvent::ChooseTheme => self.choose_theme(window, cx),
             SettingsEvent::ChooseFont => self.choose_font(window, cx),
             SettingsEvent::ChooseLanguage => self.choose_language(window, cx),
+            SettingsEvent::ShowChangelog => self.open_changelog(window, cx),
             SettingsEvent::Scale(scale) => {
                 let scale = clamp_scale(*scale);
                 self.scale_slider
@@ -1852,6 +1894,7 @@ impl Workspace {
             favorite_layouts: self.favorite_layouts.clone(),
             font_family: self.font_family.clone(),
             language: self.language.clone(),
+            last_version: Some(env!("CARGO_PKG_VERSION").into()),
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
             key_bar: self.key_bar_open,
@@ -2516,6 +2559,7 @@ impl Workspace {
                     .menu(t!("Settings…"), Box::new(OpenSettings))
                     .menu(t!("Connections…"), Box::new(OpenConnections))
                     .menu(t!("Theme…"), Box::new(ChooseTheme))
+                    .menu(t!("What's new"), Box::new(ShowChangelog))
                     .separator()
                     .menu(t!("Add / remove favorite"), Box::new(ToggleFavorite))
                     .menu_with_check(t!("Places sidebar"), sidebar_open, Box::new(ToggleSidebar))
@@ -2817,6 +2861,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_insert_name))
             .on_action(cx.listener(Self::on_insert_path))
             .on_action(cx.listener(Self::on_open_settings))
+            .on_action(cx.listener(Self::on_show_changelog))
             .on_action(cx.listener(Self::on_open_connections))
             .on_action(cx.listener(Self::on_quit))
             // Repaint when Shift changes so the key bar shows the Shift captions.

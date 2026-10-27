@@ -42,6 +42,7 @@
 "Themes directory" = "Složka motivů"
 "JSON theme files here are watched and offered in the theme chooser" = "Soubory motivů JSON v této složce se sledují a nabízejí ve výběru motivu"
 "About" = "O aplikaci"
+"What's new" = "Co je nového"
 "VAIS = vibecoded AI slop · MIT licence" = "VAIS = vibecoded AI slop · licence MIT"
 
 # ----- Command palette (action names and their data) -----------------------

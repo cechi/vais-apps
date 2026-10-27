@@ -27,6 +27,8 @@ pub enum SettingsEvent {
     ChooseFont,
     /// Open the language chooser.
     ChooseLanguage,
+    /// Open the What's new tab.
+    ShowChangelog,
     Scale(f32),
     Sidebar(bool),
     SystemPlaces(bool),
@@ -462,14 +464,28 @@ impl Render for SettingsView {
                             .child(t!("VAIS = vibecoded AI slop · MIT licence")),
                     )
                     .child(
-                        Button::new("settings-github")
-                            .link()
-                            .small()
-                            .label("github.com/cechi/vais-commander")
-                            .on_click(|_, _, _| {
-                                let _ =
-                                    open::that_detached("https://github.com/cechi/vais-commander");
-                            }),
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                Button::new("settings-github")
+                                    .link()
+                                    .small()
+                                    .label("github.com/cechi/vais-commander")
+                                    .on_click(|_, _, _| {
+                                        let _ = open::that_detached(
+                                            "https://github.com/cechi/vais-commander",
+                                        );
+                                    }),
+                            )
+                            .child(
+                                Button::new("settings-changelog")
+                                    .link()
+                                    .small()
+                                    .label(t!("What's new"))
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SettingsEvent::ShowChangelog)
+                                    })),
+                            ),
                     ),
             );
 

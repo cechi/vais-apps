@@ -5,6 +5,7 @@ mod i18n;
 mod agents;
 mod app;
 mod bridge;
+mod changelog_view;
 mod clipboard;
 mod command_line;
 mod config;

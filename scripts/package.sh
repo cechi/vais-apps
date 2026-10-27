@@ -19,7 +19,7 @@ case "$target" in
         rm -rf "$stage"
         mkdir -p "$stage"
         cp "$bin_dir/$name" "$stage/"
-        cp "$root/assets/$name.desktop" "$root/assets/$name.svg" "$root/assets/vais.portal" "$root/README.md" "$root/LICENSE" "$stage/"
+        cp "$root/assets/$name.desktop" "$root/assets/$name.svg" "$root/assets/vais.portal" "$root/README.md" "$root/CHANGELOG.md" "$root/LICENSE" "$stage/"
         cp "$root/scripts/install.sh" "$stage/install.sh"
         cp "$root/scripts/install-portal.sh" "$stage/install-portal.sh"
         chmod +x "$stage/install.sh" "$stage/install-portal.sh" "$stage/$name"
@@ -33,6 +33,7 @@ case "$target" in
         mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
         cp "$bin_dir/$name" "$app/Contents/MacOS/$name"
         chmod +x "$app/Contents/MacOS/$name"
+        cp "$root/CHANGELOG.md" "$root/LICENSE" "$app/Contents/Resources/"
         # Icon: iconset from the 1024px PNG, then icns.
         iconset="$dist/AppIcon.iconset"
         rm -rf "$iconset"
@@ -73,7 +74,7 @@ PLIST
         rm -rf "$stage"
         mkdir -p "$stage"
         cp "$bin_dir/$name.exe" "$stage/"
-        cp "$root/README.md" "$root/LICENSE" "$stage/"
+        cp "$root/README.md" "$root/CHANGELOG.md" "$root/LICENSE" "$stage/"
         (cd "$dist" && 7z a -tzip "$(basename "$stage").zip" "$(basename "$stage")" >/dev/null)
         rm -rf "$stage"
         echo "$stage.zip"
