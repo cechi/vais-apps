@@ -46,6 +46,69 @@ pub const LANGUAGES: &[Language] = &[
         catalog: include_str!("../locales/cs.toml"),
         plural: czech,
     },
+    Language {
+        code: "de",
+        name: "Deutsch",
+        english: "German",
+        catalog: include_str!("../locales/de.toml"),
+        plural: one_other,
+    },
+    Language {
+        code: "es",
+        name: "Español",
+        english: "Spanish",
+        catalog: include_str!("../locales/es.toml"),
+        plural: one_other,
+    },
+    Language {
+        code: "fr",
+        name: "Français",
+        english: "French",
+        catalog: include_str!("../locales/fr.toml"),
+        plural: french,
+    },
+    Language {
+        code: "ja",
+        name: "日本語",
+        english: "Japanese",
+        catalog: include_str!("../locales/ja.toml"),
+        plural: no_plural,
+    },
+    Language {
+        code: "pl",
+        name: "Polski",
+        english: "Polish",
+        catalog: include_str!("../locales/pl.toml"),
+        plural: polish,
+    },
+    Language {
+        code: "pt-BR",
+        name: "Português (Brasil)",
+        english: "Portuguese (Brazil)",
+        catalog: include_str!("../locales/pt-BR.toml"),
+        plural: french,
+    },
+    Language {
+        code: "sk",
+        name: "Slovenčina",
+        english: "Slovak",
+        catalog: include_str!("../locales/sk.toml"),
+        plural: czech,
+    },
+    Language {
+        code: "uk",
+        name: "Українська",
+        english: "Ukrainian",
+        catalog: include_str!("../locales/uk.toml"),
+        plural: east_slavic,
+    },
+    Language {
+        code: "zh-CN",
+        name: "简体中文",
+        english: "Chinese (Simplified)",
+        catalog: include_str!("../locales/zh-CN.toml"),
+        plural: no_plural,
+    },
 ];
 
 /// Index into [`LANGUAGES`].
@@ -202,6 +265,11 @@ fn one_other(n: u64) -> usize {
     usize::from(n != 1)
 }
 
+/// French and Brazilian Portuguese: 0 and 1 / the rest.
+fn french(n: u64) -> usize {
+    usize::from(n > 1)
+}
+
 /// Czech and Slovak: 1 / 2–4 / the rest.
 fn czech(n: u64) -> usize {
     match n {
@@ -209,6 +277,29 @@ fn czech(n: u64) -> usize {
         2..=4 => 1,
         _ => 2,
     }
+}
+
+/// Polish: 1 / 2–4 except 12–14 (also 22–24…) / the rest.
+fn polish(n: u64) -> usize {
+    match (n % 10, n % 100) {
+        _ if n == 1 => 0,
+        (2..=4, m) if !(12..=14).contains(&m) => 1,
+        _ => 2,
+    }
+}
+
+/// Ukrainian (and Russian): 1, 21, 31… / 2–4, 22–24… / the rest.
+fn east_slavic(n: u64) -> usize {
+    match (n % 10, n % 100) {
+        (1, m) if m != 11 => 0,
+        (2..=4, m) if !(12..=14).contains(&m) => 1,
+        _ => 2,
+    }
+}
+
+/// Chinese and Japanese: one form.
+fn no_plural(_: u64) -> usize {
+    0
 }
 
 #[cfg(test)]
@@ -334,6 +425,24 @@ mod tests {
         assert_eq!(find("cs-CZ"), Some(1));
         assert_eq!(find("en-US"), Some(0));
         assert_eq!(find("xx"), None);
+        let code = |locale| find(locale).map(|i| LANGUAGES[i].code);
+        assert_eq!(code("pt_BR.UTF-8"), Some("pt-BR"));
+        assert_eq!(code("pt_PT"), Some("pt-BR"));
+        assert_eq!(code("zh-Hans-CN"), Some("zh-CN"));
+        assert_eq!(code("uk_UA.UTF-8"), Some("uk"));
+    }
+
+    #[test]
+    fn slavic_plurals() {
+        assert_eq!(
+            [1, 2, 5, 12, 22, 25, 101].map(polish),
+            [0, 1, 2, 2, 1, 2, 2]
+        );
+        assert_eq!(
+            [1, 2, 5, 11, 21, 22, 112].map(east_slavic),
+            [0, 1, 2, 2, 0, 1, 2]
+        );
+        assert_eq!([0, 1, 2].map(french), [0, 0, 1]);
     }
 
     #[test]

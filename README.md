@@ -353,8 +353,10 @@ function key bar shift right while it is open; the status bar keeps the full wid
 ## Languages
 
 The interface follows the system language and can be set in Settings → Language
-(config: `language`, e.g. `"cs"`; unset follows the system). Available: English and
-Czech. A change applies at once.
+(config: `language`, e.g. `"cs"`; unset follows the system). Available: English, Czech,
+German, Spanish, French, Japanese, Polish, Portuguese (Brazil), Slovak, Ukrainian and
+Chinese (Simplified). A change applies at once. All translations except Czech were made by
+AI and no native speaker has reviewed them yet, so corrections are welcome.
 
 Translations live in `locales/<code>.toml`. The English text in the code is the key and
 the value is its translation, e.g. `"Copy" = "Kopírovat"`. A text that depends on a number
