@@ -28,6 +28,8 @@
 "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)" = "Un prompt della shell sotto i pannelli (Ctrl+E; Ctrl+Enter inserisce il file sotto il cursore)"
 "Function key bar" = "Barra dei tasti funzione"
 "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)" = "I pulsanti F2 Rinomina … F10 Esci in basso (i tasti funzionano in ogni caso)"
+"Panel status bars" = "Barre di stato dei pannelli"
+"The line under each panel: entry counts, marked size, free space" = "La riga sotto ogni pannello: numero di elementi, dimensione dei selezionati, spazio libero"
 "Files" = "File"
 "Drag and drop" = "Trascina e rilascia"
 "What dropping entries onto a panel does" = "Cosa succede rilasciando elementi su un pannello"

@@ -34,6 +34,7 @@ pub enum SettingsEvent {
     SystemPlaces(bool),
     CommandLine(bool),
     KeyBar(bool),
+    PanelStatusBar(bool),
     DropAction(DropAction),
     FileIcons(FileIcons),
     Close,
@@ -54,6 +55,8 @@ pub struct SettingsValues {
     pub command_line: bool,
     /// The function key bar at the bottom.
     pub key_bar: bool,
+    /// The status bar under each panel.
+    pub panel_status_bar: bool,
     pub drop_action: DropAction,
     pub file_icons: FileIcons,
 }
@@ -404,6 +407,19 @@ impl Render for SettingsView {
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.values.key_bar = *checked;
                                 cx.emit(SettingsEvent::KeyBar(*checked));
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        t!("Panel status bars"),
+                        t!("The line under each panel: entry counts, marked size, free space"),
+                        muted,
+                        Checkbox::new("settings-panel-status-bar")
+                            .checked(self.values.panel_status_bar)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.values.panel_status_bar = *checked;
+                                cx.emit(SettingsEvent::PanelStatusBar(*checked));
                                 cx.notify();
                             }))
                             .into_any_element(),

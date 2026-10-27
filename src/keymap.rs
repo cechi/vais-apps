@@ -49,6 +49,8 @@ actions!(
         ToggleCommandLine,
         /// Show or hide the function key bar (the ☰ menu; no default key).
         ToggleKeyBar,
+        /// Show or hide the status bars under the panels (the ☰ menu; no default key).
+        TogglePanelStatusBar,
         InsertNameToCommandLine,
         InsertPathToCommandLine,
         CommandHistoryPrev,

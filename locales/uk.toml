@@ -28,6 +28,8 @@
 "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)" = "Командний рядок оболонки під панелями (Ctrl+E; Ctrl+Enter вставляє файл під курсором)"
 "Function key bar" = "Панель функціональних клавіш"
 "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)" = "Кнопки F2 Перейменувати … F10 Вийти внизу (клавіші працюють і без них)"
+"Panel status bars" = "Рядки стану панелей"
+"The line under each panel: entry counts, marked size, free space" = "Рядок під кожною панеллю: кількість елементів, розмір позначених, вільне місце"
 "Files" = "Файли"
 "Drag and drop" = "Перетягування"
 "What dropping entries onto a panel does" = "Що відбувається, коли елементи скидають на панель"

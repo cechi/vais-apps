@@ -29,6 +29,8 @@
 "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)" = "Příkazový řádek shellu pod panely (Ctrl+E; Ctrl+Enter vloží soubor pod kurzorem)"
 "Function key bar" = "Lišta funkčních kláves"
 "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)" = "Tlačítka F2 Přejmenovat … F10 Konec dole (klávesy fungují i bez nich)"
+"Panel status bars" = "Stavové řádky panelů"
+"The line under each panel: entry counts, marked size, free space" = "Řádek pod každým panelem: počet položek, velikost označených, volné místo"
 "Files" = "Soubory"
 "Drag and drop" = "Přetažení myší"
 "What dropping entries onto a panel does" = "Co se stane po upuštění položek na panel"

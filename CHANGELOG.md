@@ -9,6 +9,8 @@ What changed in each release of VAIS Commander, newest first.
 - What's new: this changelog opens in a tab on the first start of a new
   version, and from the ☰ menu or Settings → About at any time. It is also in
   the release archives as `CHANGELOG.md`.
+- The status bars under the panels can be turned off for all panels
+  (Settings, or the ☰ menu).
 
 ## 0.4.1 - 2026-10-27
 

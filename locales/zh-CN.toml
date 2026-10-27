@@ -28,6 +28,8 @@
 "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)" = "面板下方的 Shell 提示符（Ctrl+E；Ctrl+Enter 插入光标处的文件）"
 "Function key bar" = "功能键栏"
 "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)" = "底部的 F2 重命名 … F10 退出 按钮（不显示时按键照样可用）"
+"Panel status bars" = "面板状态栏"
+"The line under each panel: entry counts, marked size, free space" = "每个面板下方的一行：条目数、已标记大小、可用空间"
 "Files" = "文件"
 "Drag and drop" = "拖放"
 "What dropping entries onto a panel does" = "将项目拖放到面板上时执行的操作"

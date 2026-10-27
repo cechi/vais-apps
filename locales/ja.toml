@@ -28,6 +28,8 @@
 "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)" = "パネルの下のシェルプロンプト（Ctrl+E。Ctrl+Enter でカーソル位置のファイルを挿入）"
 "Function key bar" = "ファンクションキーバー"
 "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)" = "下部の F2 名前変更 … F10 終了 ボタン（キー操作は表示しなくても使えます）"
+"Panel status bars" = "パネルのステータスバー"
+"The line under each panel: entry counts, marked size, free space" = "各パネルの下の行：項目数、マークしたサイズ、空き容量"
 "Files" = "ファイル"
 "Drag and drop" = "ドラッグ アンド ドロップ"
 "What dropping entries onto a panel does" = "項目をパネルにドロップしたときの動作"

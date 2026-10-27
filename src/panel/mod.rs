@@ -2391,6 +2391,8 @@ impl Render for FilePanel {
             colors.muted_foreground
         };
         let muted_foreground = colors.muted_foreground;
+        let show_status_bar =
+            crate::settings::get(cx).panel_status_bar || self.state.error.is_some();
 
         let row_colors = colors.clone();
         let list = uniform_list(
@@ -2645,18 +2647,22 @@ impl Render for FilePanel {
                                 move |menu, _, _| Self::panel_menu(menu, focus.clone(), sort, view)
                             }),
                     )
-                    .child(
-                        h_flex()
-                            .h(rems(1.375))
-                            .flex_none()
-                            .px_2()
-                            .bg(status_bar)
-                            .border_t_1()
-                            .border_color(border)
-                            .text_xs()
-                            .text_color(footer_color)
-                            .child(div().flex_1().min_w_0().truncate().child(footer_text)),
-                    ),
+                    // Errors are only reported here, so they show even with the
+                    // status bars turned off.
+                    .when(show_status_bar, |panel| {
+                        panel.child(
+                            h_flex()
+                                .h(rems(1.375))
+                                .flex_none()
+                                .px_2()
+                                .bg(status_bar)
+                                .border_t_1()
+                                .border_color(border)
+                                .text_xs()
+                                .text_color(footer_color)
+                                .child(div().flex_1().min_w_0().truncate().child(footer_text)),
+                        )
+                    }),
             )
     }
 }

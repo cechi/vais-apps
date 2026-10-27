@@ -172,7 +172,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+J` | Show / hide the operations panel |
 | `Ctrl+B` | Show / hide the places sidebar (also the toggle at the left of the status bar) |
 | `Ctrl+K` | Connection manager tab (see Connections) |
-| `Ctrl+,` | Settings tab: theme, UI scale, file icons (desktop icon theme on Linux, shell icons on Windows, or generic; folders always use the built-in icon), sidebar, command line, function key bar, drag & drop behaviour, config and themes folders (also in the ☰ menu at the right of the tab bar, which lists the other app-level commands too) |
+| `Ctrl+,` | Settings tab: theme, UI scale, file icons (desktop icon theme on Linux, shell icons on Windows, or generic; folders always use the built-in icon), sidebar, command line, function key bar, panel status bars, drag & drop behaviour, config and themes folders (also in the ☰ menu at the right of the tab bar, which lists the other app-level commands too) |
 | `Ctrl+Shift+T` | Choose a theme (built-in or from the themes directory); type to filter the list |
 | `Ctrl+Shift+D` | Toggle light / dark |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | UI scale up / down / reset (also the slider in the status bar and Ctrl+mouse wheel) |
@@ -188,7 +188,9 @@ a directory row, `..`, or the empty area of any panel to drop them there; `drop_
 the config decides what happens: `ask` (default, a small Move / Copy menu at the drop point), `move` or `copy`. The
 function key bar above the status bar has a button per F-key; hold Shift to see the
 Shift variants (F6 Rename, F8 permanent delete). Settings and the ☰ menu hide it (the keys
-keep working), and the command line the same way. Directories have a chevron that expands
+keep working), and the command line the same way. The status bar under each panel (counts, marked size, free
+space) can be turned off for all panels in Settings or the ☰ menu (`panel_status_bar` in
+the config); a panel still shows it while it has an error to report. Directories have a chevron that expands
 them inline as a tree (any depth); marks and the cursor follow paths across reloads, and
 operations work on nested entries. Right-click on an entry opens a context
 menu (open, copy/move, rename, marks, trash/delete, copy path, new folder, terminal);

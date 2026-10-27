@@ -813,6 +813,7 @@ impl Workspace {
             system_places: self.system_places,
             command_line: self.command_line_open,
             key_bar: self.key_bar_open,
+            panel_status_bar: crate::settings::get(cx).panel_status_bar,
             drop_action: crate::settings::get(cx).drop_action,
             file_icons: crate::settings::get(cx).file_icons,
         }
@@ -1036,6 +1037,11 @@ impl Workspace {
             SettingsEvent::CommandLine(open) => {
                 if self.command_line_open != *open {
                     self.toggle_command_line(cx);
+                }
+            }
+            SettingsEvent::PanelStatusBar(show) => {
+                if crate::settings::get(cx).panel_status_bar != *show {
+                    self.toggle_panel_status_bar(cx);
                 }
             }
             SettingsEvent::KeyBar(open) => {
@@ -1898,6 +1904,7 @@ impl Workspace {
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
             key_bar: self.key_bar_open,
+            panel_status_bar: crate::settings::get(cx).panel_status_bar,
             command_history: self.command_line.read(cx).history().to_vec(),
             agents_open: self.agents_open,
             agents_width: self.current_agents_width(cx),
@@ -2295,6 +2302,26 @@ impl Workspace {
         cx.notify();
     }
 
+    fn toggle_panel_status_bar(&mut self, cx: &mut Context<Self>) {
+        let show = !crate::settings::get(cx).panel_status_bar;
+        crate::settings::set_panel_status_bar(cx, show);
+        for grid in self.tabs.iter().filter_map(|tab| tab.grid_view()) {
+            grid.update(cx, |grid, cx| grid.redraw_panels(cx));
+        }
+        self.schedule_save(cx);
+        self.sync_settings(cx);
+        cx.notify();
+    }
+
+    fn on_toggle_panel_status_bar(
+        &mut self,
+        _: &TogglePanelStatusBar,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_panel_status_bar(cx);
+    }
+
     fn on_toggle_key_bar(&mut self, _: &ToggleKeyBar, _: &mut Window, cx: &mut Context<Self>) {
         self.toggle_key_bar(cx);
     }
@@ -2549,6 +2576,7 @@ impl Workspace {
         let agents_open = self.agents_open;
         let command_line_open = self.command_line_open;
         let key_bar_open = self.key_bar_open;
+        let panel_status_bar = crate::settings::get(cx).panel_status_bar;
         let app_menu = Button::new("app-menu")
             .ghost()
             .small()
@@ -2575,6 +2603,11 @@ impl Workspace {
                         Box::new(ToggleCommandLine),
                     )
                     .menu_with_check(t!("Function key bar"), key_bar_open, Box::new(ToggleKeyBar))
+                    .menu_with_check(
+                        t!("Panel status bars"),
+                        panel_status_bar,
+                        Box::new(TogglePanelStatusBar),
+                    )
                     .separator()
                     .menu(t!("New tab"), Box::new(NewTab))
                     .menu(t!("Close tab"), Box::new(CloseTab))
@@ -2852,6 +2885,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_command_line))
             .on_action(cx.listener(Self::on_toggle_key_bar))
+            .on_action(cx.listener(Self::on_toggle_panel_status_bar))
             .on_action(cx.listener(Self::on_focus_command_line))
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_toggle_agents))
