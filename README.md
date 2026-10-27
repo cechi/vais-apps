@@ -354,7 +354,7 @@ function key bar shift right while it is open; the status bar keeps the full wid
 
 The interface follows the system language and can be set in Settings → Language
 (config: `language`, e.g. `"cs"`; unset follows the system). Available: English, Czech,
-German, Spanish, French, Japanese, Polish, Portuguese (Brazil), Slovak, Ukrainian and
+German, Spanish, French, Italian, Japanese, Polish, Portuguese (Brazil), Slovak, Ukrainian and
 Chinese (Simplified). A change applies at once. All translations except Czech were made by
 AI and no native speaker has reviewed them yet, so corrections are welcome.
 

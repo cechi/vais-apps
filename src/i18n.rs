@@ -68,6 +68,13 @@ pub const LANGUAGES: &[Language] = &[
         plural: french,
     },
     Language {
+        code: "it",
+        name: "Italiano",
+        english: "Italian",
+        catalog: include_str!("../locales/it.toml"),
+        plural: one_other,
+    },
+    Language {
         code: "ja",
         name: "日本語",
         english: "Japanese",
