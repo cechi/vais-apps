@@ -1,11 +1,12 @@
 #!/bin/bash
 # Records docs/demo.gif and docs/demo.mp4: a scripted tour of the app in a
 # nested niri compositor. Needs niri, grim, wtype, ffmpeg, zip and
-# ImageMagick; run it from the repository root after `cargo build --release`.
+# ImageMagick; run it after `cargo build --release`.
 # The nested compositor opens as a window of your session; do not touch the
 # keyboard while it runs (about 40 s).
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+WORKSPACE=$(cd "$ROOT/../.." && pwd)
 WORK=${DEMO_WORK:-$(mktemp -d)}
 DATA=/tmp/vais-demo
 mkdir -p "$WORK/frames" "$WORK/xdg/vais-commander" "$WORK/xdg-cache"
@@ -33,7 +34,7 @@ sleep 2
 WD=$(grep -o 'wayland-[0-9]*' "$WORK/niri.log" | head -1)
 SOCK=$(grep -o '/run/user/[0-9]*/niri\.wayland-[0-9]*\.[0-9]*\.sock' "$WORK/niri.log" | head -1)
 WAYLAND_DISPLAY=$WD XDG_CONFIG_HOME=$WORK/xdg XDG_CACHE_HOME=$WORK/xdg-cache \
-    "$ROOT/target/release/vais-commander" > "$WORK/app.log" 2>&1 &
+    "$WORKSPACE/target/release/vais-commander" > "$WORK/app.log" 2>&1 &
 AP=$!
 sleep 5
 stop() { kill "$AP" 2>/dev/null || true; kill "$NP" 2>/dev/null || true; }

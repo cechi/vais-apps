@@ -4,15 +4,16 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+workspace="$(cd "$root/../.." && pwd)"
 profile="${1:-release}"
-bin="$root/target/$profile/vais-commander"
+bin="$workspace/target/$profile/vais-commander"
 
 if [[ ! -x "$bin" ]]; then
     echo "building $profile binary…"
     if [[ "$profile" == release ]]; then
-        (cd "$root" && cargo build --release)
+        (cd "$root" && cargo build --release -p vais-commander)
     else
-        (cd "$root" && cargo build)
+        (cd "$root" && cargo build -p vais-commander)
     fi
 fi
 

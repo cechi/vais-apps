@@ -53,7 +53,7 @@ fi
 
 # The binary: given, in PATH, the per-user install, or the release build.
 if [[ -z $bin ]]; then
-    for candidate in "$(command -v vais-commander 2>/dev/null || true)" "$HOME/.local/bin/vais-commander" "$here/../target/release/vais-commander"; do
+    for candidate in "$(command -v vais-commander 2>/dev/null || true)" "$HOME/.local/bin/vais-commander" "$here/../../../target/release/vais-commander"; do
         [[ -n $candidate && -x $candidate ]] && { bin="$candidate"; break; }
     done
 fi

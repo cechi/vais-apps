@@ -1,9 +1,15 @@
 name: Release
 
+# Tags name the app and its version: vais-commander-v0.5.0 releases
+# apps/vais-commander. A manual run builds the app it is given, without a release.
 on:
   push:
-    tags: ["v*"]
+    tags: ["*-v*"]
   workflow_dispatch:
+    inputs:
+      app:
+        description: App to build (a directory in apps/)
+        default: vais-commander
 
 permissions:
   contents: write
@@ -26,18 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Version (must match the tag)
+      - name: App and version (must match the tag)
         id: version
         shell: bash
         run: |
-          crate=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            tag="${GITHUB_REF#refs/tags/v}"
-            if [[ "$tag" != "$crate" ]]; then
-              echo "tag v$tag does not match Cargo.toml version $crate" >&2
-              exit 1
-            fi
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            app="${tag%-v*}"
+          else
+            tag=""
+            app="${{ inputs.app }}"
           fi
+          manifest="apps/$app/Cargo.toml"
+          [[ -f $manifest ]] || { echo "no app $app (missing $manifest)" >&2; exit 1; }
+          crate=$(grep -m1 '^version' "$manifest" | sed -E 's/.*"([^"]+)".*/\1/')
+          if [[ -n $tag && "$tag" != "$app-v$crate" ]]; then
+            echo "tag $tag does not match $manifest version $crate" >&2
+            exit 1
+          fi
+          echo "app=$app" >> "$GITHUB_OUTPUT"
           echo "version=$crate" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -56,15 +69,15 @@ jobs:
             libvulkan1 vulkan-validationlayers
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked -p ${{ steps.version.outputs.app }} --target ${{ matrix.target }}
 
       - name: Test
         if: runner.os == 'Linux'
-        run: cargo test --release --locked --target ${{ matrix.target }}
+        run: cargo test --release --locked -p ${{ steps.version.outputs.app }} --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
-        run: scripts/package.sh ${{ matrix.target }} ${{ steps.version.outputs.version }}
+        run: apps/${{ steps.version.outputs.app }}/scripts/package.sh ${{ matrix.target }} ${{ steps.version.outputs.version }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -73,21 +86,27 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Release notes (the version's CHANGELOG.md section)
+        id: notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          app="${GITHUB_REF_NAME%-v*}"
+          version="${GITHUB_REF_NAME##*-v}"
+          changelog="apps/$app/CHANGELOG.md"
           awk -v h="## $version - " 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' \
-            CHANGELOG.md > release-notes.md
+            "$changelog" > release-notes.md
           if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "CHANGELOG.md has no section for $version" >&2
+            echo "$changelog has no section for $version" >&2
             exit 1
           fi
           cat release-notes.md
+          # A version with a suffix (0.5.0-beta.1) is a pre-release.
+          [[ $version == *-* ]] && pre=true || pre=false
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -99,4 +118,4 @@ jobs:
           files: dist/*
           body_path: release-notes.md
           generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ steps.notes.outputs.prerelease }}
