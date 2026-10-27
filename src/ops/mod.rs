@@ -20,7 +20,8 @@ pub enum OpKind {
 }
 
 impl OpKind {
-    /// Imperative label for dialogs and buttons.
+    /// Imperative label, in English: the kind's name for the agent tools.
+    /// The interface uses the translated sentences below.
     pub fn verb(self) -> &'static str {
         match self {
             OpKind::Copy => "Copy",
@@ -30,22 +31,63 @@ impl OpKind {
         }
     }
 
-    /// Progressive label for the status bar.
-    pub fn progress_verb(self) -> &'static str {
+    /// "Copy report.pdf": the operation on `what` (see [`describe`]), for
+    /// dialog titles and the operations panel.
+    pub fn title(self, what: &str) -> String {
         match self {
-            OpKind::Copy => "Copying",
-            OpKind::Move => "Moving",
-            OpKind::Delete { .. } => "Deleting",
+            OpKind::Copy => t!("Copy {what}", what = what),
+            OpKind::Move => t!("Move {what}", what = what),
+            OpKind::Delete { permanent: true } => t!("Delete {what} permanently", what = what),
+            OpKind::Delete { permanent: false } => t!("Move {what} to trash", what = what),
         }
     }
 
-    /// Past tense for the final notification.
-    pub fn done_verb(self) -> &'static str {
+    /// "Copying report.pdf", while it runs.
+    pub fn progress_text(self, what: &str) -> String {
         match self {
-            OpKind::Copy => "Copied",
-            OpKind::Move => "Moved",
-            OpKind::Delete { permanent: true } => "Deleted",
-            OpKind::Delete { permanent: false } => "Trashed",
+            OpKind::Copy => t!("Copying {what}", what = what),
+            OpKind::Move => t!("Moving {what}", what = what),
+            OpKind::Delete { .. } => t!("Deleting {what}", what = what),
+        }
+    }
+
+    /// "Copied report.pdf", for the final notification.
+    pub fn done_text(self, what: &str) -> String {
+        match self {
+            OpKind::Copy => t!("Copied {what}", what = what),
+            OpKind::Move => t!("Moved {what}", what = what),
+            OpKind::Delete { permanent: true } => t!("Deleted {what}", what = what),
+            OpKind::Delete { permanent: false } => t!("Trashed {what}", what = what),
+        }
+    }
+
+    /// "Copy report.pdf cancelled after 3 items".
+    pub fn cancelled_text(self, what: &str, done: usize) -> String {
+        match self {
+            OpKind::Copy => tn!(
+                "Copy {what} cancelled after {n} item",
+                "Copy {what} cancelled after {n} items",
+                done,
+                what = what
+            ),
+            OpKind::Move => tn!(
+                "Move {what} cancelled after {n} item",
+                "Move {what} cancelled after {n} items",
+                done,
+                what = what
+            ),
+            OpKind::Delete { permanent: true } => tn!(
+                "Delete {what} permanently cancelled after {n} item",
+                "Delete {what} permanently cancelled after {n} items",
+                done,
+                what = what
+            ),
+            OpKind::Delete { permanent: false } => tn!(
+                "Move {what} to trash cancelled after {n} item",
+                "Move {what} to trash cancelled after {n} items",
+                done,
+                what = what
+            ),
         }
     }
 }
@@ -92,7 +134,7 @@ pub struct Report {
 pub fn describe(sources: &[Location]) -> String {
     match sources {
         [single] => single.file_name().unwrap_or_else(|| single.display()),
-        many => format!("{} items", many.len()),
+        many => tn!("{n} item", "{n} items", many.len()),
     }
 }
 
@@ -198,16 +240,16 @@ fn transfer(
     let dest = req
         .dest
         .as_deref()
-        .ok_or_else(|| io::Error::other("no destination"))?;
+        .ok_or_else(|| io::Error::other(t!("no destination")))?;
     let name = src
         .file_name()
-        .ok_or_else(|| io::Error::other("source has no file name"))?;
+        .ok_or_else(|| io::Error::other(t!("source has no file name")))?;
     let dst = dest.join(name);
     if dst == src {
-        return Err(io::Error::other("source and destination are the same"));
+        return Err(io::Error::other(t!("source and destination are the same")));
     }
     if src.is_dir() && dst.starts_with(src) {
-        return Err(io::Error::other("cannot copy a directory into itself"));
+        return Err(io::Error::other(t!("cannot copy a directory into itself")));
     }
     if remove_source {
         move_tree(src, &dst, req.overwrite, progress, cancel)
@@ -340,9 +382,9 @@ fn copy_tree(
             return Ok(());
         }
         if existing.is_dir() {
-            return Err(io::Error::other(format!(
-                "{} exists and is a directory",
-                dst.display()
+            return Err(io::Error::other(t!(
+                "{path} exists and is a directory",
+                path = dst.display()
             )));
         }
     }
@@ -490,16 +532,16 @@ fn transfer_generic(
     let dest = req
         .dest
         .as_ref()
-        .ok_or_else(|| io::Error::other("no destination"))?;
+        .ok_or_else(|| io::Error::other(t!("no destination")))?;
     let name = src
         .file_name()
-        .ok_or_else(|| io::Error::other("source has no file name"))?;
+        .ok_or_else(|| io::Error::other(t!("source has no file name")))?;
     let dst = dest.join(&name);
     if dst == *src {
-        return Err(io::Error::other("source and destination are the same"));
+        return Err(io::Error::other(t!("source and destination are the same")));
     }
     if dst.starts_with(src) {
-        return Err(io::Error::other("cannot copy a directory into itself"));
+        return Err(io::Error::other(t!("cannot copy a directory into itself")));
     }
     let db = backend_for(&dst)?;
     if req.kind == OpKind::Move && src.conn() == dst.conn() {
@@ -595,9 +637,9 @@ fn copy_generic(
             return Ok(());
         }
         if existing.is_dir() {
-            return Err(io::Error::other(format!(
-                "{} exists and is a directory",
-                dst.display()
+            return Err(io::Error::other(t!(
+                "{path} exists and is a directory",
+                path = dst.display()
             )));
         }
     }

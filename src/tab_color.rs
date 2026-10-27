@@ -16,6 +16,22 @@ pub const PRESETS: [(&str, &str); 9] = [
     ("Gray", "#8b8d98"),
 ];
 
+/// A preset's name as shown (the table's names are the English keys).
+pub fn label(name: &'static str) -> &'static str {
+    match name {
+        "Red" => t!("Red"),
+        "Orange" => t!("Orange"),
+        "Yellow" => t!("Yellow"),
+        "Green" => t!("Green"),
+        "Teal" => t!("Teal"),
+        "Blue" => t!("Blue"),
+        "Purple" => t!("Purple"),
+        "Pink" => t!("Pink"),
+        "Gray" => t!("Gray"),
+        _ => name,
+    }
+}
+
 /// `#rgb`, `#rrggbb` or `#rrggbbaa` (with or without the `#`) as a colour.
 pub fn parse(text: &str) -> Option<Hsla> {
     let text = text.trim();

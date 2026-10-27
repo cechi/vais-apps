@@ -64,9 +64,9 @@ impl AuthMethod {
 
     pub fn label(self) -> &'static str {
         match self {
-            AuthMethod::Auto => "Agent / keys",
-            AuthMethod::Key => "Key file",
-            AuthMethod::Password => "Password",
+            AuthMethod::Auto => t!("Agent / keys"),
+            AuthMethod::Key => t!("Key file"),
+            AuthMethod::Password => t!("Password"),
         }
     }
 }
@@ -332,8 +332,10 @@ impl ConnectionManager {
         cx: &mut Context<Self>,
     ) {
         let Some(config) = self.config(conn).cloned() else {
-            self.status
-                .insert(conn.clone(), Status::Failed("unknown connection".into()));
+            self.status.insert(
+                conn.clone(),
+                Status::Failed(t!("unknown connection").into()),
+            );
             cx.emit(ConnectionEvent::Changed(conn.clone()));
             return;
         };

@@ -24,9 +24,18 @@ impl ViewMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            ViewMode::Full => "Full",
-            ViewMode::Brief => "Brief",
-            ViewMode::Thumbnails => "Thumbnails",
+            ViewMode::Full => t!("Full"),
+            ViewMode::Brief => t!("Brief"),
+            ViewMode::Thumbnails => t!("Thumbnails"),
+        }
+    }
+
+    /// The label in the panel's context menu.
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            ViewMode::Full => t!("Full view"),
+            ViewMode::Brief => t!("Brief view"),
+            ViewMode::Thumbnails => t!("Thumbnails view"),
         }
     }
 
@@ -123,12 +132,12 @@ impl Column {
 
     pub fn label(self) -> &'static str {
         match self {
-            Column::Size => "Size",
-            Column::Kind => "Type",
-            Column::Modified => "Modified",
-            Column::Created => "Created",
-            Column::Permissions => "Permissions",
-            Column::Owner => "Owner",
+            Column::Size => t!("Size"),
+            Column::Kind => t!("Type"),
+            Column::Modified => t!("Modified"),
+            Column::Created => t!("Created"),
+            Column::Permissions => t!("Permissions"),
+            Column::Owner => t!("Owner"),
         }
     }
 

@@ -33,10 +33,10 @@ impl CaseMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            CaseMode::Keep => "Keep",
-            CaseMode::Lower => "lower",
-            CaseMode::Upper => "UPPER",
-            CaseMode::Title => "Title",
+            CaseMode::Keep => t!("Keep##case"),
+            CaseMode::Lower => t!("lower"),
+            CaseMode::Upper => t!("UPPER"),
+            CaseMode::Title => t!("Title##case"),
         }
     }
 }
@@ -88,10 +88,10 @@ pub enum Problem {
 impl Problem {
     pub fn label(self) -> &'static str {
         match self {
-            Problem::Empty => "empty name",
-            Problem::Invalid => "invalid name",
-            Problem::Duplicate => "duplicate",
-            Problem::Exists => "already exists",
+            Problem::Empty => t!("empty name"),
+            Problem::Invalid => t!("invalid name"),
+            Problem::Duplicate => t!("duplicate"),
+            Problem::Exists => t!("already exists"),
         }
     }
 }

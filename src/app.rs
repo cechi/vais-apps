@@ -114,27 +114,27 @@ impl FKey {
     fn slots(shift: bool) -> [(&'static str, &'static str, FKey, bool); 9] {
         if shift {
             [
-                ("F2", "Rename", FKey::Rename, true),
-                ("F3", "View", FKey::View, true),
-                ("F4", "Edit", FKey::Edit, true),
-                ("F5", "Copy", FKey::Copy, true),
-                ("F6", "Rename", FKey::Rename, true),
-                ("F7", "MkDir", FKey::MkDir, true),
-                ("F8", "Delete!", FKey::DeletePermanently, true),
-                ("F9", "Terminal", FKey::Terminal, true),
-                ("F10", "Quit", FKey::Quit, true),
+                ("F2", t!("Rename"), FKey::Rename, true),
+                ("F3", t!("View"), FKey::View, true),
+                ("F4", t!("Edit"), FKey::Edit, true),
+                ("F5", t!("Copy"), FKey::Copy, true),
+                ("F6", t!("Rename"), FKey::Rename, true),
+                ("F7", t!("MkDir"), FKey::MkDir, true),
+                ("F8", t!("Delete!"), FKey::DeletePermanently, true),
+                ("F9", t!("Terminal"), FKey::Terminal, true),
+                ("F10", t!("Quit"), FKey::Quit, true),
             ]
         } else {
             [
-                ("F2", "Rename", FKey::Rename, true),
-                ("F3", "View", FKey::View, true),
-                ("F4", "Edit", FKey::Edit, true),
-                ("F5", "Copy", FKey::Copy, true),
-                ("F6", "Move", FKey::Move, true),
-                ("F7", "MkDir", FKey::MkDir, true),
-                ("F8", "Trash", FKey::Delete, true),
-                ("F9", "Terminal", FKey::Terminal, true),
-                ("F10", "Quit", FKey::Quit, true),
+                ("F2", t!("Rename"), FKey::Rename, true),
+                ("F3", t!("View"), FKey::View, true),
+                ("F4", t!("Edit"), FKey::Edit, true),
+                ("F5", t!("Copy"), FKey::Copy, true),
+                ("F6", t!("Move"), FKey::Move, true),
+                ("F7", t!("MkDir"), FKey::MkDir, true),
+                ("F8", t!("Trash"), FKey::Delete, true),
+                ("F9", t!("Terminal"), FKey::Terminal, true),
+                ("F10", t!("Quit"), FKey::Quit, true),
             ]
         }
     }
@@ -181,6 +181,8 @@ pub struct Workspace {
     favorite_layouts: Vec<FavoriteLayout>,
     /// Personal font family from the config, applied over every theme.
     font_family: Option<String>,
+    /// Interface language code; `None` follows the system.
+    language: Option<String>,
     /// Divider between the sidebar and the main column.
     side_split: Entity<ResizableState>,
     /// Finished operations to announce on the next render (needs the window).
@@ -393,6 +395,7 @@ impl Workspace {
             favorites: config.favorites.clone(),
             favorite_layouts: config.favorite_layouts.clone(),
             font_family: config.font_family.clone(),
+            language: config.language.clone(),
             side_split: cx.new(|_| ResizableState::default()),
             ops,
             ops_panel,
@@ -462,8 +465,8 @@ impl Workspace {
         // The registry already lists the built-in pair as "Default Light/Dark".
         let mut choices: Vec<ThemeChoice> = vec![ThemeChoice::System];
         let mut items = vec![
-            PaletteItem::new("System")
-                .detail("built-in light or dark, following the desktop")
+            PaletteItem::new(t!("System##theme"))
+                .detail(t!("built-in light or dark, following the desktop"))
                 .icon(IconName::Palette)
                 .checked(current == ThemeChoice::System),
         ];
@@ -471,7 +474,11 @@ impl Workspace {
             let choice = ThemeChoice::Named(name.clone());
             items.push(
                 PaletteItem::new(name)
-                    .detail(if mode.is_dark() { "dark" } else { "light" })
+                    .detail(if mode.is_dark() {
+                        t!("dark")
+                    } else {
+                        t!("light")
+                    })
                     .icon(if mode.is_dark() {
                         IconName::Moon
                     } else {
@@ -483,8 +490,8 @@ impl Workspace {
         }
         let view = cx.entity();
         let palette = cx.new(|cx| {
-            Palette::pick_filtered(items, "Filter themes", window, cx)
-                .footer(format!("User themes: {dir}"))
+            Palette::pick_filtered(items, t!("Filter themes"), window, cx)
+                .footer(t!("User themes: {dir}", dir = dir))
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     if let Some(theme) = choice.item.and_then(|ix| choices.get(ix).cloned()) {
@@ -493,7 +500,7 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Theme".to_string(), palette, window, cx);
+        palette::open(t!("Theme").to_string(), palette, window, cx);
     }
 
     /// A palette of the installed font families, "Theme default" first.
@@ -503,8 +510,8 @@ impl Workspace {
         fonts.dedup();
         let current = self.font_family.clone();
         let mut items = vec![
-            PaletteItem::new("Theme default")
-                .detail("the font the theme (or the toolkit) picks")
+            PaletteItem::new(t!("Theme default"))
+                .detail(t!("the font the theme (or the toolkit) picks"))
                 .icon(IconName::Palette)
                 .checked(current.is_none()),
         ];
@@ -513,8 +520,10 @@ impl Workspace {
         }));
         let view = cx.entity();
         let palette = cx.new(|cx| {
-            Palette::pick_filtered(items, "Filter fonts", window, cx)
-                .footer("Installed font families; the choice applies to the UI and the editor")
+            Palette::pick_filtered(items, t!("Filter fonts"), window, cx)
+                .footer(t!(
+                    "Installed font families; the choice applies to the UI and the editor"
+                ))
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     let Some(ix) = choice.item else {
@@ -528,7 +537,53 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Font".to_string(), palette, window, cx);
+        palette::open(t!("Font").to_string(), palette, window, cx);
+    }
+
+    /// A palette of the interface languages, the system's first.
+    fn choose_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self.language.clone();
+        let mut items = vec![
+            PaletteItem::new(t!("System language"))
+                .detail(crate::i18n::system_language().name)
+                .icon(IconName::Settings)
+                .checked(current.is_none()),
+        ];
+        items.extend(crate::i18n::LANGUAGES.iter().map(|language| {
+            PaletteItem::new(language.name)
+                .detail(language.english)
+                .checked(current.as_deref() == Some(language.code))
+        }));
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            Palette::pick(items, cx)
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let Some(ix) = choice.item else {
+                        return;
+                    };
+                    let code = (ix > 0).then(|| crate::i18n::LANGUAGES[ix - 1].code.to_string());
+                    view.update(cx, |this, cx| this.set_language(code, cx));
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open(t!("Language").to_string(), palette, window, cx);
+    }
+
+    fn set_language(&mut self, code: Option<String>, cx: &mut Context<Self>) {
+        if self.language == code {
+            return;
+        }
+        crate::i18n::set_language(code.as_deref());
+        self.language = code;
+        // The sidebar names its places when it reads them.
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.refresh();
+            cx.notify();
+        });
+        self.sync_settings(cx);
+        self.schedule_save(cx);
+        cx.refresh_windows();
     }
 
     /// Apply a font family over the theme; `None` goes back to the theme's.
@@ -733,6 +788,7 @@ impl Workspace {
         SettingsValues {
             theme: self.theme.clone(),
             font_family: self.font_family.clone(),
+            language: self.language.clone(),
             scale: self.scale,
             sidebar_open: self.sidebar_open,
             system_places: self.system_places,
@@ -847,13 +903,13 @@ impl Workspace {
         let palette = cx.new(|cx| {
             let (manager_ok, manager_cancel, conn_ok, conn_cancel) =
                 (manager.clone(), manager, conn.clone(), conn);
-            Palette::new(Vec::new(), "", "Password", window, cx)
+            Palette::new(Vec::new(), "", t!("Password"), window, cx)
                 .masked(true)
                 .input_icon(Some(IconName::Globe))
                 .hint(if remember {
-                    "Stored in the system keyring after a successful login"
+                    t!("Stored in the system keyring after a successful login")
                 } else {
-                    "Asked again next time (set the connection to Password to store it)"
+                    t!("Asked again next time (set the connection to Password to store it)")
                 })
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
@@ -870,7 +926,11 @@ impl Workspace {
                 })
         });
         palette::open(
-            format!("Password for {}@{}", config.user, config.host),
+            t!(
+                "Password for {user}@{host}",
+                user = config.user,
+                host = config.host
+            ),
             palette,
             window,
             cx,
@@ -910,6 +970,7 @@ impl Workspace {
         match event {
             SettingsEvent::ChooseTheme => self.choose_theme(window, cx),
             SettingsEvent::ChooseFont => self.choose_font(window, cx),
+            SettingsEvent::ChooseLanguage => self.choose_language(window, cx),
             SettingsEvent::Scale(scale) => {
                 let scale = clamp_scale(*scale);
                 self.scale_slider
@@ -984,10 +1045,13 @@ impl Workspace {
         }
         let note = if let Some(ix) = self.favorites.iter().position(|f| f.path == path) {
             let removed = self.favorites.remove(ix);
-            format!("Removed {} from favorites", removed.display_name())
+            t!(
+                "Removed {name} from favorites",
+                name = removed.display_name()
+            )
         } else {
             self.favorites.push(Favorite::new(path.clone()));
-            format!("Added {} to favorites", path.display_name())
+            t!("Added {name} to favorites", name = path.display_name())
         };
         self.sync_favorites(cx);
         self.notify(Notification::info(note), window, cx);
@@ -1018,10 +1082,10 @@ impl Workspace {
                 let (current, fixed) = (fav.display_name(), fav.name.is_some());
                 self.ask_name(
                     NameAsk {
-                        title: "Rename favorite",
-                        placeholder: "Name",
-                        hint: "A fixed name; empty to show the directory's own name again",
-                        reset_label: "Back to the directory name",
+                        title: t!("Rename favorite"),
+                        placeholder: t!("Name"),
+                        hint: t!("A fixed name; empty to show the directory's own name again"),
+                        reset_label: t!("Back to the directory name"),
                         current,
                         fixed,
                     },
@@ -1039,10 +1103,10 @@ impl Workspace {
                 };
                 self.ask_name(
                     NameAsk {
-                        title: "Rename layout",
-                        placeholder: "Name",
-                        hint: "Tabs opened from the layout take this name as their title",
-                        reset_label: "Cancel",
+                        title: t!("Rename layout"),
+                        placeholder: t!("Name"),
+                        hint: t!("Tabs opened from the layout take this name as their title"),
+                        reset_label: t!("Cancel"),
                         current: saved.name.clone(),
                         fixed: false,
                     },
@@ -1095,7 +1159,7 @@ impl Workspace {
         };
         let view = cx.entity();
         self.pick_color(
-            "Favorite color",
+            (t!("Favorite color"), t!("Custom favorite color")),
             current,
             Rc::new(move |color, _, cx| {
                 let id = id.clone();
@@ -1143,22 +1207,24 @@ impl Workspace {
         let default = tab.title(cx);
         // The config keeps every slot; only rows x cols of them are shown.
         let shown = usize::from(config.layout.rows) * usize::from(config.layout.cols);
-        let description = format!(
-            "{}x{} layout, {} panel{}",
-            config.layout.rows,
-            config.layout.cols,
+        let description = tn!(
+            "{rows}x{cols} layout, {n} panel",
+            "{rows}x{cols} layout, {n} panels",
             shown,
-            if shown == 1 { "" } else { "s" }
+            rows = config.layout.rows,
+            cols = config.layout.cols
         );
         let rows = vec![
-            PaletteItem::new("Save").value("").icon(IconName::Check),
-            PaletteItem::new("Cancel").value("").icon(IconName::Close),
+            PaletteItem::new(t!("Save")).value("").icon(IconName::Check),
+            PaletteItem::new(t!("Cancel"))
+                .value("")
+                .icon(IconName::Close),
         ];
         const CANCEL_ROW: usize = 1;
         let view = cx.entity();
         let len = default.len();
         let palette = cx.new(|cx| {
-            Palette::new(rows, &default, "Name", window, cx)
+            Palette::new(rows, &default, t!("Name"), window, cx)
                 .input_icon(Some(IconName::LayoutDashboard))
                 .description(description)
                 .select_range(0..len)
@@ -1180,7 +1246,7 @@ impl Workspace {
                             });
                             this.sync_layouts(cx);
                             this.notify(
-                                Notification::info(format!("Saved layout {name}")),
+                                Notification::info(t!("Saved layout {name}", name = name)),
                                 window,
                                 cx,
                             );
@@ -1190,7 +1256,7 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Add layout to favorites".into(), palette, window, cx);
+        palette::open(t!("Add layout to favorites").into(), palette, window, cx);
     }
 
     /// The tab's context menu: a fixed title for the tab, or none again.
@@ -1202,10 +1268,10 @@ impl Workspace {
         let fixed = grid.read(cx).custom_title().is_some();
         self.ask_name(
             NameAsk {
-                title: "Rename tab",
-                placeholder: "Tab title",
-                hint: "A fixed title; empty to follow the active panel's directory again",
-                reset_label: "Back to the directory name",
+                title: t!("Rename tab"),
+                placeholder: t!("Tab title"),
+                hint: t!("A fixed title; empty to follow the active panel's directory again"),
+                reset_label: t!("Back to the directory name"),
                 current,
                 fixed,
             },
@@ -1228,10 +1294,16 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let rows = vec![
-            PaletteItem::new("Rename").value("").icon(IconName::Check),
-            PaletteItem::new(if ask.fixed { ask.reset_label } else { "Cancel" })
+            PaletteItem::new(t!("Rename"))
                 .value("")
-                .icon(IconName::Close),
+                .icon(IconName::Check),
+            PaletteItem::new(if ask.fixed {
+                ask.reset_label
+            } else {
+                t!("Cancel")
+            })
+            .value("")
+            .icon(IconName::Close),
         ];
         const SECOND_ROW: usize = 1;
         let len = ask.current.len();
@@ -1268,7 +1340,7 @@ impl Workspace {
         };
         let current = grid.read(cx).color().map(str::to_string);
         self.pick_color(
-            "Tab color",
+            (t!("Tab color"), t!("Custom tab color")),
             current,
             Rc::new(move |color, _, cx| {
                 grid.update(cx, |grid, cx| grid.set_color(color, cx));
@@ -1279,10 +1351,11 @@ impl Workspace {
     }
 
     /// A palette with the preset colours, "Custom…" (a hex asked for next)
-    /// and "No color"; `current` is shown checked.
+    /// and "No color"; `current` is shown checked. `titles` are the
+    /// palette's and the hex input's.
     fn pick_color(
         &mut self,
-        title: &'static str,
+        titles: (&'static str, &'static str),
         current: Option<String>,
         apply: Apply<Option<String>>,
         window: &mut Window,
@@ -1291,7 +1364,7 @@ impl Workspace {
         let mut items: Vec<PaletteItem> = crate::tab_color::PRESETS
             .iter()
             .map(|(name, hex)| {
-                PaletteItem::new(*name)
+                PaletteItem::new(crate::tab_color::label(*name))
                     .color(crate::tab_color::parse(hex))
                     .checked(
                         current
@@ -1306,13 +1379,13 @@ impl Workspace {
             .filter(|c| crate::tab_color::preset_name(c).is_none())
             .map(str::to_string);
         items.push(
-            PaletteItem::new("Custom…")
+            PaletteItem::new(t!("Custom…"))
                 .detail(custom_now.clone().unwrap_or_else(|| "#rrggbb".into()))
                 .color(custom_now.as_deref().and_then(crate::tab_color::parse))
                 .checked(custom_now.is_some()),
         );
         let none_ix = items.len();
-        items.push(PaletteItem::new("No color").checked(current.is_none()));
+        items.push(PaletteItem::new(t!("No color")).checked(current.is_none()));
 
         let view = cx.entity();
         let palette = cx.new(|cx| {
@@ -1326,7 +1399,7 @@ impl Workspace {
                     window.defer(cx, move |window, cx| {
                         if item == custom_ix {
                             view.update(cx, |this, cx| {
-                                this.ask_color(title, current, apply, window, cx)
+                                this.ask_color(titles.1, current, apply, window, cx)
                             });
                             return;
                         }
@@ -1342,10 +1415,10 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open(title.into(), palette, window, cx);
+        palette::open(titles.0.into(), palette, window, cx);
     }
 
-    /// The hex input behind "Custom…".
+    /// The hex input behind "Custom…"; `title` is the palette's.
     fn ask_color(
         &mut self,
         title: &'static str,
@@ -1359,7 +1432,7 @@ impl Workspace {
         let palette = cx.new(|cx| {
             Palette::new(Vec::new(), &current, "#rrggbb", window, cx)
                 .input_icon(None)
-                .hint("Three or six hex digits, with or without the #")
+                .hint(t!("Three or six hex digits, with or without the #"))
                 .select_range(1.min(len)..len)
                 .on_confirm(move |choice, window, cx| {
                     match crate::tab_color::normalise(&choice.value) {
@@ -1369,19 +1442,17 @@ impl Workspace {
                             window.defer(cx, move |window, cx| apply(Some(hex), window, cx));
                         }
                         None => window.push_notification(
-                            Notification::error(format!("{}: not a hex color", choice.value)),
+                            Notification::error(t!(
+                                "{value}: not a hex color",
+                                value = choice.value
+                            )),
                             cx,
                         ),
                     }
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open(
-            format!("Custom {}", title.to_lowercase()).into(),
-            palette,
-            window,
-            cx,
-        );
+        palette::open(title.into(), palette, window, cx);
     }
 
     fn sync_layouts(&mut self, cx: &mut Context<Self>) {
@@ -1429,7 +1500,7 @@ impl Workspace {
         let removed = self.favorite_layouts.remove(ix);
         self.sync_layouts(cx);
         self.notify(
-            Notification::info(format!("Removed layout {}", removed.name)),
+            Notification::info(t!("Removed layout {name}", name = removed.name)),
             window,
             cx,
         );
@@ -1451,7 +1522,7 @@ impl Workspace {
         let actions: std::rc::Rc<Vec<Box<dyn Action>>> =
             std::rc::Rc::new(commands.into_iter().map(|c| c.action).collect());
         let palette = cx.new(|cx| {
-            Palette::pick_filtered(items, "Command…", window, cx)
+            Palette::pick_filtered(items, t!("Command…"), window, cx)
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     let Some(ix) = choice.item else {
@@ -1462,7 +1533,7 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Commands".into(), palette, window, cx);
+        palette::open(t!("Commands").into(), palette, window, cx);
     }
 
     fn on_open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
@@ -1581,7 +1652,7 @@ impl Workspace {
                 grid.update(cx, |grid, cx| grid.refresh_dir(dir, cx));
             }
             window.push_notification(
-                Notification::success(format!("Renamed {renamed} items")),
+                Notification::success(tn!("Renamed {n} item", "Renamed {n} items", *renamed)),
                 cx,
             );
         }
@@ -1673,12 +1744,12 @@ impl Workspace {
         let view = cx.entity();
         let palette = cx.new(|cx| {
             let items = vec![
-                PaletteItem::new("Save and close"),
-                PaletteItem::new("Discard changes").danger(true),
-                PaletteItem::new("Cancel"),
+                PaletteItem::new(t!("Save and close")),
+                PaletteItem::new(t!("Discard changes")).danger(true),
+                PaletteItem::new(t!("Cancel")),
             ];
             Palette::pick(items, cx)
-                .description(format!("{title} has unsaved changes."))
+                .description(t!("{title} has unsaved changes.", title = title))
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     let (view, editor) = (view.clone(), editor.clone());
@@ -1704,7 +1775,7 @@ impl Workspace {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Unsaved changes".to_string(), palette, window, cx);
+        palette::open(t!("Unsaved changes").to_string(), palette, window, cx);
     }
 
     // ----- sidebar -------------------------------------------------------
@@ -1780,6 +1851,7 @@ impl Workspace {
             favorites: self.favorites.clone(),
             favorite_layouts: self.favorite_layouts.clone(),
             font_family: self.font_family.clone(),
+            language: self.language.clone(),
             connections: self.connections.read(cx).configs().to_vec(),
             command_line: self.command_line_open,
             key_bar: self.key_bar_open,
@@ -2014,7 +2086,7 @@ impl Workspace {
                     Ok(path) if path.is_dir() => Location::Local(path),
                     _ => {
                         self.notify(
-                            Notification::error(format!("cd: {}: not a directory", arg)),
+                            Notification::error(t!("cd: {dir}: not a directory", dir = arg)),
                             window,
                             cx,
                         );
@@ -2032,7 +2104,7 @@ impl Workspace {
 
         let Some(dir) = current.as_local().map(Path::to_path_buf) else {
             self.notify(
-                Notification::error("The command line needs a local directory"),
+                Notification::error(t!("The command line needs a local directory")),
                 window,
                 cx,
             );
@@ -2062,7 +2134,7 @@ impl Workspace {
         match result {
             Err(err) => self.notify(Notification::error(format!("{command}: {err}")), window, cx),
             Ok((code, output)) if output.trim().is_empty() => {
-                let text = format!("{command}: exit {code}");
+                let text = t!("{command}: exit {code}", command = command, code = code);
                 let note = if code == 0 {
                     Notification::success(text)
                 } else {
@@ -2346,20 +2418,20 @@ impl Workspace {
                         let menu = if is_grid {
                             let (ws_rename, ws_color, ws_save) =
                                 (workspace.clone(), workspace.clone(), workspace.clone());
-                            menu.item(PopupMenuItem::new("Rename tab…").on_click(
+                            menu.item(PopupMenuItem::new(t!("Rename tab…")).on_click(
                                 move |_, window, cx| {
                                     ws_rename
                                         .update(cx, |this, cx| this.rename_tab(ix, window, cx));
                                 },
                             ))
-                            .item(PopupMenuItem::new("Tab color…").on_click(
+                            .item(PopupMenuItem::new(t!("Tab color…")).on_click(
                                 move |_, window, cx| {
                                     ws_color
                                         .update(cx, |this, cx| this.pick_tab_color(ix, window, cx));
                                 },
                             ))
                             .item(
-                                PopupMenuItem::new("Add layout to favorites…").on_click(
+                                PopupMenuItem::new(t!("Add layout to favorites…")).on_click(
                                     move |_, window, cx| {
                                         ws_save.update(cx, |this, cx| {
                                             this.save_layout_favorite(ix, window, cx)
@@ -2373,7 +2445,7 @@ impl Workspace {
                         if closable {
                             let workspace = workspace.clone();
                             menu.separator()
-                                .item(PopupMenuItem::new("Close tab").on_click(
+                                .item(PopupMenuItem::new(t!("Close tab")).on_click(
                                     move |_, window, cx| {
                                         workspace
                                             .update(cx, |this, cx| this.close_tab(ix, window, cx));
@@ -2440,30 +2512,30 @@ impl Workspace {
             .icon(IconName::Menu)
             .dropdown_menu(move |menu, _window, _cx| {
                 menu.action_context(tab_focus.clone())
-                    .menu("Commands…", Box::new(CommandPalette))
-                    .menu("Settings…", Box::new(OpenSettings))
-                    .menu("Connections…", Box::new(OpenConnections))
-                    .menu("Theme…", Box::new(ChooseTheme))
+                    .menu(t!("Commands…"), Box::new(CommandPalette))
+                    .menu(t!("Settings…"), Box::new(OpenSettings))
+                    .menu(t!("Connections…"), Box::new(OpenConnections))
+                    .menu(t!("Theme…"), Box::new(ChooseTheme))
                     .separator()
-                    .menu("Add / remove favorite", Box::new(ToggleFavorite))
-                    .menu_with_check("Places sidebar", sidebar_open, Box::new(ToggleSidebar))
+                    .menu(t!("Add / remove favorite"), Box::new(ToggleFavorite))
+                    .menu_with_check(t!("Places sidebar"), sidebar_open, Box::new(ToggleSidebar))
                     .menu_with_check(
-                        "Operations panel",
+                        t!("Operations panel"),
                         ops_open,
                         Box::new(ToggleOperationsPanel),
                     )
-                    .menu_with_check("Agents panel", agents_open, Box::new(ToggleAgents))
+                    .menu_with_check(t!("Agents panel"), agents_open, Box::new(ToggleAgents))
                     .menu_with_check(
-                        "Command line",
+                        t!("Command line"),
                         command_line_open,
                         Box::new(ToggleCommandLine),
                     )
-                    .menu_with_check("Function key bar", key_bar_open, Box::new(ToggleKeyBar))
+                    .menu_with_check(t!("Function key bar"), key_bar_open, Box::new(ToggleKeyBar))
                     .separator()
-                    .menu("New tab", Box::new(NewTab))
-                    .menu("Close tab", Box::new(CloseTab))
+                    .menu(t!("New tab"), Box::new(NewTab))
+                    .menu(t!("Close tab"), Box::new(CloseTab))
                     .separator()
-                    .menu("Quit", Box::new(Quit))
+                    .menu(t!("Quit"), Box::new(Quit))
             });
         let layout_button = Button::new("tab-layout")
             .ghost()
@@ -2560,9 +2632,11 @@ impl Render for Workspace {
             let m = self.ops.read(cx);
             match m.running_count() {
                 0 => None,
-                n => Some(format!(
-                    "{n} running · {}/s",
-                    human_size(m.total_speed() as u64)
+                n => Some(tn!(
+                    "{n} running · {speed}/s",
+                    "{n} running · {speed}/s",
+                    n,
+                    speed = human_size(m.total_speed() as u64)
                 )),
             }
         };
@@ -2570,31 +2644,43 @@ impl Render for Workspace {
             Some(_) if ops_status.is_some() => ops_status.unwrap_or_default(),
             Some(view) => {
                 let grid = view.read(cx);
-                format!(
-                    "Tab {}/{}  ·  Layout {}  ·  Panel {}/{}",
-                    self.active_tab + 1,
-                    self.tabs.len(),
-                    grid.layout().label(),
-                    grid.active_index() + 1,
-                    grid.layout().count()
+                t!(
+                    "Tab {tab}/{tabs}  ·  Layout {layout}  ·  Panel {panel}/{panels}",
+                    tab = self.active_tab + 1,
+                    tabs = self.tabs.len(),
+                    layout = grid.layout().label(),
+                    panel = grid.active_index() + 1,
+                    panels = grid.layout().count()
                 )
             }
-            None => format!("Tab {}/{}", self.active_tab + 1, self.tabs.len()),
+            None => t!(
+                "Tab {tab}/{tabs}",
+                tab = self.active_tab + 1,
+                tabs = self.tabs.len()
+            ),
         };
         let status_left = match crate::clipboard::get(cx).summary() {
-            Some(clip) => format!("{status_left}  ·  Clipboard: {clip}"),
+            Some(clip) => t!(
+                "{status}  ·  Clipboard: {clipboard}",
+                status = status_left,
+                clipboard = clip
+            ),
             None => status_left,
         };
         let status_right = if cfg!(target_os = "macos") {
-            "Cmd+T new tab · Cmd+W close · Ctrl+Tab / Cmd+1..9 tabs · Tab panel · Alt+1..9 layout · Cmd+L path · Cmd+Shift+. hidden · Cmd+Shift+T theme · Cmd+±/0 zoom · Cmd+Q quit"
+            t!(
+                "Cmd+T new tab · Cmd+W close · Ctrl+Tab / Cmd+1..9 tabs · Tab panel · Alt+1..9 layout · Cmd+L path · Cmd+Shift+. hidden · Cmd+Shift+T theme · Cmd+±/0 zoom · Cmd+Q quit"
+            )
         } else {
-            "Ctrl+T new tab · Ctrl+W close · Ctrl+Tab / Ctrl+1..9 tabs · Tab panel · Alt+1..9 layout · Ctrl+L path · Ctrl+H hidden · Ctrl+Shift+T theme · Ctrl+±/0 zoom · Ctrl+Q quit"
+            t!(
+                "Ctrl+T new tab · Ctrl+W close · Ctrl+Tab / Ctrl+1..9 tabs · Tab panel · Alt+1..9 layout · Ctrl+L path · Ctrl+H hidden · Ctrl+Shift+T theme · Ctrl+±/0 zoom · Ctrl+Q quit"
+            )
         };
         let scale_label = format!("{:.0} %", self.scale * 100.0);
         let scale_control = h_flex()
             .flex_none()
             .gap_2()
-            .child(div().flex_none().child("UI"))
+            .child(div().flex_none().child(t!("UI##scale")))
             .child(Slider::new(&self.scale_slider).w(rems(7.)))
             .child(
                 div()

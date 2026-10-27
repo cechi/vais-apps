@@ -36,7 +36,7 @@ impl EventEmitter<CommandLineEvent> for CommandLine {}
 
 impl CommandLine {
     pub fn new(history: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Command…"));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Command…")));
         let subscription = cx.subscribe_in(
             &input,
             window,

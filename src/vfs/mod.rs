@@ -349,10 +349,10 @@ pub fn write_all(loc: &Location, bytes: &[u8]) -> io::Result<()> {
     let backend = backend_for(loc)?;
     let name = loc
         .file_name()
-        .ok_or_else(|| io::Error::other("no file name"))?;
+        .ok_or_else(|| io::Error::other(t!("no file name")))?;
     let partial = loc
         .parent()
-        .ok_or_else(|| io::Error::other("no parent directory"))?
+        .ok_or_else(|| io::Error::other(t!("no parent directory")))?
         .join(&format!(".{name}.vais-save"));
     let result = (|| {
         let mut writer = backend.open_write(&partial)?;
@@ -380,7 +380,7 @@ pub fn local_copy(loc: &Location) -> io::Result<PathBuf> {
     };
     let dir = directories::ProjectDirs::from("", "", "vais-commander")
         .map(|d| d.cache_dir().join("remote").join(sub))
-        .ok_or_else(|| io::Error::other("no cache directory"))?;
+        .ok_or_else(|| io::Error::other(t!("no cache directory")))?;
     std::fs::create_dir_all(&dir)?;
     let backend = backend_for(loc)?;
     let meta = backend.stat(loc)?;
@@ -419,7 +419,7 @@ pub fn backend_for(loc: &Location) -> io::Result<Arc<dyn Backend>> {
     match loc {
         Location::Local(_) => Ok(local::shared()),
         Location::Remote { conn, .. } => crate::connections::backend(conn)
-            .ok_or_else(|| io::Error::other(format!("{conn}: not connected"))),
+            .ok_or_else(|| io::Error::other(t!("{conn}: not connected", conn = conn))),
         Location::Archive { archive, .. } => archive::open(archive),
     }
 }

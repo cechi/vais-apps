@@ -78,6 +78,8 @@ pub struct Config {
     /// UI and monospace font family applied over the theme; `None` keeps the
     /// theme's (or the kit's) font.
     pub font_family: Option<String>,
+    /// Interface language (a code such as `cs`); `None` follows the system.
+    pub language: Option<String>,
     pub window: Option<WindowConfig>,
     pub active_tab: usize,
     pub tabs: Vec<TabConfig>,
@@ -114,6 +116,7 @@ impl Default for Config {
             drop_action: DropAction::Ask,
             file_icons: FileIcons::System,
             font_family: None,
+            language: None,
             window: None,
             active_tab: 0,
             tabs: Vec::new(),

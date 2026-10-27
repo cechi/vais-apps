@@ -52,7 +52,7 @@ fn open(config: &ConnectionConfig, password: &str) -> io::Result<FtpStream> {
         .to_socket_addrs()
         .map_err(|e| io::Error::other(format!("{}: {e}", config.host)))?
         .next()
-        .ok_or_else(|| io::Error::other(format!("{}: no address", config.host)))?;
+        .ok_or_else(|| io::Error::other(t!("{host}: no address", host = config.host)))?;
     let mut stream = FtpStream::connect_timeout(addr, CONNECT_TIMEOUT).map_err(ftp_err)?;
     stream.set_mode(Mode::Passive);
     let user = if config.user.is_empty() {
@@ -72,7 +72,7 @@ fn ftp_err(err: FtpError) -> io::Error {
 fn remote_path<'a>(conn: &ConnId, loc: &'a Location) -> io::Result<&'a str> {
     match loc {
         Location::Remote { conn: c, path } if c == conn => Ok(path.as_str()),
-        _ => Err(io::Error::other("not on this connection")),
+        _ => Err(io::Error::other(t!("not on this connection"))),
     }
 }
 
@@ -140,13 +140,15 @@ impl FtpBackend {
     fn find(&self, loc: &Location) -> io::Result<File> {
         let name = loc
             .file_name()
-            .ok_or_else(|| io::Error::other("the root has no listing entry"))?;
-        let parent = loc.parent().ok_or_else(|| io::Error::other("no parent"))?;
+            .ok_or_else(|| io::Error::other(t!("the root has no listing entry")))?;
+        let parent = loc
+            .parent()
+            .ok_or_else(|| io::Error::other(t!("no parent directory")))?;
         let parent_path = remote_path(&self.conn, &parent)?;
         self.listing(parent_path)?
             .into_iter()
             .find(|f| f.name() == name)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, t!("not found")))
     }
 
     fn remove_tree(&self, loc: &Location) -> io::Result<()> {

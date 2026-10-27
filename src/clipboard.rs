@@ -29,14 +29,17 @@ impl FileClipboard {
         if self.paths.is_empty() {
             return None;
         }
-        let what = match self.paths.len() {
-            1 => self.paths[0].file_name().unwrap_or_else(|| "1 item".into()),
-            n => format!("{n} items"),
-        };
-        Some(if self.cut {
-            format!("{what} (cut)")
+        let n = self.paths.len();
+        let name = if n == 1 {
+            self.paths[0].file_name()
         } else {
-            what
+            None
+        };
+        Some(match (name, self.cut) {
+            (Some(name), false) => name,
+            (Some(name), true) => t!("{name} (cut)", name = name),
+            (None, false) => tn!("{n} item", "{n} items", n),
+            (None, true) => tn!("{n} item (cut)", "{n} items (cut)", n),
         })
     }
 }

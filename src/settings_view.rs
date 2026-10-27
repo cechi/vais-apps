@@ -25,6 +25,8 @@ pub enum SettingsEvent {
     ChooseTheme,
     /// Open the font chooser.
     ChooseFont,
+    /// Open the language chooser.
+    ChooseLanguage,
     Scale(f32),
     Sidebar(bool),
     SystemPlaces(bool),
@@ -41,6 +43,8 @@ pub struct SettingsValues {
     pub theme: ThemeChoice,
     /// Font family over the theme's; `None` keeps the theme's own.
     pub font_family: Option<String>,
+    /// Interface language code; `None` follows the system.
+    pub language: Option<String>,
     pub scale: f32,
     pub sidebar_open: bool,
     /// Home, Desktop, Documents… at the top of the sidebar's Favorites.
@@ -92,7 +96,7 @@ impl SettingsView {
     }
 
     pub fn title(&self) -> String {
-        "Settings".into()
+        t!("Settings").into()
     }
 
     pub fn focus_handle(&self) -> FocusHandle {
@@ -199,16 +203,23 @@ impl Render for SettingsView {
         }
 
         let theme_name = match &self.values.theme {
-            ThemeChoice::System => "System".to_string(),
+            ThemeChoice::System => t!("System##theme").to_string(),
             ThemeChoice::Light => "Default Light".to_string(),
             ThemeChoice::Dark => "Default Dark".to_string(),
             ThemeChoice::Named(name) => name.clone(),
         };
+        let language_name = match self.values.language.as_deref() {
+            None => t!(
+                "System language, {name}",
+                name = crate::i18n::system_language().name
+            ),
+            Some(_) => crate::i18n::current().name.to_string(),
+        };
         let config_path = Config::path().unwrap_or_default();
         let themes_dir = theme::themes_dir().unwrap_or_default();
         let icon_buttons = [
-            (FileIcons::System, "System"),
-            (FileIcons::Generic, "Generic"),
+            (FileIcons::System, t!("System##icons")),
+            (FileIcons::Generic, t!("Generic")),
         ]
         .into_iter()
         .map(|(icons, label)| {
@@ -223,9 +234,9 @@ impl Render for SettingsView {
             button.on_click(cx.listener(move |this, _, _, cx| this.set_file_icons(icons, cx)))
         });
         let drop_buttons = [
-            (DropAction::Ask, "Ask"),
-            (DropAction::Move, "Move"),
-            (DropAction::Copy, "Copy"),
+            (DropAction::Ask, t!("Ask")),
+            (DropAction::Move, t!("Move")),
+            (DropAction::Copy, t!("Copy")),
         ]
         .into_iter()
         .map(|(action, label)| {
@@ -259,7 +270,7 @@ impl Render for SettingsView {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().font_semibold().text_lg().child("Settings"))
+                    .child(div().font_semibold().text_lg().child(t!("Settings")))
                     .child(div().flex_1())
                     .child(
                         Button::new("settings-close")
@@ -270,10 +281,10 @@ impl Render for SettingsView {
                     ),
             )
             .child(
-                Self::section("Appearance", muted, border)
+                Self::section(t!("Appearance"), muted, border)
                     .child(Self::row(
-                        "Theme",
-                        "Built-in light / dark, System, or a theme from the themes directory",
+                        t!("Theme"),
+                        t!("Built-in light / dark, System, or a theme from the themes directory"),
                         muted,
                         h_flex()
                             .gap_2()
@@ -281,7 +292,7 @@ impl Render for SettingsView {
                             .child(
                                 Button::new("settings-theme")
                                     .small()
-                                    .label("Choose…")
+                                    .label(t!("Choose…"))
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(SettingsEvent::ChooseTheme)
                                     })),
@@ -289,8 +300,8 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "Font",
-                        "UI and monospace font family, over the theme's (config: font_family)",
+                        t!("Font"),
+                        t!("UI and monospace font family, over the theme's (config: font_family)"),
                         muted,
                         h_flex()
                             .gap_2()
@@ -298,12 +309,12 @@ impl Render for SettingsView {
                                 self.values
                                     .font_family
                                     .clone()
-                                    .unwrap_or_else(|| "Theme default".to_string()),
+                                    .unwrap_or_else(|| t!("Theme default").to_string()),
                             ))
                             .child(
                                 Button::new("settings-font")
                                     .small()
-                                    .label("Choose…")
+                                    .label(t!("Choose…"))
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(SettingsEvent::ChooseFont)
                                     })),
@@ -311,8 +322,25 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "UI scale",
-                        "Size of everything; Ctrl+= / Ctrl+- / Ctrl+0 do the same",
+                        t!("Language"),
+                        t!("The language of the interface; the system's by default"),
+                        muted,
+                        h_flex()
+                            .gap_2()
+                            .child(div().text_sm().child(language_name))
+                            .child(
+                                Button::new("settings-language")
+                                    .small()
+                                    .label(t!("Choose…"))
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SettingsEvent::ChooseLanguage)
+                                    })),
+                            )
+                            .into_any_element(),
+                    ))
+                    .child(Self::row(
+                        t!("UI scale"),
+                        t!("Size of everything; Ctrl+= / Ctrl+- / Ctrl+0 do the same"),
                         muted,
                         h_flex()
                             .gap_2()
@@ -321,14 +349,14 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "File icons",
-                        "Icons from the desktop's icon theme (Linux), or the built-in generic ones",
+                        t!("File icons"),
+                        t!("Icons from the desktop's icon theme (Linux), or the built-in generic ones"),
                         muted,
                         h_flex().gap_1().children(icon_buttons).into_any_element(),
                     ))
                     .child(Self::row(
-                        "Places sidebar",
-                        "Show user folders and volumes at the left (Ctrl+B)",
+                        t!("Places sidebar"),
+                        t!("Show user folders and volumes at the left (Ctrl+B)"),
                         muted,
                         Checkbox::new("settings-sidebar")
                             .checked(self.values.sidebar_open)
@@ -340,8 +368,8 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "System places in Favorites",
-                        "Home, Desktop, Documents… above your own favorites; off, the group shows only while you have some",
+                        t!("System places in Favorites"),
+                        t!("Home, Desktop, Documents… above your own favorites; off, the group shows only while you have some"),
                         muted,
                         Checkbox::new("settings-system-places")
                             .checked(self.values.system_places)
@@ -353,8 +381,8 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "Command line",
-                        "A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)",
+                        t!("Command line"),
+                        t!("A shell prompt under the panels (Ctrl+E; Ctrl+Enter inserts the file under the cursor)"),
                         muted,
                         Checkbox::new("settings-command-line")
                             .checked(self.values.command_line)
@@ -366,8 +394,8 @@ impl Render for SettingsView {
                             .into_any_element(),
                     ))
                     .child(Self::row(
-                        "Function key bar",
-                        "The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)",
+                        t!("Function key bar"),
+                        t!("The F2 Rename … F10 Quit buttons at the bottom (the keys work either way)"),
                         muted,
                         Checkbox::new("settings-key-bar")
                             .checked(self.values.key_bar)
@@ -379,35 +407,35 @@ impl Render for SettingsView {
                             .into_any_element(),
                     )),
             )
-            .child(Self::section("Files", muted, border).child(Self::row(
-                "Drag and drop",
-                "What dropping entries onto a panel does",
+            .child(Self::section(t!("Files"), muted, border).child(Self::row(
+                t!("Drag and drop"),
+                t!("What dropping entries onto a panel does"),
                 muted,
                 h_flex().gap_1().children(drop_buttons).into_any_element(),
             )))
             .child(
-                Self::section("Locations", muted, border)
+                Self::section(t!("Locations"), muted, border)
                     .child(Self::row_with_path(
-                        "Config file",
-                        "Saved automatically: tabs, layouts, theme, scale",
+                        t!("Config file"),
+                        t!("Saved automatically: tabs, layouts, theme, scale"),
                         Some(config_path.clone()),
                         muted,
                         Button::new("settings-open-config")
                             .small()
-                            .label("Open folder")
+                            .label(t!("Open folder"))
                             .on_click(open_dir(
                                 config_path.parent().map(PathBuf::from).unwrap_or_default(),
                             ))
                             .into_any_element(),
                     ))
                     .child(Self::row_with_path(
-                        "Themes directory",
-                        "JSON theme files here are watched and offered in the theme chooser",
+                        t!("Themes directory"),
+                        t!("JSON theme files here are watched and offered in the theme chooser"),
                         Some(themes_dir.clone()),
                         muted,
                         Button::new("settings-open-themes")
                             .small()
-                            .label("Open folder")
+                            .label(t!("Open folder"))
                             .on_click(open_dir(themes_dir))
                             .into_any_element(),
                     )),
@@ -420,7 +448,7 @@ impl Render for SettingsView {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child("ABOUT"),
+                            .child(t!("About").to_uppercase()),
                     )
                     .child(
                         div()
@@ -431,7 +459,7 @@ impl Render for SettingsView {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child("VAIS = vibecoded AI slop · MIT licence"),
+                            .child(t!("VAIS = vibecoded AI slop · MIT licence")),
                     )
                     .child(
                         Button::new("settings-github")

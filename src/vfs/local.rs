@@ -18,7 +18,7 @@ pub fn shared() -> Arc<dyn Backend> {
 
 fn path_of(loc: &Location) -> io::Result<&Path> {
     loc.as_local()
-        .ok_or_else(|| io::Error::other("not a local path"))
+        .ok_or_else(|| io::Error::other(t!("not a local path")))
 }
 
 /// Permission bits and owner of a Unix file; nothing elsewhere.

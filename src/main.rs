@@ -1,5 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod agents;
 mod app;
 mod bridge;
@@ -122,6 +124,7 @@ fn main() {
 /// picker alike).
 pub(crate) fn init_app(config: &Config, cx: &mut App) {
     init(cx);
+    i18n::set_language(config.language.as_deref());
     settings::init(config, cx);
     clipboard::init(cx);
     thumbs::init(cx);

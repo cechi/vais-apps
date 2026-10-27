@@ -91,10 +91,10 @@ pub fn open(
         match spec.kind {
             PickKind::Open {
                 directory: true, ..
-            } => "Select folder",
-            PickKind::Open { .. } => "Open file",
-            PickKind::Save { .. } => "Save file",
-            PickKind::SaveFiles { .. } => "Save files",
+            } => t!("Select folder"),
+            PickKind::Open { .. } => t!("Open file"),
+            PickKind::Save { .. } => t!("Save file"),
+            PickKind::SaveFiles { .. } => t!("Save files"),
         }
         .to_string()
     } else {
@@ -247,7 +247,7 @@ impl Picker {
                 let name = current_name.clone().unwrap_or_default();
                 let input = cx.new(|cx| {
                     InputState::new(window, cx)
-                        .placeholder("File name")
+                        .placeholder(t!("File name"))
                         .default_value(name)
                 });
                 subscriptions.push(cx.subscribe_in(
@@ -431,7 +431,7 @@ impl Picker {
                 };
                 let name = input.read(cx).value().trim().to_string();
                 if name.is_empty() {
-                    window.push_notification(Notification::warning("Type a file name"), cx);
+                    window.push_notification(Notification::warning(t!("Type a file name")), cx);
                     return;
                 }
                 let Some(dir) = self.panel.read(cx).path().as_local().map(Path::to_path_buf) else {
@@ -484,10 +484,10 @@ impl Picker {
 
     fn confirm_replace(&mut self, target: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let items = vec![
-            PaletteItem::new("Replace")
+            PaletteItem::new(t!("Replace"))
                 .icon(IconName::Check)
                 .danger(true),
-            PaletteItem::new("Cancel").icon(IconName::Close),
+            PaletteItem::new(t!("Cancel")).icon(IconName::Close),
         ];
         let view = cx.entity();
         let name = target
@@ -496,7 +496,7 @@ impl Picker {
             .unwrap_or_default();
         let palette = cx.new(|cx| {
             Palette::pick(items, cx)
-                .description(format!("{name} already exists in this folder"))
+                .description(t!("{name} already exists in this folder", name = name))
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     if choice.item != Some(0) {
@@ -512,7 +512,7 @@ impl Picker {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Replace file?".into(), palette, window, cx);
+        palette::open(t!("Replace file?").into(), palette, window, cx);
     }
 
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -570,9 +570,9 @@ impl Render for Picker {
                     PickKind::Open {
                         directory: true, ..
                     }
-                    | PickKind::SaveFiles { .. } => "Select",
-                    PickKind::Open { .. } => "Open",
-                    PickKind::Save { .. } => "Save",
+                    | PickKind::SaveFiles { .. } => t!("Select"),
+                    PickKind::Open { .. } => t!("Open"),
+                    PickKind::Save { .. } => t!("Save"),
                 }
                 .to_string()
             })
@@ -612,7 +612,7 @@ impl Render for Picker {
                     .border_t_1()
                     .border_color(border)
                     .when_some(self.name_input.clone(), |bar, input| {
-                        bar.child(div().text_sm().text_color(muted).child("Name"))
+                        bar.child(div().text_sm().text_color(muted).child(t!("Name")))
                             .child(div().flex_1().min_w_0().child(Input::new(&input).small()))
                     })
                     .when(self.name_input.is_none(), |bar| bar.child(div().flex_1()))
@@ -627,7 +627,7 @@ impl Render for Picker {
                     .child(
                         Button::new("picker-cancel")
                             .small()
-                            .label("Cancel")
+                            .label(t!("Cancel"))
                             .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
                     )
                     .child(

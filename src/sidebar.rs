@@ -227,9 +227,10 @@ impl Sidebar {
                 name: saved.name.clone(),
                 path: Location::Local(std::path::PathBuf::new()),
                 icon: IconName::LayoutDashboard,
-                detail: Some(format!(
-                    "{}x{} layout",
-                    saved.tab.layout.rows, saved.tab.layout.cols
+                detail: Some(t!(
+                    "{rows}x{cols} layout",
+                    rows = saved.tab.layout.rows,
+                    cols = saved.tab.layout.cols
                 )),
                 layout: Some(ix),
                 removable: true,
@@ -285,9 +286,9 @@ impl Sidebar {
                 icon: IconName::Globe,
                 detail: Some(match status {
                     Status::Disconnected => format!("{}@{}", config.user, config.host),
-                    Status::Connecting => "connecting…".to_string(),
-                    Status::Connected => "connected".to_string(),
-                    Status::Failed(err) => format!("failed: {err}"),
+                    Status::Connecting => t!("connecting…").to_string(),
+                    Status::Connected => t!("connected").to_string(),
+                    Status::Failed(err) => t!("failed: {error}", error = err),
                 }),
                 layout: None,
                 removable: false,
@@ -327,6 +328,7 @@ impl Sidebar {
     fn render_section(
         &self,
         title: &'static str,
+        label: &'static str,
         places: &[Place],
         offset: usize,
         c: &Colors,
@@ -357,7 +359,7 @@ impl Sidebar {
                         .size_3()
                         .flex_none(),
                     )
-                    .child(title),
+                    .child(label),
             )
             .when(!collapsed, |d| {
                 d.children(places.iter().enumerate().map(|(i, place)| {
@@ -498,33 +500,35 @@ impl Sidebar {
                         };
                         let mut menu = menu
                             .item(
-                                PopupMenuItem::new("Rename…")
+                                PopupMenuItem::new(t!("Rename…"))
                                     .on_click(emit(SidebarEvent::RenameFavorite)),
                             )
                             .item(
-                                PopupMenuItem::new("Color…")
+                                PopupMenuItem::new(t!("Color…"))
                                     .on_click(emit(SidebarEvent::ColorFavorite)),
                             );
                         if count > 1 {
                             menu = menu.separator();
                             if index > 0 {
                                 menu = menu.item(
-                                    PopupMenuItem::new("Move up").on_click(move_to(index - 1)),
+                                    PopupMenuItem::new(t!("Move up")).on_click(move_to(index - 1)),
                                 );
                             }
                             if index + 1 < count {
                                 menu = menu.item(
-                                    PopupMenuItem::new("Move down").on_click(move_to(index + 1)),
+                                    PopupMenuItem::new(t!("Move down"))
+                                        .on_click(move_to(index + 1)),
                                 );
                             }
                         }
-                        menu.separator()
-                            .item(PopupMenuItem::new("Remove from favorites").on_click(emit(
-                                |id| match id {
+                        menu.separator().item(
+                            PopupMenuItem::new(t!("Remove from favorites")).on_click(emit(|id| {
+                                match id {
                                     FavoriteId::Layout(ix) => SidebarEvent::RemoveLayout(ix),
                                     FavoriteId::Path(path) => SidebarEvent::RemoveFavorite(path),
-                                },
-                            )))
+                                }
+                            })),
+                        )
                     })
                     .into_any_element()
                 }))
@@ -596,7 +600,7 @@ impl Render for Sidebar {
                             .flex_1()
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Places"),
+                            .child(t!("Places")),
                     )
                     .child(
                         Button::new("sidebar-refresh")
@@ -628,11 +632,19 @@ impl Render for Sidebar {
                             // Without the system places the group exists only
                             // while the user has favorites of their own.
                             .when(!places.is_empty(), |d| {
-                                d.child(self.render_section("Favorites", &places, 0, &c, cx))
+                                d.child(self.render_section(
+                                    "Favorites",
+                                    t!("Favorites"),
+                                    &places,
+                                    0,
+                                    &c,
+                                    cx,
+                                ))
                             })
                             .when(!volumes.is_empty(), |d| {
                                 d.child(self.render_section(
                                     "Volumes",
+                                    t!("Volumes"),
                                     &volumes,
                                     places.len(),
                                     &c,
@@ -643,6 +655,7 @@ impl Render for Sidebar {
                                 let offset = places.len() + volumes.len();
                                 d.child(self.render_section(
                                     "Connections",
+                                    t!("Connections"),
                                     &connections,
                                     offset,
                                     &c,
@@ -667,13 +680,20 @@ impl Render for Sidebar {
                                                 cx.emit(SidebarEvent::ManageConnections)
                                             }))
                                             .child(Icon::new(IconName::Plus).size_4().flex_none())
-                                            .child("Manage connections…"),
+                                            .child(t!("Manage connections…")),
                                     )
                                 },
                             )
                             .when(!recent.is_empty(), |d| {
                                 let offset = places.len() + volumes.len() + connections.len();
-                                d.child(self.render_section("Recent", &recent, offset, &c, cx))
+                                d.child(self.render_section(
+                                    "Recent",
+                                    t!("Recent"),
+                                    &recent,
+                                    offset,
+                                    &c,
+                                    cx,
+                                ))
                             }),
                     )
                     .child(Scrollbar::vertical(&self.scroll).viewport_from_layout()),

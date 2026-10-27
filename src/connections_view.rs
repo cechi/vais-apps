@@ -78,13 +78,13 @@ impl ConnectionsView {
             ));
             state
         };
-        let name = input("Name", false);
-        let host = input("host or address", false);
+        let name = input(t!("Name"), false);
+        let host = input(t!("host or address"), false);
         let port = input("22", false);
-        let user = input("user", false);
+        let user = input(t!("user"), false);
         let path = input("/", false);
         let key = input("~/.ssh/id_ed25519", false);
-        let password = input("password", true);
+        let password = input(t!("password"), true);
         let mut this = Self {
             selected: (!items.is_empty()).then_some(0),
             items,
@@ -170,11 +170,13 @@ impl ConnectionsView {
         let name = text(&self.name);
         let host = text(&self.host);
         if host.is_empty() {
-            return Err("host is required".into());
+            return Err(t!("host is required").into());
         }
         let port = match text(&self.port).as_str() {
             "" => self.protocol.default_port(),
-            p => p.parse().map_err(|_| "port must be a number".to_string())?,
+            p => p
+                .parse()
+                .map_err(|_| t!("port must be a number").to_string())?,
         };
         // An empty SFTP user is fine when ~/.ssh/config knows the host.
         let user = text(&self.user);
@@ -185,7 +187,7 @@ impl ConnectionsView {
                 .user
                 .is_none()
         {
-            return Err("user is required (or set it for this host in ~/.ssh/config)".into());
+            return Err(t!("user is required (or set it for this host in ~/.ssh/config)").into());
         }
         let path = match text(&self.path).as_str() {
             "" => "/".to_string(),
@@ -199,7 +201,7 @@ impl ConnectionsView {
             AuthMethod::Password
         };
         if auth == AuthMethod::Key && key.is_none() {
-            return Err("a key file is required".into());
+            return Err(t!("a key file is required").into());
         }
         let existing = self.selected.and_then(|ix| self.items.get(ix));
         let id = match existing {
@@ -297,8 +299,8 @@ impl ConnectionsView {
             .collect();
         let view = cx.entity();
         let palette = cx.new(|cx| {
-            Palette::pick_filtered(items, "Filter hosts", window, cx)
-                .hint("No Host entries in ~/.ssh/config")
+            Palette::pick_filtered(items, t!("Filter hosts"), window, cx)
+                .hint(t!("No Host entries in ~/.ssh/config"))
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
                     let Some(host) = choice.item.and_then(|ix| hosts.get(ix).cloned()) else {
@@ -311,7 +313,7 @@ impl ConnectionsView {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Add from ssh config".to_string(), palette, window, cx);
+        palette::open(t!("Add from ssh config").to_string(), palette, window, cx);
     }
 
     /// A new, unsaved connection for an ssh config host: the alias as the
@@ -485,9 +487,9 @@ impl Render for ConnectionsView {
         });
 
         let status_text = match &selected_status {
-            Some(Status::Connected) => "Connected".to_string(),
-            Some(Status::Connecting) => "Connecting…".to_string(),
-            Some(Status::Failed(err)) => format!("Failed: {err}"),
+            Some(Status::Connected) => t!("Connected").to_string(),
+            Some(Status::Connecting) => t!("Connecting…").to_string(),
+            Some(Status::Failed(err)) => t!("Failed: {error}", error = err),
             _ => String::new(),
         };
 
@@ -517,13 +519,13 @@ impl Render for ConnectionsView {
                             .bg(list_head)
                             .border_b_1()
                             .border_color(border)
-                            .child(div().flex_1().font_semibold().child("Connections"))
+                            .child(div().flex_1().font_semibold().child(t!("Connections")))
                             .child(
                                 Button::new("connections-import")
                                     .ghost()
                                     .xsmall()
                                     .icon(IconName::Globe)
-                                    .label("ssh config")
+                                    .label(t!("ssh config"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.import_from_ssh_config(window, cx)
                                     })),
@@ -552,7 +554,7 @@ impl Render for ConnectionsView {
                                         .py_2()
                                         .text_sm()
                                         .text_color(muted)
-                                        .child("No connections yet. Fill in the form and save."),
+                                        .child(t!("No connections yet. Fill in the form and save.")),
                                 )
                             }),
                     ),
@@ -568,9 +570,9 @@ impl Render for ConnectionsView {
                         h_flex()
                             .gap_2()
                             .child(div().font_semibold().text_lg().child(if has_selection {
-                                "Edit connection"
+                                t!("Edit connection")
                             } else {
-                                "New connection"
+                                t!("New connection")
                             }))
                             .child(div().flex_1())
                             .child(
@@ -587,11 +589,11 @@ impl Render for ConnectionsView {
                         h_flex()
                             .gap_3()
                             .items_end()
-                            .child(Self::field("Name", &self.name, muted).flex_1())
+                            .child(Self::field(t!("Name"), &self.name, muted).flex_1())
                             .child(
                                 v_flex()
                                     .gap_1()
-                                    .child(div().text_xs().text_color(muted).child("Protocol"))
+                                    .child(div().text_xs().text_color(muted).child(t!("Protocol")))
                                     .child(h_flex().gap_1().children(protocol_buttons)),
                             ),
                     )
@@ -599,31 +601,31 @@ impl Render for ConnectionsView {
                         h_flex()
                             .gap_3()
                             .items_end()
-                            .child(Self::field("Host", &self.host, muted).flex_1())
-                            .child(Self::field("Port", &self.port, muted).w(rems(5.)))
-                            .child(Self::field("User", &self.user, muted).w(rems(10.))),
+                            .child(Self::field(t!("Host"), &self.host, muted).flex_1())
+                            .child(Self::field(t!("Port"), &self.port, muted).w(rems(5.)))
+                            .child(Self::field(t!("User"), &self.user, muted).w(rems(10.))),
                     )
-                    .child(Self::field("Directory", &self.path, muted))
+                    .child(Self::field(t!("Directory"), &self.path, muted))
                     .when(uses_keys, |form| {
                         form.child(
                             v_flex()
                                 .gap_1()
-                                .child(div().text_xs().text_color(muted).child("Authentication"))
+                                .child(div().text_xs().text_color(muted).child(t!("Authentication")))
                                 .child(h_flex().gap_1().children(auth_buttons)),
                         )
                     })
                     .when(uses_keys && self.auth != AuthMethod::Password, |form| {
-                        form.child(Self::field("Private key (optional)", &self.key, muted))
+                        form.child(Self::field(t!("Private key (optional)"), &self.key, muted))
                     })
                     .child(
                         h_flex()
                             .gap_3()
                             .items_end()
-                            .child(Self::field("Password", &self.password, muted).flex_1())
+                            .child(Self::field(t!("Password"), &self.password, muted).flex_1())
                             .child(
                                 h_flex().h(rems(1.75)).child(
                                     Checkbox::new("connections-remember")
-                                        .label("Remember in the system keyring")
+                                        .label(t!("Remember in the system keyring"))
                                         .checked(self.remember)
                                         .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                             this.remember = *checked;
@@ -637,9 +639,9 @@ impl Render for ConnectionsView {
                             .text_xs()
                             .text_color(muted)
                             .child(if uses_keys {
-                                "Host may be an alias from ~/.ssh/config: its HostName, Port, User and IdentityFile apply where the fields are empty or at their defaults. Without a stored password you are asked when connecting; Agent / keys tries the SSH agent and ~/.ssh keys first."
+                                t!("Host may be an alias from ~/.ssh/config: its HostName, Port, User and IdentityFile apply where the fields are empty or at their defaults. Without a stored password you are asked when connecting; Agent / keys tries the SSH agent and ~/.ssh keys first.")
                             } else {
-                                "Plain FTP, passive mode. Leave the user empty for anonymous access; otherwise you are asked for the password unless it is stored."
+                                t!("Plain FTP, passive mode. Leave the user empty for anonymous access; otherwise you are asked for the password unless it is stored.")
                             }),
                     )
                     .when_some(self.error.clone(), |form, error| {
@@ -661,7 +663,7 @@ impl Render for ConnectionsView {
                                     Button::new("connections-delete")
                                         .small()
                                         .danger()
-                                        .label("Remove")
+                                        .label(t!("Remove"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.delete(window, cx)
                                         })),
@@ -674,7 +676,7 @@ impl Render for ConnectionsView {
                                 bar.child(
                                     Button::new("connections-disconnect")
                                         .small()
-                                        .label("Disconnect")
+                                        .label(t!("Disconnect"))
                                         .on_click(cx.listener(move |_, _, _, cx| {
                                             if let Some(conn) = conn.clone() {
                                                 cx.emit(ConnectionsEvent::Disconnect(conn));
@@ -685,7 +687,7 @@ impl Render for ConnectionsView {
                             .child(
                                 Button::new("connections-save")
                                     .small()
-                                    .label("Save")
+                                    .label(t!("Save"))
                                     .disabled(!self.dirty && has_selection)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.save(cx);
@@ -696,7 +698,7 @@ impl Render for ConnectionsView {
                                     .small()
                                     .primary()
                                     .icon(IconName::Globe)
-                                    .label("Connect")
+                                    .label(t!("Connect"))
                                     .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
                             ),
                     )
@@ -704,7 +706,7 @@ impl Render for ConnectionsView {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child("Connections are saved in the config file (without passwords). The remote directory opens in the active panel; its address is written as id:/path."),
+                            .child(t!("Connections are saved in the config file (without passwords). The remote directory opens in the active panel; its address is written as id:/path.")),
                     ),
             )
             .child(div().flex_none().child(Icon::new(IconName::Globe).size_4().opacity(0.)))

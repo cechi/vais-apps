@@ -75,8 +75,8 @@ impl RenameView {
         };
         let name = input(defaults.name.clone(), "[N]");
         let ext = input(defaults.ext.clone(), "[E]");
-        let find = input(String::new(), "Find");
-        let replace = input(String::new(), "Replace");
+        let find = input(String::new(), t!("Find##rename"));
+        let replace = input(String::new(), t!("Replace##rename"));
         let start = input(defaults.counter_start.to_string(), "1");
         let step = input(defaults.counter_step.to_string(), "1");
         let digits = input(defaults.counter_digits.to_string(), "1");
@@ -103,7 +103,7 @@ impl RenameView {
     }
 
     pub fn title(&self) -> String {
-        format!("Rename {}", self.paths.len())
+        t!("Rename {count}", count = self.paths.len())
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -247,17 +247,20 @@ impl Render for RenameView {
         let count = self.plan.rows.len();
         let can_apply = self.plan.can_apply();
         let summary = format!(
-            "{} of {} change · {} problem{}",
-            self.plan.changes(),
-            count,
-            self.plan.problems(),
-            if self.plan.problems() == 1 { "" } else { "s" }
+            "{} · {}",
+            tn!(
+                "{n} of {total} changes",
+                "{n} of {total} change",
+                self.plan.changes(),
+                total = count
+            ),
+            tn!("{n} problem", "{n} problems", self.plan.problems())
         );
         let error = self.error.clone().or_else(|| {
             self.plan
                 .regex_error
                 .as_ref()
-                .map(|e| format!("Regex: {e}"))
+                .map(|e| t!("Regex: {error}", error = e))
         });
 
         let case_buttons = CaseMode::ALL.iter().map(|&mode| {
@@ -304,32 +307,32 @@ impl Render for RenameView {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child(format!("in {}", self.dir.display())),
+                            .child(t!("in {dir}", dir = self.dir.display())),
                     ),
             )
             .child(
                 h_flex()
                     .gap_3()
                     .items_end()
-                    .child(Self::field("Name", &self.name, muted).flex_1())
-                    .child(Self::field("Extension", &self.ext, muted).w(rems(10.)))
-                    .child(Self::field("Counter start", &self.start, muted).w(rems(6.)))
-                    .child(Self::field("Step", &self.step, muted).w(rems(4.)))
-                    .child(Self::field("Digits", &self.digits, muted).w(rems(4.))),
+                    .child(Self::field(t!("Name"), &self.name, muted).flex_1())
+                    .child(Self::field(t!("Extension"), &self.ext, muted).w(rems(10.)))
+                    .child(Self::field(t!("Counter start"), &self.start, muted).w(rems(6.)))
+                    .child(Self::field(t!("Step"), &self.step, muted).w(rems(4.)))
+                    .child(Self::field(t!("Digits"), &self.digits, muted).w(rems(4.))),
             )
             .child(
                 h_flex()
                     .gap_3()
                     .items_end()
-                    .child(Self::field("Find", &self.find, muted).flex_1())
-                    .child(Self::field("Replace", &self.replace, muted).flex_1())
+                    .child(Self::field(t!("Find##rename"), &self.find, muted).flex_1())
+                    .child(Self::field(t!("Replace##rename"), &self.replace, muted).flex_1())
                     .child(
                         h_flex()
                             .gap_3()
                             .h(rems(1.75))
                             .child(
                                 Checkbox::new("rename-regex")
-                                    .label("Regex")
+                                    .label(t!("Regex"))
                                     .checked(self.regex)
                                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                         this.regex = *checked;
@@ -338,7 +341,7 @@ impl Render for RenameView {
                             )
                             .child(
                                 Checkbox::new("rename-ignore-case")
-                                    .label("Ignore case")
+                                    .label(t!("Ignore case"))
                                     .checked(self.ignore_case)
                                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                         this.ignore_case = *checked;
@@ -350,15 +353,12 @@ impl Render for RenameView {
             .child(
                 h_flex()
                     .gap_3()
-                    .child(div().text_xs().text_color(muted).child("Case"))
+                    .child(div().text_xs().text_color(muted).child(t!("Case")))
                     .child(h_flex().gap_1().children(case_buttons))
                     .child(div().flex_1())
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child("[N] name · [E] extension · [C] counter · $1 regex groups"),
-                    ),
+                    .child(div().text_xs().text_color(muted).child(t!(
+                        "[N] name · [E] extension · [C] counter · $1 regex groups"
+                    ))),
             )
             .when_some(error, |this, error| {
                 this.child(div().text_sm().text_color(danger).child(error))
@@ -380,10 +380,10 @@ impl Render for RenameView {
                             .bg(list_head)
                             .border_b_1()
                             .border_color(border)
-                            .child(div().flex_1().child("Old name"))
+                            .child(div().flex_1().child(t!("Old name")))
                             // Same width as the arrow in the rows.
                             .child(div().flex_none().text_sm().invisible().child("→"))
-                            .child(div().flex_1().child("New name")),
+                            .child(div().flex_1().child(t!("New name"))),
                     )
                     .child(div().flex_1().min_h_0().child(list)),
             )
@@ -394,7 +394,7 @@ impl Render for RenameView {
                     .child(
                         Button::new("rename-cancel")
                             .small()
-                            .label("Cancel")
+                            .label(t!("Cancel"))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(RenameEvent::Cancelled))),
                     )
                     .child(
@@ -402,7 +402,7 @@ impl Render for RenameView {
                             .small()
                             .primary()
                             .icon(IconName::Check)
-                            .label("Rename")
+                            .label(t!("Rename"))
                             .disabled(!can_apply)
                             .on_click(cx.listener(|this, _, _, cx| this.apply(cx))),
                     ),

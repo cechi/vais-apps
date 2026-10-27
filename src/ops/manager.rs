@@ -291,25 +291,20 @@ impl OperationsManager {
 /// One-line result for notifications.
 pub fn summary(op: &Operation) -> String {
     let Some(report) = &op.report else {
-        return format!("{} {}", op.kind.progress_verb(), op.label);
+        return op.kind.progress_text(&op.label);
     };
     if report.cancelled {
-        format!(
-            "{} {} cancelled after {} items",
-            op.kind.verb(),
-            op.label,
-            report.done
-        )
+        op.kind.cancelled_text(&op.label, report.done)
     } else if report.errors.is_empty() {
-        format!("{} {}", op.kind.done_verb(), op.label)
+        op.kind.done_text(&op.label)
     } else {
-        format!(
-            "{} {}: {} items, {} failed: {}",
-            op.kind.done_verb(),
-            op.label,
+        tn!(
+            "{result}: {n} item, {failed} failed: {errors}",
+            "{result}: {n} items, {failed} failed: {errors}",
             report.done,
-            report.errors.len(),
-            report
+            result = op.kind.done_text(&op.label),
+            failed = report.errors.len(),
+            errors = report
                 .errors
                 .iter()
                 .take(3)

@@ -76,27 +76,48 @@ pub fn user_places() -> Vec<(String, PathBuf, gpui_kit::component::IconName)> {
         return places;
     };
     places.push((
-        "Home".to_string(),
+        t!("Home").to_string(),
         dirs.home_dir().to_path_buf(),
         IconName::User,
     ));
     let home = dirs.home_dir();
-    // XDG user dirs when configured, else the conventional folder names.
-    let known: [(&str, Option<&Path>, IconName); 6] = [
-        ("Desktop", dirs.desktop_dir(), IconName::Frame),
-        ("Documents", dirs.document_dir(), IconName::FileText),
-        ("Downloads", dirs.download_dir(), IconName::Inbox),
-        ("Pictures", dirs.picture_dir(), IconName::GalleryVerticalEnd),
-        ("Music", dirs.audio_dir(), IconName::Mic),
-        ("Videos", dirs.video_dir(), IconName::Play),
+    // XDG user dirs when configured, else the conventional folder names
+    // (English on disk, translated in the sidebar).
+    let known: [(&str, &str, Option<&Path>, IconName); 6] = [
+        (
+            "Desktop",
+            t!("Desktop"),
+            dirs.desktop_dir(),
+            IconName::Frame,
+        ),
+        (
+            "Documents",
+            t!("Documents"),
+            dirs.document_dir(),
+            IconName::FileText,
+        ),
+        (
+            "Downloads",
+            t!("Downloads"),
+            dirs.download_dir(),
+            IconName::Inbox,
+        ),
+        (
+            "Pictures",
+            t!("Pictures"),
+            dirs.picture_dir(),
+            IconName::GalleryVerticalEnd,
+        ),
+        ("Music", t!("Music"), dirs.audio_dir(), IconName::Mic),
+        ("Videos", t!("Videos"), dirs.video_dir(), IconName::Play),
     ];
-    for (name, dir, icon) in known {
+    for (folder, label, dir, icon) in known {
         let dir = dir
             .map(Path::to_path_buf)
             .filter(|d| d.is_dir())
-            .or_else(|| Some(home.join(name)).filter(|d| d.is_dir()));
+            .or_else(|| Some(home.join(folder)).filter(|d| d.is_dir()));
         if let Some(dir) = dir {
-            places.push((name.to_string(), dir, icon));
+            places.push((label.to_string(), dir, icon));
         }
     }
     places
@@ -223,7 +244,7 @@ pub fn open_terminal(dir: &Path) -> std::io::Result<()> {
         ] {
             candidates.push(name.to_string());
         }
-        let mut last_err = std::io::Error::other("no terminal emulator found");
+        let mut last_err = std::io::Error::other(t!("no terminal emulator found"));
         for term in candidates {
             match Command::new(&term).current_dir(dir).spawn() {
                 Ok(_) => return Ok(()),
@@ -262,7 +283,7 @@ pub fn free_space(path: &Path) -> Option<u64> {
 
 pub fn display_name(path: &Path) -> String {
     if is_roots_path(path) {
-        return "Computer".to_string();
+        return t!("Computer").to_string();
     }
     match path.file_name() {
         Some(name) => name.to_string_lossy().into_owned(),

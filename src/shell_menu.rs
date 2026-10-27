@@ -54,7 +54,7 @@ pub fn hwnd(window: &gpui_kit::Window) -> Option<isize> {
 /// app is borrowed (inside an update); GPUI's window procedure needs it.
 pub fn show(hwnd: isize, dir: &Path, items: &[PathBuf]) -> Result<()> {
     if items.iter().any(|p| p.parent() != items[0].parent()) {
-        bail!("the entries are in different folders");
+        bail!("{}", t!("the entries are in different folders"));
     }
     let hwnd = HWND(hwnd as *mut _);
     // SAFETY: COM is initialised on this (the UI) thread by GPUI; every

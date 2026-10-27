@@ -557,10 +557,10 @@ impl Render for TerminalView {
         let note = match &self.state {
             SessionState::Running => None,
             SessionState::Exited(code) => Some(match code {
-                Some(code) => format!("Process exited with code {code}"),
-                None => "Process exited".to_string(),
+                Some(code) => t!("Process exited with code {code}", code = code),
+                None => t!("Process exited").to_string(),
             }),
-            SessionState::Failed(err) => Some(format!("Could not start: {err}")),
+            SessionState::Failed(err) => Some(t!("Could not start: {error}", error = err)),
         };
         div()
             .id("terminal")
@@ -587,7 +587,7 @@ impl Render for TerminalView {
                             h_flex().gap_2().child(
                                 Button::new("terminal-restart")
                                     .small()
-                                    .label("Restart")
+                                    .label(t!("Restart"))
                                     .on_click(cx.listener(Self::on_restart)),
                             ),
                         ),

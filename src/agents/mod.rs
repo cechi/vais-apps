@@ -128,7 +128,7 @@ impl AgentsPanel {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("New agent session".into(), palette, window, cx);
+        palette::open(t!("New agent session").into(), palette, window, cx);
     }
 
     fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -169,11 +169,15 @@ impl AgentsPanel {
         let session = &self.sessions[ix];
         let view = session.view.read(cx);
         let base = session.kind.label();
-        let state = if view.is_running() { "" } else { " (exited)" };
-        if view.title().is_empty() {
-            format!("{base}{state}")
-        } else {
-            format!("{base}: {}{state}", view.title())
+        match (view.title().is_empty(), view.is_running()) {
+            (true, true) => base.to_string(),
+            (true, false) => t!("{agent} (exited)", agent = base),
+            (false, true) => format!("{base}: {}", view.title()),
+            (false, false) => t!(
+                "{agent}: {title} (exited)",
+                agent = base,
+                title = view.title()
+            ),
         }
     }
 }
@@ -213,7 +217,7 @@ impl Render for AgentsPanel {
                             .flex_1()
                             .text_sm()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Agents"),
+                            .child(t!("Agents")),
                     )
                     .child(
                         Button::new("agents-new")
@@ -311,7 +315,7 @@ impl AgentsPanel {
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Start a session with"),
+                    .child(t!("Start a session with")),
             )
             .children(self.agents.iter().cloned().enumerate().map(|(ix, agent)| {
                 let (kind, path_text) = (agent.kind, agent.path.to_string_lossy().into_owned());

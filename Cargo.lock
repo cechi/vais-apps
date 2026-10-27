@@ -7421,6 +7421,7 @@ dependencies = [
  "sevenz-rust2",
  "ssh2",
  "suppaftp",
+ "sys-locale",
  "tar",
  "toml 0.8.23",
  "trash",

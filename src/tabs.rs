@@ -109,7 +109,7 @@ impl Tab {
             TabContent::Rename(view) => view.read(cx).title(),
             TabContent::Settings(view) => view.read(cx).title(),
             TabContent::Editor(view) => view.read(cx).title(),
-            TabContent::Connections(_) => "Connections".to_string(),
+            TabContent::Connections(_) => t!("Connections").to_string(),
         }
     }
 

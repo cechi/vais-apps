@@ -350,6 +350,22 @@ Below them a **Recent** group lists the last 10 directories the focused panel sh
 the place matching the panel's directory is highlighted. Each group folds on a click of its header, and the folded ones are remembered across restarts. The list scrolls (with a scrollbar) when it is taller than the window. The sidebar is resizable, its state is saved, and the tab bar, panels and
 function key bar shift right while it is open; the status bar keeps the full width.
 
+## Languages
+
+The interface follows the system language and can be set in Settings → Language
+(config: `language`, e.g. `"cs"`; unset follows the system). Available: English and
+Czech. A change applies at once.
+
+Translations live in `locales/<code>.toml`. The English text in the code is the key and
+the value is its translation, e.g. `"Copy" = "Kopírovat"`. A text that depends on a number
+lists the language's plural forms: `"{n} items" = ["{n} položka", "{n} položky", "{n} položek"]`.
+Anything missing falls back to English. To add a language, add an entry to `LANGUAGES`
+in `src/i18n.rs`, with the plural rule if the language needs a new one, and an empty
+catalog. Then run `cargo test catalogs`: it prints every missing entry, ready to fill in.
+The test also fails on stale keys and on mismatched placeholders, so the catalogs cannot
+silently fall behind the code. Texts of the UI toolkit itself (the input field menus) stay
+English.
+
 ## Themes
 
 Four themes are built in: the kit's Default Light / Dark and **Cechi Light / Dark**, a
@@ -395,6 +411,7 @@ src/editor_view.rs  the file editor tab (view / edit)
 src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
 src/shell_menu.rs  Windows: Explorer's context menu (IContextMenu) for the selection or a directory
 src/config.rs      TOML config
+src/i18n.rs        translations: t!/tn! macros, language choice, catalogs in locales/
 src/theme.rs       theme directory watching and applying a theme by name
 src/sidebar.rs     places sidebar (user folders, volumes)
 src/watch.rs       directory watching (notify): panels on local directories reload when they change

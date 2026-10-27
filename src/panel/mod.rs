@@ -204,9 +204,9 @@ impl FilePanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
-        let path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Path"));
+        let path_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Path")));
         let filter_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Filter… (* and ? for globs)"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter… (* and ? for globs)")));
 
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.on_focus_in(&focus_handle, window, |_this, _window, cx| {
@@ -871,19 +871,16 @@ impl FilePanel {
             .filter(|e| !e.is_parent)
             .count();
         let count = if filter.is_search() {
-            format!(
-                "{shown} results{}{}",
-                if self.state.search_truncated {
-                    " (limit)"
-                } else {
-                    ""
-                },
-                if self.searching {
-                    " · searching…"
-                } else {
-                    ""
-                }
-            )
+            match (self.state.search_truncated, self.searching) {
+                (false, false) => tn!("{n} result", "{n} results", shown),
+                (true, false) => tn!("{n} result (limit)", "{n} results (limit)", shown),
+                (false, true) => tn!("{n} result · searching…", "{n} results · searching…", shown),
+                (true, true) => tn!(
+                    "{n} result (limit) · searching…",
+                    "{n} results (limit) · searching…",
+                    shown
+                ),
+            }
         } else {
             format!("{shown} / {total}")
         };
@@ -909,14 +906,14 @@ impl FilePanel {
                 .child(
                     Button::new(("filter-recursive", self.index))
                         .xsmall()
-                        .label("Subfolders")
+                        .label(t!("Subfolders"))
                         .selected(filter.recursive)
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_recursive(cx))),
                 )
                 .child(
                     Button::new(("filter-content", self.index))
                         .xsmall()
-                        .label("Contents")
+                        .label(t!("Contents"))
                         .selected(filter.content)
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_content(cx))),
                 )
@@ -1284,7 +1281,7 @@ impl FilePanel {
         if is_dir {
             self.navigate(expanded, None, cx);
         } else {
-            self.state.error = Some(format!("{}: not a directory", expanded.display()));
+            self.state.error = Some(t!("{path}: not a directory", path = expanded.display()));
         }
         self.focus_handle.focus(window, cx);
         cx.notify();
@@ -1583,12 +1580,12 @@ impl FilePanel {
             return;
         }
         let Some(dir) = self.state.path.as_local() else {
-            self.state.error = Some("terminal: not a local directory".into());
+            self.state.error = Some(t!("terminal: not a local directory").into());
             cx.notify();
             return;
         };
         if let Err(err) = platform::open_terminal(dir) {
-            self.state.error = Some(format!("terminal: {err}"));
+            self.state.error = Some(t!("terminal: {error}", error = err));
             cx.notify();
         }
     }
@@ -1623,7 +1620,7 @@ impl FilePanel {
             local(&self.state.path),
             items.iter().map(local).collect::<Option<Vec<_>>>(),
         ) else {
-            self.state.error = Some("context menu: not a local file".into());
+            self.state.error = Some(t!("context menu: not a local file").into());
             cx.notify();
             return;
         };
@@ -1635,7 +1632,7 @@ impl FilePanel {
         cx.spawn(async move |this, cx| {
             if let Err(err) = crate::shell_menu::show(hwnd, &dir, &items) {
                 this.update(cx, |this, cx| {
-                    this.state.error = Some(format!("context menu: {err}"));
+                    this.state.error = Some(t!("context menu: {error}", error = err));
                     cx.notify();
                 })
                 .ok();
@@ -1657,49 +1654,49 @@ impl FilePanel {
         let menu = menu.action_context(focus);
         if is_parent {
             return menu
-                .menu("Go up", Box::new(GoUp))
+                .menu(t!("Go up"), Box::new(GoUp))
                 .separator()
-                .menu("New folder…", Box::new(MakeDir))
-                .menu("Open terminal here", Box::new(OpenTerminal))
+                .menu(t!("New folder…"), Box::new(MakeDir))
+                .menu(t!("Open terminal here"), Box::new(OpenTerminal))
                 .when(cfg!(windows), |menu| {
                     menu.separator()
-                        .menu("Windows context menu", Box::new(WindowsFolderMenu))
+                        .menu(t!("Windows context menu"), Box::new(WindowsFolderMenu))
                 });
         }
         menu.menu(
             if is_dir {
-                "Open"
+                t!("Open")
             } else if is_archive {
-                "Browse archive"
+                t!("Browse archive")
             } else {
-                "Open with default app"
+                t!("Open with default app")
             },
             Box::new(Open),
         )
         .when(is_archive, |menu| {
-            menu.menu("Extract…", Box::new(ExtractArchive))
+            menu.menu(t!("Extract…"), Box::new(ExtractArchive))
         })
         .separator()
-        .menu("Copy to other panel…", Box::new(CopyFiles))
-        .menu("Move to other panel…", Box::new(MoveFiles))
-        .menu("Rename…", Box::new(RenameFile))
+        .menu(t!("Copy to other panel…"), Box::new(CopyFiles))
+        .menu(t!("Move to other panel…"), Box::new(MoveFiles))
+        .menu(t!("Rename…"), Box::new(RenameFile))
         .separator()
-        .menu("Copy", Box::new(CopyToClipboard))
-        .menu("Cut", Box::new(CutToClipboard))
-        .menu("Paste", Box::new(PasteFromClipboard))
+        .menu(t!("Copy"), Box::new(CopyToClipboard))
+        .menu(t!("Cut"), Box::new(CutToClipboard))
+        .menu(t!("Paste"), Box::new(PasteFromClipboard))
         .separator()
-        .menu("Toggle mark", Box::new(ToggleMark))
-        .menu("Mark all", Box::new(MarkAll))
+        .menu(t!("Toggle mark"), Box::new(ToggleMark))
+        .menu(t!("Mark all"), Box::new(MarkAll))
         .separator()
-        .menu("Move to trash", Box::new(DeleteFiles))
-        .menu("Delete permanently", Box::new(DeleteFilesPermanently))
+        .menu(t!("Move to trash"), Box::new(DeleteFiles))
+        .menu(t!("Delete permanently"), Box::new(DeleteFilesPermanently))
         .separator()
-        .menu("Copy path", Box::new(CopyPath))
-        .menu("New folder…", Box::new(MakeDir))
-        .menu("Open terminal here", Box::new(OpenTerminal))
+        .menu(t!("Copy path"), Box::new(CopyPath))
+        .menu(t!("New folder…"), Box::new(MakeDir))
+        .menu(t!("Open terminal here"), Box::new(OpenTerminal))
         .when(cfg!(windows), |menu| {
             menu.separator()
-                .menu("Windows context menu", Box::new(WindowsContextMenu))
+                .menu(t!("Windows context menu"), Box::new(WindowsContextMenu))
         })
     }
 
@@ -1707,29 +1704,25 @@ impl FilePanel {
     fn panel_menu(menu: PopupMenu, focus: FocusHandle, sort: Sort, view: ViewMode) -> PopupMenu {
         let menu = menu
             .action_context(focus)
-            .menu("Paste", Box::new(PasteFromClipboard))
+            .menu(t!("Paste"), Box::new(PasteFromClipboard))
             .separator()
-            .menu("New folder…", Box::new(MakeDir))
-            .menu("Open terminal here", Box::new(OpenTerminal))
-            .menu("Copy directory path", Box::new(CopyPath))
+            .menu(t!("New folder…"), Box::new(MakeDir))
+            .menu(t!("Open terminal here"), Box::new(OpenTerminal))
+            .menu(t!("Copy directory path"), Box::new(CopyPath))
             .when(cfg!(windows), |menu| {
-                menu.menu("Windows context menu", Box::new(WindowsFolderMenu))
+                menu.menu(t!("Windows context menu"), Box::new(WindowsFolderMenu))
             })
             .separator()
-            .menu("Mark all", Box::new(MarkAll))
-            .menu("Clear marks", Box::new(CancelOrClear))
+            .menu(t!("Mark all"), Box::new(MarkAll))
+            .menu(t!("Clear marks"), Box::new(CancelOrClear))
             .separator()
-            .menu("Filter…", Box::new(OpenFilter))
-            .menu("Edit path…", Box::new(EditPath))
-            .menu("Toggle hidden files", Box::new(ToggleHidden))
-            .menu("Reload", Box::new(Reload))
+            .menu(t!("Filter…"), Box::new(OpenFilter))
+            .menu(t!("Edit path…"), Box::new(EditPath))
+            .menu(t!("Toggle hidden files"), Box::new(ToggleHidden))
+            .menu(t!("Reload"), Box::new(Reload))
             .separator();
         let menu = ViewMode::ALL.iter().fold(menu, |menu, &mode| {
-            menu.menu_with_check(
-                format!("{} view", mode.label()),
-                mode == view,
-                Box::new(SetView { mode }),
-            )
+            menu.menu_with_check(mode.menu_label(), mode == view, Box::new(SetView { mode }))
         });
         SortKey::ALL
             .iter()
@@ -1741,9 +1734,9 @@ impl FilePanel {
                 )
             })
             .separator()
-            .menu("Go up", Box::new(GoUp))
-            .menu("Back", Box::new(GoBack))
-            .menu("Forward", Box::new(GoForward))
+            .menu(t!("Go up"), Box::new(GoUp))
+            .menu(t!("Back"), Box::new(GoBack))
+            .menu(t!("Forward"), Box::new(GoForward))
     }
 
     /// Right-click menu of the column header: which columns to show.
@@ -1773,7 +1766,7 @@ impl FilePanel {
     ) -> AnyElement {
         let sort = self.state.sort;
         let (label, key, width, right) = match column {
-            None => ("Name", Some(SortKey::Name), None, false),
+            None => (t!("Name"), Some(SortKey::Name), None, false),
             Some(col) => (
                 col.label(),
                 col.sort_key(),
@@ -1961,7 +1954,10 @@ impl FilePanel {
         .when(look.is_marked || look.is_cursor, |d| {
             let drag = DragEntries { paths: drag_paths };
             d.on_drag(drag, |drag, _offset, _window, cx| {
-                let label = crate::ops::describe(&drag.paths);
+                let label = match drag.paths.as_slice() {
+                    [single] => single.file_name().unwrap_or_else(|| single.display()),
+                    many => tn!("{n} item", "{n} items", many.len()),
+                };
                 cx.new(|_| DragPreview { label })
             })
         })
@@ -2346,11 +2342,11 @@ impl Render for FilePanel {
         let filter_bar = self.render_filter_bar(&colors, cx);
         let footer_text = if self.state.loading || self.searching {
             if self.searching {
-                "Searching…".to_string()
+                t!("Searching…").to_string()
             } else if let Some(conn) = self.state.path.conn() {
-                format!("Connecting to {conn}…")
+                t!("Connecting to {connection}…", connection = conn)
             } else {
-                "Loading…".to_string()
+                t!("Loading…").to_string()
             }
         } else if let Some(err) = &self.state.error {
             err.clone()
@@ -2361,27 +2357,33 @@ impl Render for FilePanel {
                 .iter()
                 .filter(|e| !e.is_parent)
                 .count();
-            format!(
-                "{} / {} selected · {} of {} shown",
-                self.state.marked.len(),
-                self.state.item_count(),
-                self.state.item_count(),
-                total
+            t!(
+                "{marked} / {count} selected · {shown} of {total} shown",
+                marked = self.state.marked.len(),
+                count = self.state.item_count(),
+                shown = self.state.item_count(),
+                total = total
             )
         } else {
-            let free = self
-                .state
-                .path
-                .as_local()
-                .and_then(platform::free_space)
-                .map(|bytes| format!(" · {} free", human_size(bytes)))
-                .unwrap_or_default();
-            format!(
-                "{} / {} selected · {}{free}",
-                self.state.marked.len(),
-                self.state.item_count(),
-                human_size(self.state.marked_bytes())
-            )
+            let free = self.state.path.as_local().and_then(platform::free_space);
+            let marked = self.state.marked.len();
+            let count = self.state.item_count();
+            let size = human_size(self.state.marked_bytes());
+            match free {
+                Some(bytes) => t!(
+                    "{marked} / {count} selected · {size} · {free} free",
+                    marked = marked,
+                    count = count,
+                    size = size,
+                    free = human_size(bytes)
+                ),
+                None => t!(
+                    "{marked} / {count} selected · {size}",
+                    marked = marked,
+                    count = count,
+                    size = size
+                ),
+            }
         };
         let footer_color = if self.state.error.is_some() {
             danger
@@ -2659,16 +2661,25 @@ impl Render for FilePanel {
     }
 }
 
-/// Menu label like "Sort by size ▾" for the current key.
-fn sort_label(sort: Sort, key: SortKey) -> String {
-    let label = key.label().to_lowercase();
-    if sort.key == key {
-        let dir = match sort.dir {
-            SortDir::Asc => "ascending",
-            SortDir::Desc => "descending",
-        };
-        format!("Sort by {label} ({dir})")
-    } else {
-        format!("Sort by {label}")
+/// Menu label like "Sort by size (ascending)" for `key`; the direction
+/// shows on the current key only.
+fn sort_label(sort: Sort, key: SortKey) -> &'static str {
+    let dir = (sort.key == key).then_some(sort.dir);
+    match (key, dir) {
+        (SortKey::Name, None) => t!("Sort by name"),
+        (SortKey::Name, Some(SortDir::Asc)) => t!("Sort by name (ascending)"),
+        (SortKey::Name, Some(SortDir::Desc)) => t!("Sort by name (descending)"),
+        (SortKey::Size, None) => t!("Sort by size"),
+        (SortKey::Size, Some(SortDir::Asc)) => t!("Sort by size (ascending)"),
+        (SortKey::Size, Some(SortDir::Desc)) => t!("Sort by size (descending)"),
+        (SortKey::Type, None) => t!("Sort by type"),
+        (SortKey::Type, Some(SortDir::Asc)) => t!("Sort by type (ascending)"),
+        (SortKey::Type, Some(SortDir::Desc)) => t!("Sort by type (descending)"),
+        (SortKey::Modified, None) => t!("Sort by modified"),
+        (SortKey::Modified, Some(SortDir::Asc)) => t!("Sort by modified (ascending)"),
+        (SortKey::Modified, Some(SortDir::Desc)) => t!("Sort by modified (descending)"),
+        (SortKey::Created, None) => t!("Sort by created"),
+        (SortKey::Created, Some(SortDir::Asc)) => t!("Sort by created (ascending)"),
+        (SortKey::Created, Some(SortDir::Desc)) => t!("Sort by created (descending)"),
     }
 }

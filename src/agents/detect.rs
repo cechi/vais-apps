@@ -27,7 +27,7 @@ impl AgentKind {
             AgentKind::OpenCode => "OpenCode",
             AgentKind::Codex => "Codex",
             AgentKind::Gemini => "Gemini CLI",
-            AgentKind::Shell => "Shell",
+            AgentKind::Shell => t!("Shell"),
         }
     }
 

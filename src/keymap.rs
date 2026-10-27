@@ -389,19 +389,8 @@ pub struct Command {
 /// The actions the command palette lists: every binding that applies while
 /// a panel has the focus, first binding of each action wins.
 pub fn commands() -> Vec<Command> {
-    let contexts: Vec<KeyContext> = [WORKSPACE_CONTEXT, GRID_CONTEXT, PANEL_CONTEXT]
-        .iter()
-        .filter_map(|c| KeyContext::parse(c).ok())
-        .collect();
     let mut out: Vec<Command> = Vec::new();
-    for binding in bindings() {
-        // As in dispatch: the predicate holds at some depth of the focus path.
-        let applies = binding
-            .predicate()
-            .is_none_or(|predicate| predicate.depth_of(&contexts).is_some());
-        if !applies {
-            continue;
-        }
+    for binding in panel_bindings() {
         let action = binding.action();
         let label = command_label(action);
         if out.iter().any(|c| c.label == label) {
@@ -423,9 +412,50 @@ pub fn commands() -> Vec<Command> {
     out
 }
 
+/// The bindings usable from a file panel.
+fn panel_bindings() -> Vec<KeyBinding> {
+    let contexts: Vec<KeyContext> = [WORKSPACE_CONTEXT, GRID_CONTEXT, PANEL_CONTEXT]
+        .iter()
+        .filter_map(|c| KeyContext::parse(c).ok())
+        .collect();
+    bindings()
+        .into_iter()
+        .filter(|binding| {
+            // As in dispatch: the predicate holds at some depth of the focus path.
+            binding
+                .predicate()
+                .is_none_or(|predicate| predicate.depth_of(&contexts).is_some())
+        })
+        .collect()
+}
+
+/// The English texts of the [`commands`] labels, the catalog keys they
+/// translate by: action names and the named data.
+#[cfg(test)]
+pub fn command_labels() -> Vec<String> {
+    let mut labels = Vec::new();
+    for binding in panel_bindings() {
+        labels.push(command_name(binding.action()));
+        if let Some((detail, true)) = action_detail(binding.action()) {
+            labels.push(detail);
+        }
+    }
+    labels
+}
+
 /// `vais::CopyFiles` → `Copy Files`; an action with data adds it:
-/// `SortBy { key: Name }` → `Sort By: Name`.
+/// `SortBy { key: Name }` → `Sort By: Name`; in the interface language.
 fn command_label(action: &dyn Action) -> String {
+    let name = crate::i18n::tr_str(&command_name(action)).to_string();
+    match action_detail(action) {
+        Some((detail, true)) => format!("{name}: {}", crate::i18n::tr_str(&detail)),
+        Some((detail, false)) => format!("{name}: {detail}"),
+        None => name,
+    }
+}
+
+/// `vais::CopyFiles` → `Copy Files`.
+fn command_name(action: &dyn Action) -> String {
     let name = action.name().rsplit("::").next().unwrap_or("");
     let mut label = String::new();
     for (i, c) in name.chars().enumerate() {
@@ -434,27 +464,24 @@ fn command_label(action: &dyn Action) -> String {
         }
         label.push(c);
     }
-    if let Some(detail) = action_detail(action) {
-        label.push_str(": ");
-        label.push_str(&detail);
-    }
     label
 }
 
-/// The data of the actions that carry some, for the palette label.
-fn action_detail(action: &dyn Action) -> Option<String> {
+/// The data of the actions that carry some, for the palette label, and
+/// whether it is a name to translate (numbers are not).
+fn action_detail(action: &dyn Action) -> Option<(String, bool)> {
     let any = action.as_any();
     if let Some(a) = any.downcast_ref::<SortBy>() {
-        Some(format!("{:?}", a.key))
+        Some((format!("{:?}", a.key), true))
     } else if let Some(a) = any.downcast_ref::<SetView>() {
-        Some(format!("{:?}", a.mode))
+        Some((format!("{:?}", a.mode), true))
     } else if let Some(a) = any.downcast_ref::<ToggleColumn>() {
-        Some(format!("{:?}", a.column))
+        Some((format!("{:?}", a.column), true))
     } else if let Some(a) = any.downcast_ref::<ActivateTab>() {
-        Some((a.index + 1).to_string())
+        Some(((a.index + 1).to_string(), false))
     } else {
         any.downcast_ref::<SetLayout>()
-            .map(|a| format!("{}x{}", a.rows, a.cols))
+            .map(|a| (format!("{}x{}", a.rows, a.cols), false))
     }
 }
 

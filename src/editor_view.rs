@@ -49,17 +49,17 @@ pub fn load(location: &Location) -> Result<Loaded, String> {
     let backend = vfs::backend_for(location).map_err(|e| e.to_string())?;
     let meta = backend.stat(location).map_err(|e| e.to_string())?;
     if meta.is_dir() {
-        return Err("not a regular file".into());
+        return Err(t!("not a regular file").into());
     }
     if meta.size > MAX_SIZE {
-        return Err(format!(
-            "too large to edit ({}), opening with the default application",
-            human_size(meta.size)
+        return Err(t!(
+            "too large to edit ({size}), opening with the default application",
+            size = human_size(meta.size)
         ));
     }
     let bytes = vfs::read_all(location).map_err(|e| e.to_string())?;
     if bytes.iter().take(8192).any(|&b| b == 0) {
-        return Err("binary file, opening with the default application".into());
+        return Err(t!("binary file, opening with the default application").into());
     }
     let (text, lossy) = match String::from_utf8(bytes) {
         Ok(text) => (text, false),
@@ -170,7 +170,7 @@ impl EditorView {
     /// Make the file editable (F4 on a file that is already open read-only).
     pub fn set_readonly(&mut self, readonly: bool, cx: &mut Context<Self>) {
         if self.lossy && !readonly {
-            self.error = Some("not valid UTF-8, kept read-only".into());
+            self.error = Some(t!("not valid UTF-8, kept read-only").into());
             cx.notify();
             return;
         }
@@ -185,7 +185,7 @@ impl EditorView {
     /// Write the text back; CRLF files get their line endings back.
     pub fn save(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
         if self.readonly {
-            return Err("read-only".into());
+            return Err(t!("read-only").into());
         }
         let text = self.state.read(cx).value().to_string();
         let text = if self.crlf {
@@ -203,7 +203,7 @@ impl EditorView {
                 Ok(())
             }
             Err(err) => {
-                self.error = Some(format!("save failed: {err}"));
+                self.error = Some(t!("save failed: {error}", error = err));
                 cx.notify();
                 Err(err.to_string())
             }
@@ -263,20 +263,26 @@ impl Render for EditorView {
             .map(|p| p.display())
             .unwrap_or_default();
         let mode_label = if self.readonly {
-            "Read-only"
+            t!("Read-only")
         } else {
-            "Editable"
+            t!("Editable")
         };
-        let status = format!(
-            "Ln {}, Col {}  ·  {} lines  ·  {}  ·  {}{}{}",
-            position.line + 1,
-            position.character + 1,
+        let mut status = tn!(
+            "Ln {line}, Col {col}  ·  {n} line  ·  {size}  ·  {language}",
+            "Ln {line}, Col {col}  ·  {n} lines  ·  {size}  ·  {language}",
             lines,
-            human_size(self.size),
-            self.language.unwrap_or("plain text"),
-            if self.crlf { "  ·  CRLF" } else { "" },
-            if self.lossy { "  ·  not UTF-8" } else { "" },
+            line = position.line + 1,
+            col = position.character + 1,
+            size = human_size(self.size),
+            language = self.language.unwrap_or(t!("plain text")),
         );
+        if self.crlf {
+            status.push_str("  ·  CRLF");
+        }
+        if self.lossy {
+            status.push_str("  ·  ");
+            status.push_str(t!("not UTF-8"));
+        }
 
         v_flex()
             .id("file-editor")
@@ -328,7 +334,7 @@ impl Render for EditorView {
                             .ghost()
                             .xsmall()
                             .icon(IconName::RefreshCw)
-                            .label("Reload")
+                            .label(t!("Reload"))
                             .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
                     )
                     .child(
@@ -336,7 +342,7 @@ impl Render for EditorView {
                             .primary()
                             .xsmall()
                             .icon(IconName::Check)
-                            .label("Save")
+                            .label(t!("Save"))
                             .disabled(self.readonly || !self.dirty)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let _ = this.save(cx);

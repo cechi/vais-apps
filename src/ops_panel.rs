@@ -57,11 +57,11 @@ impl OperationsPanel {
         let fraction = op.fraction();
 
         let (status_text, status_color) = match op.status {
-            OpStatus::Running => ("Running", c.primary),
-            OpStatus::Cancelling => ("Cancelling…", c.warning),
-            OpStatus::Done => ("Done", c.success),
-            OpStatus::Failed => ("Failed", c.danger),
-            OpStatus::Cancelled => ("Cancelled", c.warning),
+            OpStatus::Running => (t!("Running"), c.primary),
+            OpStatus::Cancelling => (t!("Cancelling…"), c.warning),
+            OpStatus::Done => (t!("Done"), c.success),
+            OpStatus::Failed => (t!("Failed"), c.danger),
+            OpStatus::Cancelled => (t!("Cancelled"), c.warning),
         };
         let bar_color = match op.status {
             OpStatus::Failed => c.danger,
@@ -71,15 +71,21 @@ impl OperationsPanel {
         };
 
         let progress_text = if progress.total_bytes > 0 {
-            format!(
-                "{} / {}  ·  {} / {} items",
-                human_size(progress.bytes),
-                human_size(progress.total_bytes),
-                progress.done,
-                progress.total
+            tn!(
+                "{bytes} / {total_bytes}  ·  {done} / {n} item",
+                "{bytes} / {total_bytes}  ·  {done} / {n} items",
+                progress.total,
+                bytes = human_size(progress.bytes),
+                total_bytes = human_size(progress.total_bytes),
+                done = progress.done
             )
         } else {
-            format!("{} / {} items", progress.done, progress.total)
+            tn!(
+                "{done} / {n} item",
+                "{done} / {n} items",
+                progress.total,
+                done = progress.done
+            )
         };
         let detail = if op.is_running() {
             progress.current.clone()
@@ -93,9 +99,9 @@ impl OperationsPanel {
             format!("{}/s", human_size(op.speed as u64))
         } else if progress.total_bytes > 0 {
             let secs = op.elapsed().as_secs_f64().max(0.001);
-            format!(
-                "{}/s avg",
-                human_size((progress.bytes as f64 / secs) as u64)
+            t!(
+                "{speed}/s avg",
+                speed = human_size((progress.bytes as f64 / secs) as u64)
             )
         } else {
             String::new()
@@ -158,11 +164,7 @@ impl OperationsPanel {
                     .w(rems(14.))
                     .min_w_0()
                     .flex_none()
-                    .child(
-                        div()
-                            .truncate()
-                            .child(format!("{} {}", op.kind.verb(), op.label)),
-                    )
+                    .child(div().truncate().child(op.kind.title(&op.label)))
                     .child(
                         div()
                             .truncate()
@@ -259,11 +261,19 @@ impl Render for OperationsPanel {
             (m.running_count(), m.operations().len())
         };
         let title = if running > 0 {
-            format!("Operations · {running} running")
+            tn!(
+                "Operations · {n} running",
+                "Operations · {n} running",
+                running
+            )
         } else if total > 0 {
-            format!("Operations · {total} finished")
+            tn!(
+                "Operations · {n} finished",
+                "Operations · {n} finished",
+                total
+            )
         } else {
-            "Operations".to_string()
+            t!("Operations").to_string()
         };
 
         let rows: Vec<AnyElement> = {
@@ -305,7 +315,7 @@ impl Render for OperationsPanel {
                         Button::new("ops-clear")
                             .ghost()
                             .xsmall()
-                            .label("Clear finished")
+                            .label(t!("Clear finished"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.manager.update(cx, |m, cx| m.clear_finished(cx));
                             })),
@@ -332,7 +342,7 @@ impl Render for OperationsPanel {
                                 .p_3()
                                 .text_sm()
                                 .text_color(c.muted_foreground)
-                                .child("No operations yet. F5 copies, F6 moves, F8 deletes."),
+                                .child(t!("No operations yet. F5 copies, F6 moves, F8 deletes.")),
                         )
                     })
                     .children(rows),

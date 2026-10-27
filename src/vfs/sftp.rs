@@ -43,9 +43,9 @@ pub fn connect(
     };
     let user = if config.user.is_empty() {
         ssh.user.clone().ok_or_else(|| {
-            other(format!(
-                "{}: no user (set one, or in ~/.ssh/config)",
-                config.host
+            other(t!(
+                "{host}: no user (set one, or in ~/.ssh/config)",
+                host = config.host
             ))
         })?
     } else {
@@ -55,7 +55,7 @@ pub fn connect(
         .to_socket_addrs()
         .map_err(|e| other(format!("{address}: {e}")))?
         .next()
-        .ok_or_else(|| other(format!("{address}: no address")))?;
+        .ok_or_else(|| other(t!("{host}: no address", host = address)))?;
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| other(format!("{}: {e}", config.host)))?;
     let mut session = Session::new().map_err(|e| other(e.message().to_string()))?;
@@ -63,7 +63,7 @@ pub fn connect(
     session.set_timeout(IO_TIMEOUT_MS);
     session
         .handshake()
-        .map_err(|e| other(format!("handshake: {}", e.message())))?;
+        .map_err(|e| other(t!("handshake: {error}", error = e.message())))?;
     // The host key is not checked yet; log it so a change can at least be seen.
     if let Some((key, _)) = session.host_key() {
         log::info!("{}: host key {} bytes", config.host, key.len());
@@ -77,11 +77,11 @@ pub fn connect(
             };
             session
                 .userauth_password(user, password)
-                .map_err(|e| other(format!("password: {}", e.message())))?;
+                .map_err(|e| other(t!("password: {error}", error = e.message())))?;
         }
         AuthMethod::Key => {
             let Some(key) = &config.key else {
-                return Err(other("no key file set".into()));
+                return Err(other(t!("no key file set").into()));
             };
             session
                 .userauth_pubkey_file(user, None, key, password)
@@ -102,12 +102,12 @@ pub fn connect(
                 };
                 session
                     .userauth_password(user, password)
-                    .map_err(|e| other(format!("password: {}", e.message())))?;
+                    .map_err(|e| other(t!("password: {error}", error = e.message())))?;
             }
         }
     }
     if !session.authenticated() {
-        return Err(other("authentication failed".into()));
+        return Err(other(t!("authentication failed").into()));
     }
     let sftp = session
         .sftp()
@@ -138,7 +138,7 @@ fn default_keys(config: &ConnectionConfig, from_ssh_config: &[PathBuf]) -> Vec<P
 fn remote_path<'a>(conn: &ConnId, loc: &'a Location) -> io::Result<&'a Path> {
     match loc {
         Location::Remote { conn: c, path } if c == conn => Ok(Path::new(path)),
-        _ => Err(io::Error::other("not on this connection")),
+        _ => Err(io::Error::other(t!("not on this connection"))),
     }
 }
 

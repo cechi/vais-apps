@@ -119,18 +119,21 @@ pub struct ArchiveBackend {
 }
 
 fn read_only() -> io::Error {
-    io::Error::new(io::ErrorKind::PermissionDenied, "archives are read-only")
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        t!("archives are read-only"),
+    )
 }
 
 fn not_found() -> io::Error {
-    io::Error::new(io::ErrorKind::NotFound, "not in the archive")
+    io::Error::new(io::ErrorKind::NotFound, t!("not in the archive"))
 }
 
 /// The cache directory for archives.
 fn cache_root() -> io::Result<PathBuf> {
     directories::ProjectDirs::from("", "", "vais-commander")
         .map(|d| d.cache_dir().join("archives"))
-        .ok_or_else(|| io::Error::other("no cache directory"))
+        .ok_or_else(|| io::Error::other(t!("no cache directory")))
 }
 
 /// Remove extracted archives nobody has touched for a week.
@@ -167,8 +170,9 @@ fn table() -> &'static Table {
 pub fn open(outer: &Location) -> io::Result<Arc<dyn Backend>> {
     let name = outer
         .file_name()
-        .ok_or_else(|| io::Error::other("no archive name"))?;
-    let kind = kind_of(&name).ok_or_else(|| io::Error::other(format!("{name}: not an archive")))?;
+        .ok_or_else(|| io::Error::other(t!("no archive name")))?;
+    let kind = kind_of(&name)
+        .ok_or_else(|| io::Error::other(t!("{name}: not an archive", name = name)))?;
     let meta = super::backend_for(outer)?.stat(outer)?;
     if let Ok(table) = table().lock()
         && let Some((size, modified, backend)) = table.get(outer)
@@ -392,14 +396,14 @@ impl ArchiveBackend {
         use sevenz_rust2::{ArchiveReader, Error as SevenZError, Password};
         let describe = |err: SevenZError| match err {
             SevenZError::PasswordRequired | SevenZError::MaybeBadPassword(_) => {
-                io::Error::other("encrypted 7z archives are not supported")
+                io::Error::other(t!("encrypted 7z archives are not supported"))
             }
             // Built without AES: an encrypted archive shows up as a method.
             SevenZError::UnsupportedCompressionMethod(method) if method.starts_with("AES") => {
-                io::Error::other("encrypted 7z archives are not supported")
+                io::Error::other(t!("encrypted 7z archives are not supported"))
             }
             SevenZError::UnsupportedCompressionMethod(method) => {
-                io::Error::other(format!("unsupported 7z compression: {method}"))
+                io::Error::other(t!("unsupported 7z compression: {method}", method = method))
             }
             other => io::Error::other(other.to_string()),
         };
@@ -527,7 +531,7 @@ impl Backend for ArchiveBackend {
     fn read_dir(&self, dir: &Location, show_hidden: bool) -> io::Result<Vec<Entry>> {
         let (_, node) = self.node(dir)?;
         if node.kind != EntryKind::Dir {
-            return Err(io::Error::other("not a directory"));
+            return Err(io::Error::other(t!("not a directory")));
         }
         let inner = inner_path(&self.outer, dir).unwrap_or_default();
         let mut entries = Vec::with_capacity(node.children.len());
@@ -583,7 +587,7 @@ impl Backend for ArchiveBackend {
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn Read + Send>> {
         let (inner, node) = self.node(loc)?;
         if node.kind == EntryKind::Dir {
-            return Err(io::Error::other("is a directory"));
+            return Err(io::Error::other(t!("is a directory")));
         }
         let path = if self.zip.is_some() {
             self.extracted(inner, node)?

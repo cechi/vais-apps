@@ -29,7 +29,66 @@ struct DropMenu {
     _subscription: Subscription,
 }
 
-const READ_ONLY_ARCHIVE: &str = "Archives are read-only";
+fn read_only_archive() -> &'static str {
+    t!("Archives are read-only")
+}
+
+/// The name of a single entry, `None` for several.
+fn single_name(sources: &[Location]) -> Option<String> {
+    match sources {
+        [single] => Some(single.file_name().unwrap_or_else(|| single.display())),
+        _ => None,
+    }
+}
+
+/// "Copy report.pdf" / "Move 3 items": the destination palette's title.
+fn transfer_title(kind: OpKind, sources: &[Location]) -> String {
+    let n = sources.len();
+    match (kind == OpKind::Move, single_name(sources)) {
+        (false, Some(name)) => t!("Copy {name}", name = name),
+        (false, None) => tn!("Copy {n} item", "Copy {n} items", n),
+        (true, Some(name)) => t!("Move {name}", name = name),
+        (true, None) => tn!("Move {n} item", "Move {n} items", n),
+    }
+}
+
+/// The delete confirmation's title; `requester` names the agent asking.
+fn delete_title(permanent: bool, sources: &[Location], requester: Option<&str>) -> String {
+    let n = sources.len();
+    let name = single_name(sources);
+    match (requester, permanent, name) {
+        (None, true, Some(name)) => t!("Delete {name} permanently?", name = name),
+        (None, true, None) => tn!(
+            "Delete {n} item permanently?",
+            "Delete {n} items permanently?",
+            n
+        ),
+        (None, false, Some(name)) => t!("Move {name} to trash?", name = name),
+        (None, false, None) => tn!("Move {n} item to trash?", "Move {n} items to trash?", n),
+        (Some(who), true, Some(name)) => t!(
+            "{agent} wants to delete {name} permanently",
+            agent = who,
+            name = name
+        ),
+        (Some(who), true, None) => tn!(
+            "{agent} wants to delete {n} item permanently",
+            "{agent} wants to delete {n} items permanently",
+            n,
+            agent = who
+        ),
+        (Some(who), false, Some(name)) => t!(
+            "{agent} wants to move {name} to trash",
+            agent = who,
+            name = name
+        ),
+        (Some(who), false, None) => tn!(
+            "{agent} wants to move {n} item to trash",
+            "{agent} wants to move {n} items to trash",
+            n,
+            agent = who
+        ),
+    }
+}
 
 pub enum GridEvent {
     /// Something worth persisting (or showing in the tab title) changed.
@@ -281,7 +340,7 @@ impl GridView {
     fn selection(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Location>> {
         let paths = self.active_panel().read(cx).selected_paths();
         if paths.is_empty() {
-            self.notify(Notification::warning("Nothing selected"), window, cx);
+            self.notify(Notification::warning(t!("Nothing selected")), window, cx);
             return None;
         }
         Some(paths)
@@ -295,7 +354,7 @@ impl GridView {
             return;
         };
         let dest_default = self.target_panel().read(cx).path().display();
-        let title = format!("{} {}", kind.verb(), ops::describe(&sources));
+        let title = transfer_title(kind, &sources);
 
         // Rows in reading order; `panel_of[row]` maps a row back to its panel.
         let mut panel_of = Vec::new();
@@ -305,7 +364,7 @@ impl GridView {
             panel_of.push(ix);
             items.push(
                 PaletteItem::new(path)
-                    .detail(format!("Panel {}", ix + 1))
+                    .detail(t!("Panel {number}", number = ix + 1))
                     .icon(IconName::Folder),
             );
         }
@@ -314,27 +373,33 @@ impl GridView {
         let palette = cx.new(|cx| {
             let (confirm_view, select_view, cancel_view) = (view.clone(), view.clone(), view);
             let panel_of = Rc::new(panel_of);
-            Palette::new(items, &dest_default, "Destination directory", window, cx)
-                .on_select(move |row, _window, cx| {
-                    let target = row.and_then(|row| panel_of.get(row).copied());
-                    select_view.update(cx, |this, cx| this.set_highlight(target, cx));
-                })
-                .on_confirm(move |choice, window, cx| {
-                    window.close_dialog(cx);
-                    let (view, sources) = (confirm_view.clone(), sources.clone());
-                    window.defer(cx, move |window, cx| {
-                        view.update(cx, |this, cx| {
-                            this.set_highlight(None, cx);
-                            let dest = crate::panel::expand_path(&choice.value);
-                            this.confirm_transfer(kind, sources, dest, window, cx);
-                        });
+            Palette::new(
+                items,
+                &dest_default,
+                t!("Destination directory"),
+                window,
+                cx,
+            )
+            .on_select(move |row, _window, cx| {
+                let target = row.and_then(|row| panel_of.get(row).copied());
+                select_view.update(cx, |this, cx| this.set_highlight(target, cx));
+            })
+            .on_confirm(move |choice, window, cx| {
+                window.close_dialog(cx);
+                let (view, sources) = (confirm_view.clone(), sources.clone());
+                window.defer(cx, move |window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.set_highlight(None, cx);
+                        let dest = crate::panel::expand_path(&choice.value);
+                        this.confirm_transfer(kind, sources, dest, window, cx);
                     });
-                })
-                .on_cancel(move |window, cx| {
-                    window.close_dialog(cx);
-                    cancel_view.update(cx, |this, cx| this.set_highlight(None, cx));
-                })
-                .hint("No other panel in this layout — type a path")
+                });
+            })
+            .on_cancel(move |window, cx| {
+                window.close_dialog(cx);
+                cancel_view.update(cx, |this, cx| this.set_highlight(None, cx));
+            })
+            .hint(t!("No other panel in this layout — type a path"))
         });
         let initial = palette.read(cx).selected().and_then(|row| {
             (0..self.layout.count())
@@ -368,15 +433,15 @@ impl GridView {
     pub fn start_extract(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((archive, stem)) = self.archive_at_cursor(cx) else {
             self.notify(
-                Notification::warning("No archive under the cursor"),
+                Notification::warning(t!("No archive under the cursor")),
                 window,
                 cx,
             );
             return;
         };
-        let title = format!(
-            "Extract {}",
-            archive.file_name().unwrap_or_else(|| stem.clone())
+        let title = t!(
+            "Extract {name}",
+            name = archive.file_name().unwrap_or_else(|| stem.clone())
         );
 
         // Two rows per panel in reading order; `panel_of[row]` maps a row
@@ -386,7 +451,7 @@ impl GridView {
         let mut default = String::new();
         for ix in 0..self.layout.count() {
             let dir = self.panels[ix].read(cx).path().clone();
-            let label = format!("Panel {}", ix + 1);
+            let number = ix + 1;
             let here = dir.display();
             let folder = dir.join(&stem).display();
             if ix == self.active {
@@ -394,12 +459,12 @@ impl GridView {
             }
             items.push(
                 PaletteItem::new(here)
-                    .detail(label.clone())
+                    .detail(t!("Panel {number}", number = number))
                     .icon(IconName::Folder),
             );
             items.push(
                 PaletteItem::new(folder)
-                    .detail(format!("{label}, own folder"))
+                    .detail(t!("Panel {number}, own folder", number = number))
                     .icon(IconName::FolderOpen),
             );
             panel_of.extend([ix, ix]);
@@ -409,7 +474,7 @@ impl GridView {
         let palette = cx.new(|cx| {
             let (confirm_view, select_view, cancel_view) = (view.clone(), view.clone(), view);
             let panel_of = Rc::new(panel_of);
-            Palette::new(items, &default, "Destination directory", window, cx)
+            Palette::new(items, &default, t!("Destination directory"), window, cx)
                 .on_select(move |row, _window, cx| {
                     let target = row.and_then(|row| panel_of.get(row).copied());
                     select_view.update(cx, |this, cx| this.set_highlight(target, cx));
@@ -450,7 +515,7 @@ impl GridView {
         cx: &mut Context<Self>,
     ) {
         if dest.is_archive() {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            self.notify(Notification::error(read_only_archive()), window, cx);
             return;
         }
         // Listing the root unpacks a tar or reads the zip index: not on the
@@ -475,7 +540,7 @@ impl GridView {
                     }
                 };
                 if sources.is_empty() {
-                    let message = format!("{} is empty", archive.display());
+                    let message = t!("{archive} is empty", archive = archive.display());
                     this.notify(Notification::info(message), window, cx);
                     return;
                 }
@@ -541,13 +606,13 @@ impl GridView {
                 }
             };
         if dest.is_archive() {
-            reject(self, READ_ONLY_ARCHIVE.to_string(), window, cx);
+            reject(self, read_only_archive().to_string(), window, cx);
             return;
         }
         if kind == OpKind::Move && sources.iter().any(Location::is_archive) {
             reject(
                 self,
-                "Cannot move out of an archive: copy instead".to_string(),
+                t!("Cannot move out of an archive: copy instead").to_string(),
                 window,
                 cx,
             );
@@ -559,7 +624,7 @@ impl GridView {
         if !is_dir {
             reject(
                 self,
-                format!("{} is not a directory", dest.display()),
+                t!("{path} is not a directory", path = dest.display()),
                 window,
                 cx,
             );
@@ -586,35 +651,34 @@ impl GridView {
             .take(5)
             .filter_map(Location::file_name)
             .collect();
-        let description = format!(
-            "{} already exist{} in {}: {}{}",
+        let mut list = names.join(", ");
+        if conflicts.len() > names.len() {
+            list.push_str(", …");
+        }
+        let description = tn!(
+            "{n} already exists in {dir}: {names}",
+            "{n} already exist in {dir}: {names}",
             conflicts.len(),
-            if conflicts.len() == 1 { "s" } else { "" },
-            request
+            dir = request
                 .dest
                 .as_ref()
                 .map(Location::display)
                 .unwrap_or_default(),
-            names.join(", "),
-            if conflicts.len() > names.len() {
-                ", …"
-            } else {
-                ""
-            }
+            names = list
         );
         let overwrite = request.clone_with_overwrite(true);
         let view = cx.entity();
         let on_cancel_outcome = on_outcome.clone();
         let title = if on_outcome.is_some() {
-            "Agent: files already exist".to_string()
+            t!("Agent: files already exist").to_string()
         } else {
-            "Files already exist".to_string()
+            t!("Files already exist").to_string()
         };
         let palette = cx.new(|cx| {
             let items = vec![
-                PaletteItem::new("Overwrite").danger(true),
-                PaletteItem::new("Skip existing"),
-                PaletteItem::new("Cancel"),
+                PaletteItem::new(t!("Overwrite")).danger(true),
+                PaletteItem::new(t!("Skip existing")),
+                PaletteItem::new(t!("Cancel")),
             ];
             Palette::pick(items, cx)
                 .description(description)
@@ -692,11 +756,11 @@ impl GridView {
         let menu = PopupMenu::build(window, cx, |menu, _window, _cx| {
             let (run_move, run_copy) = (run.clone(), run.clone());
             menu.item(
-                PopupMenuItem::new("Move here")
+                PopupMenuItem::new(t!("Move here"))
                     .on_click(move |_, window, cx| run_move(OpKind::Move, window, cx)),
             )
             .item(
-                PopupMenuItem::new("Copy here")
+                PopupMenuItem::new(t!("Copy here"))
                     .on_click(move |_, window, cx| run_copy(OpKind::Copy, window, cx)),
             )
         });
@@ -735,9 +799,13 @@ impl GridView {
         cx: &mut Context<Self>,
     ) {
         if sources.iter().any(Location::is_archive) {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            self.notify(Notification::error(read_only_archive()), window, cx);
             if let Some(cb) = &on_outcome {
-                cb(Outcome::Rejected(READ_ONLY_ARCHIVE.to_string()), window, cx);
+                cb(
+                    Outcome::Rejected(read_only_archive().to_string()),
+                    window,
+                    cx,
+                );
             }
             return;
         }
@@ -758,14 +826,7 @@ impl GridView {
                 ""
             }
         );
-        let title = match &requester {
-            Some(who) => format!(
-                "{who} wants to {} {}",
-                kind.verb().to_lowercase(),
-                ops::describe(&sources)
-            ),
-            None => format!("{} {}?", kind.verb(), ops::describe(&sources)),
-        };
+        let title = delete_title(permanent, &sources, requester.as_deref());
         let request = Request {
             kind,
             sources,
@@ -777,12 +838,12 @@ impl GridView {
         let palette = cx.new(|cx| {
             let items = vec![
                 PaletteItem::new(if permanent {
-                    "Delete permanently"
+                    t!("Delete permanently")
                 } else {
-                    "Move to trash"
+                    t!("Move to trash")
                 })
                 .danger(permanent),
-                PaletteItem::new("Cancel"),
+                PaletteItem::new(t!("Cancel")),
             ];
             Palette::pick(items, cx)
                 .description(description)
@@ -810,10 +871,10 @@ impl GridView {
 
     pub fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let base = self.active_panel().read(cx).path().clone();
-        let hint = format!("in {}", base.display());
+        let hint = t!("in {dir}", dir = base.display());
         let view = cx.entity();
         let palette = cx.new(|cx| {
-            Palette::new(Vec::new(), "", "New folder name", window, cx)
+            Palette::new(Vec::new(), "", t!("New folder name"), window, cx)
                 .hint(hint)
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
@@ -826,7 +887,7 @@ impl GridView {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("New folder".to_string(), palette, window, cx);
+        palette::open(t!("New folder").to_string(), palette, window, cx);
     }
 
     fn make_dir(
@@ -853,7 +914,7 @@ impl GridView {
         cx: &mut Context<Self>,
     ) -> Result<Location, String> {
         if base.is_archive() {
-            return Err(READ_ONLY_ARCHIVE.to_string());
+            return Err(read_only_archive().to_string());
         }
         let path = base.join(name);
         backend_for(base)
@@ -873,7 +934,7 @@ impl GridView {
     pub fn start_edit(&mut self, readonly: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self.active_panel().read(cx).current_path() else {
             self.notify(
-                Notification::warning("Nothing under the cursor"),
+                Notification::warning(t!("Nothing under the cursor")),
                 window,
                 cx,
             );
@@ -903,7 +964,7 @@ impl GridView {
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let marked = self.active_panel().read(cx).selected_paths();
         if marked.iter().any(Location::is_archive) {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            self.notify(Notification::error(read_only_archive()), window, cx);
             return;
         }
         if marked.len() > 1 {
@@ -915,17 +976,17 @@ impl GridView {
         let old_name = panel.current_path().and_then(|p| p.file_name());
         let is_dir = panel.state.current().is_some_and(|e| e.is_dir());
         let (Some(old_name), Some(from)) = (old_name, panel.current_path()) else {
-            self.notify(Notification::warning("Nothing to rename"), window, cx);
+            self.notify(Notification::warning(t!("Nothing to rename")), window, cx);
             return;
         };
         let base = from.parent().unwrap_or_else(|| from.clone());
-        let hint = format!("in {}", base.display());
+        let hint = t!("in {dir}", dir = base.display());
 
         let view = cx.entity();
         let palette = cx.new(|cx| {
             let (confirm_view, old) = (view, old_name.clone());
             let base_for_confirm = base.clone();
-            Palette::new(Vec::new(), &old_name, "New name", window, cx)
+            Palette::new(Vec::new(), &old_name, t!("New name"), window, cx)
                 .input_icon(Some(if is_dir {
                     IconName::Folder
                 } else {
@@ -946,7 +1007,7 @@ impl GridView {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open(format!("Rename {old_name}"), palette, window, cx);
+        palette::open(t!("Rename {name}", name = old_name), palette, window, cx);
     }
 
     fn rename(
@@ -975,15 +1036,15 @@ impl GridView {
         cx: &mut Context<Self>,
     ) -> Result<Location, String> {
         if base.is_archive() {
-            return Err(READ_ONLY_ARCHIVE.to_string());
+            return Err(read_only_archive().to_string());
         }
         let (from, to) = (base.join(old_name), base.join(new_name));
         backend_for(base)
             .and_then(|backend| {
                 if backend.exists(&to) {
-                    Err(std::io::Error::other(
-                        "a file with that name already exists",
-                    ))
+                    Err(std::io::Error::other(t!(
+                        "a file with that name already exists"
+                    )))
                 } else {
                     backend.rename(&from, &to)
                 }
@@ -1082,7 +1143,7 @@ impl GridView {
         let clip = clipboard::get(cx);
         if clip.is_empty() {
             if !self.paste_image(window, cx) {
-                self.notify(Notification::warning("Nothing to paste"), window, cx);
+                self.notify(Notification::warning(t!("Nothing to paste")), window, cx);
             }
             return;
         }
@@ -1098,7 +1159,11 @@ impl GridView {
             self.clipboard_changed(cx);
         }
         if sources.is_empty() {
-            self.notify(Notification::info("Already in this directory"), window, cx);
+            self.notify(
+                Notification::info(t!("Already in this directory")),
+                window,
+                cx,
+            );
             return;
         }
         let kind = if clip.cut { OpKind::Move } else { OpKind::Copy };
@@ -1120,12 +1185,12 @@ impl GridView {
         };
         let dest = self.active_panel().read(cx).path().clone();
         if dest.is_archive() {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            self.notify(Notification::error(read_only_archive()), window, cx);
             return true;
         }
         if dest.is_roots() {
             self.notify(
-                Notification::error("Pick a directory to save the image in"),
+                Notification::error(t!("Pick a directory to save the image in")),
                 window,
                 cx,
             );
@@ -1136,10 +1201,10 @@ impl GridView {
             "clipboard-{}.{extension}",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
         );
-        let description = format!(
-            "{} image, {}",
-            extension.to_uppercase(),
-            crate::fs::format::human_size(image.bytes.len() as u64)
+        let description = t!(
+            "{format} image, {size}",
+            format = extension.to_uppercase(),
+            size = crate::fs::format::human_size(image.bytes.len() as u64)
         );
         let bytes = std::sync::Arc::new(image.bytes);
         let view = cx.entity();
@@ -1147,13 +1212,15 @@ impl GridView {
         // Two buttons under the name: Enter on the input or the Save row
         // saves, the Cancel row (or Esc) does nothing.
         let rows = vec![
-            PaletteItem::new("Save").value("").icon(IconName::Check),
-            PaletteItem::new("Cancel").value("").icon(IconName::Close),
+            PaletteItem::new(t!("Save")).value("").icon(IconName::Check),
+            PaletteItem::new(t!("Cancel"))
+                .value("")
+                .icon(IconName::Close),
         ];
         const CANCEL_ROW: usize = 1;
         let palette = cx.new(|cx| {
-            let (dest_for_confirm, hint) = (dest.clone(), format!("in {}", dest.display()));
-            Palette::new(rows, &default, "File name", window, cx)
+            let (dest_for_confirm, hint) = (dest.clone(), t!("in {dir}", dir = dest.display()));
+            Palette::new(rows, &default, t!("File name"), window, cx)
                 .input_icon(Some(IconName::File))
                 .description(description)
                 .hint(hint)
@@ -1174,7 +1241,7 @@ impl GridView {
                 })
                 .on_cancel(|window, cx| window.close_dialog(cx))
         });
-        palette::open("Save image from clipboard".into(), palette, window, cx);
+        palette::open(t!("Save image from clipboard").into(), palette, window, cx);
         true
     }
 
@@ -1187,13 +1254,16 @@ impl GridView {
         cx: &mut Context<Self>,
     ) {
         if name.is_empty() || name.contains(['/', '\\']) {
-            self.notify(Notification::error("Not a valid file name"), window, cx);
+            self.notify(Notification::error(t!("Not a valid file name")), window, cx);
             return;
         }
         let target = dest.join(&name);
         if backend_for(&target).is_ok_and(|b| b.exists(&target)) {
             self.notify(
-                Notification::error(format!("{name}: a file with that name already exists")),
+                Notification::error(t!(
+                    "{name}: a file with that name already exists",
+                    name = name
+                )),
                 window,
                 cx,
             );
@@ -1209,7 +1279,11 @@ impl GridView {
             this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => {
                     this.refresh_active(Some(target), cx);
-                    this.notify(Notification::success(format!("Saved {name}")), window, cx);
+                    this.notify(
+                        Notification::success(t!("Saved {name}", name = name)),
+                        window,
+                        cx,
+                    );
                 }
                 Err(err) => this.notify(Notification::error(format!("{name}: {err}")), window, cx),
             })
@@ -1246,14 +1320,16 @@ impl GridView {
             })
             .unwrap_or_else(|| "*".to_string());
         let title = if on {
-            "Mark entries matching"
+            t!("Mark entries matching")
         } else {
-            "Unmark entries matching"
+            t!("Unmark entries matching")
         };
         let len = default.len();
         let palette = cx.new(|cx| {
-            Palette::new(Vec::new(), &default, "Pattern (* and ?)", window, cx)
-                .hint("Case-insensitive; text without wildcards matches anywhere in the name")
+            Palette::new(Vec::new(), &default, t!("Pattern (* and ?)"), window, cx)
+                .hint(t!(
+                    "Case-insensitive; text without wildcards matches anywhere in the name"
+                ))
                 .select_range(0..len)
                 .on_confirm(move |choice, window, cx| {
                     window.close_dialog(cx);
@@ -1285,7 +1361,7 @@ impl GridView {
     }
     fn on_mkdir(&mut self, _: &MakeDir, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_panel().read(cx).path().is_archive() {
-            self.notify(Notification::error(READ_ONLY_ARCHIVE), window, cx);
+            self.notify(Notification::error(read_only_archive()), window, cx);
             return;
         }
         self.start_mkdir(window, cx);

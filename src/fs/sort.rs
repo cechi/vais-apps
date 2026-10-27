@@ -24,16 +24,6 @@ impl SortKey {
         SortKey::Modified,
         SortKey::Created,
     ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            SortKey::Name => "Name",
-            SortKey::Size => "Size",
-            SortKey::Type => "Type",
-            SortKey::Modified => "Modified",
-            SortKey::Created => "Created",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
