@@ -2,7 +2,7 @@
 
 What changed in each release of VAIS Commander, newest first.
 
-## Unreleased
+## 0.4.2 - 2026-10-27
 
 ### Added
 
