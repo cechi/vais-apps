@@ -16,6 +16,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # The repository has one "Latest" release: only this app's releases take it,
+  # so /releases/latest/download/... keeps pointing at it.
+  LATEST_APP: vais-commander
 
 jobs:
   build:
@@ -96,6 +99,9 @@ jobs:
         run: |
           app="${GITHUB_REF_NAME%-v*}"
           version="${GITHUB_REF_NAME##*-v}"
+          # The title: the app's name from the first heading of its README.
+          title=$(grep -m1 '^# ' "apps/$app/README.md" | sed 's/^# //')
+          echo "name=${title:-$app} $version" >> "$GITHUB_OUTPUT"
           changelog="apps/$app/CHANGELOG.md"
           awk -v h="## $version - " 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' \
             "$changelog" > release-notes.md
@@ -107,6 +113,8 @@ jobs:
           # A version with a suffix (0.5.0-beta.1) is a pre-release.
           [[ $version == *-* ]] && pre=true || pre=false
           echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+          [[ $app == "$LATEST_APP" && $pre == false ]] && latest=true || latest=false
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -115,7 +123,10 @@ jobs:
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.notes.outputs.name }}
           files: dist/*
+          # Only the CHANGELOG.md section: GitHub's generated notes run from the
+          # previous tag of any app, so they would mix the apps' commits.
           body_path: release-notes.md
-          generate_release_notes: true
           prerelease: ${{ steps.notes.outputs.prerelease }}
+          make_latest: ${{ steps.notes.outputs.latest }}
