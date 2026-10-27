@@ -496,3 +496,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  Буфер обміну: {clipboard}"
 "{title} has unsaved changes." = "{title} містить незбережені зміни."
 "{value}: not a hex color" = "{value}: не шістнадцятковий колір"
+"Windows Context Menu" = "Контекстне меню Windows"

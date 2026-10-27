@@ -440,6 +440,10 @@ pub fn command_labels() -> Vec<String> {
             labels.push(detail);
         }
     }
+    // Bound on some platforms only, translated in every catalog all the same.
+    labels.push(command_name(&WindowsContextMenu));
+    labels.sort();
+    labels.dedup();
     labels
 }
 

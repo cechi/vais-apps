@@ -497,3 +497,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  Schránka: {clipboard}"
 "{title} has unsaved changes." = "{title} obsahuje neuložené změny."
 "{value}: not a hex color" = "{value}: není šestnáctková barva"
+"Windows Context Menu" = "Kontextové menu Windows"

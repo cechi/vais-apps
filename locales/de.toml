@@ -496,3 +496,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  Zwischenablage: {clipboard}"
 "{title} has unsaved changes." = "{title} enthält ungespeicherte Änderungen."
 "{value}: not a hex color" = "{value}: keine Hex-Farbe"
+"Windows Context Menu" = "Windows-Kontextmenü"

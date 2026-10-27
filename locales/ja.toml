@@ -496,3 +496,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  クリップボード：{clipboard}"
 "{title} has unsaved changes." = "{title} には未保存の変更があります。"
 "{value}: not a hex color" = "{value}：16 進数の色ではありません"
+"Windows Context Menu" = "Windows のコンテキストメニュー"

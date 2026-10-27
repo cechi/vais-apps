@@ -496,3 +496,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  Área de transferência: {clipboard}"
 "{title} has unsaved changes." = "{title} tem alterações não salvas."
 "{value}: not a hex color" = "{value}: não é uma cor hexadecimal"
+"Windows Context Menu" = "Menu de contexto do Windows"

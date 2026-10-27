@@ -496,3 +496,4 @@
 "{status}  ·  Clipboard: {clipboard}" = "{status}  ·  剪贴板：{clipboard}"
 "{title} has unsaved changes." = "{title} 有未保存的更改。"
 "{value}: not a hex color" = "{value}：不是十六进制颜色"
+"Windows Context Menu" = "Windows 上下文菜单"
