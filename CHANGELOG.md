@@ -2,6 +2,14 @@
 
 What changed in each release of VAIS Commander, newest first.
 
+## Unreleased
+
+### Fixed
+
+- Agents started from the Agents panel get the VAIS MCP server again after
+  the program file was replaced while the app ran (an update or a rebuild);
+  they were launched without it.
+
 ## 0.4.2 - 2026-10-27
 
 ### Added

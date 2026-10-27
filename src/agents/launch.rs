@@ -3,6 +3,7 @@
 //! `vais-commander --mcp` for that one session, plus the directory it runs in.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use serde_json::json;
 
@@ -24,11 +25,9 @@ pub fn plan(agent: &Agent, cwd: Option<PathBuf>, bridge_env: &[(String, String)]
         cwd: Some(cwd.clone()),
         env: bridge_env.to_vec(),
     };
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.canonicalize().ok())
-        .map(|p| p.to_string_lossy().into_owned());
+    let exe = exe();
     let with_mcp = !bridge_env.is_empty() && agent.kind.supports_mcp();
+    log::debug!("launch {agent:?}: exe {exe:?}, bridge {:?}", bridge_env);
     match agent.kind {
         AgentKind::Shell => {
             if cfg!(target_os = "macos") {
@@ -94,6 +93,32 @@ pub fn plan(agent: &Agent, cwd: Option<PathBuf>, bridge_env: &[(String, String)]
     launch
 }
 
+/// This program's path, for the agents to start `--mcp` from.
+static EXE: OnceLock<Option<String>> = OnceLock::new();
+
+/// Take the program's path now, at startup, while the file is surely there.
+pub fn remember_exe() {
+    exe();
+}
+
+fn exe() -> Option<&'static str> {
+    EXE.get_or_init(|| resolve_exe(std::env::current_exe().ok()?))
+        .as_deref()
+}
+
+/// The canonical path of `exe`. A binary replaced while the app runs (an
+/// update, a rebuild) is reported by Linux as "<path> (deleted)"; the new
+/// file at the same path serves, as the MCP server only talks to the bridge.
+fn resolve_exe(exe: PathBuf) -> Option<String> {
+    let exe = match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(path) => PathBuf::from(path),
+        None => exe,
+    };
+    exe.canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 fn toml_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -116,7 +141,7 @@ fn gemini_settings(exe: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::plan;
+    use super::{plan, resolve_exe};
     use crate::agents::detect::{Agent, AgentKind};
     use std::path::PathBuf;
 
@@ -136,6 +161,21 @@ mod tests {
         assert_eq!(launch.args[3], "mcp__vais__*");
         assert_eq!(launch.cwd.as_deref(), Some(std::path::Path::new("/tmp")));
         assert!(launch.env.iter().any(|(k, _)| k == "VAIS_BRIDGE"));
+    }
+
+    #[test]
+    fn a_replaced_binary_resolves_to_the_new_file() {
+        let file = std::env::temp_dir().join(format!("vais-exe-{}", std::process::id()));
+        std::fs::write(&file, b"").unwrap();
+        let deleted = PathBuf::from(format!("{} (deleted)", file.display()));
+        let expected = file.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(resolve_exe(deleted).as_deref(), Some(expected.as_str()));
+        assert_eq!(
+            resolve_exe(file.clone()).as_deref(),
+            Some(expected.as_str())
+        );
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(resolve_exe(file), None);
     }
 
     #[test]

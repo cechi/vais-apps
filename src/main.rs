@@ -61,6 +61,9 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--mcp") {
         std::process::exit(mcp::run());
     }
+    // The agents start `--mcp` from this path; taken before the binary can
+    // be replaced under the running app.
+    agents::launch::remember_exe();
     let config = Config::load();
     // `vais-commander --portal`: the file chooser backend of xdg-desktop-portal
     // (a separate process without a main window).
