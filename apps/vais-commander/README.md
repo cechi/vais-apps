@@ -19,8 +19,9 @@ programs (a download finishing, a build writing files) without a manual reload.
 
 ## Install
 
-Prebuilt binaries are on the [Releases](https://github.com/cechi/vais-commander/releases) page,
-with `SHA256SUMS` next to them.
+Prebuilt binaries are on the [Releases](https://github.com/cechi/vais-apps/releases) page
+(the `vais-commander-v…` ones; the latest is always
+[here](https://github.com/cechi/vais-apps/releases/latest)), with `SHA256SUMS` next to them.
 
 - **Linux (x86_64)**: extract `vais-commander-<version>-x86_64-linux.tar.gz` and run
   `./install.sh` inside it (binary to `~/.local/bin`, launcher entry and icon to

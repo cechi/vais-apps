@@ -486,10 +486,10 @@ impl Render for SettingsView {
                                 Button::new("settings-github")
                                     .link()
                                     .small()
-                                    .label("github.com/cechi/vais-commander")
+                                    .label("github.com/cechi/vais-apps")
                                     .on_click(|_, _, _| {
                                         let _ = open::that_detached(
-                                            "https://github.com/cechi/vais-commander",
+                                            "https://github.com/cechi/vais-apps/tree/master/apps/vais-commander",
                                         );
                                     }),
                             )
