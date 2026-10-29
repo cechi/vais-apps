@@ -4,8 +4,10 @@ pub mod preview;
 pub mod state;
 pub mod view;
 
+use std::cell::Cell;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::vfs::Location;
 use std::sync::Arc;
@@ -39,7 +41,7 @@ use crate::settings::FileIcons;
 use crate::ui::{h_flex, v_flex};
 use preview::PreviewPane;
 use state::{Filter, PanelState};
-use view::{Column, Columns, PreviewMode, ViewMode};
+use view::{Column, ColumnWidths, Columns, PreviewMode, ViewMode};
 
 /// Row height in rems, so the list follows the UI scale.
 pub const ROW_HEIGHT_REMS: f32 = 1.5;
@@ -57,7 +59,22 @@ pub struct MarqueeDrag {
     panel: usize,
 }
 
-/// Invisible drag preview for the rubber band.
+/// Payload of a column edge drag in the header: which panel owns it.
+#[derive(Clone, Copy, Debug)]
+pub struct ColumnResizeDrag {
+    panel: usize,
+}
+
+/// A column edge being dragged: the column (`None` is the name), where the
+/// press was and the column's width then.
+#[derive(Clone, Copy, Debug)]
+struct ColumnResize {
+    column: Option<Column>,
+    start_x: Pixels,
+    start_width: Pixels,
+}
+
+/// Invisible drag preview for the rubber band and the column edges.
 struct EmptyPreview;
 
 impl Render for EmptyPreview {
@@ -160,6 +177,10 @@ pub struct FilePanel {
     pick: Option<PickMode>,
     view: ViewMode,
     columns: Columns,
+    column_resize: Option<ColumnResize>,
+    /// The width of the name column's header at the last paint: where a
+    /// drag starts from while the name fills the rest of the row.
+    name_head_width: Rc<Cell<Pixels>>,
     /// The preview of the cursor entry: where, and its share of the panel.
     preview: PreviewMode,
     preview_size: f32,
@@ -280,6 +301,8 @@ impl FilePanel {
             pick: None,
             view: cfg.view,
             columns: cfg.columns,
+            column_resize: None,
+            name_head_width: Rc::new(Cell::new(px(0.))),
             preview: cfg.preview,
             preview_size: clamp_preview_size(cfg.preview_size),
             preview_split: cx.new(|_| ResizableState::default()),
@@ -365,6 +388,12 @@ impl FilePanel {
         }
         let leaving_full = self.view == ViewMode::Full;
         self.view = mode;
+        // Only the full view scrolls sideways.
+        let handle = self.scroll.0.borrow().base_handle.clone();
+        let offset = handle.offset();
+        if offset.x != px(0.) {
+            handle.set_offset(point(px(0.), offset.y));
+        }
         if leaving_full && !self.state.expanded.is_empty() {
             self.state.expanded.clear();
             self.reload(cx);
@@ -484,6 +513,45 @@ impl FilePanel {
         self.columns.toggle(action.column);
         cx.emit(PanelEvent::Changed);
         cx.notify();
+    }
+
+    fn on_reset_column_widths(
+        &mut self,
+        _: &ResetColumnWidths,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.columns.widths = ColumnWidths::default();
+        cx.emit(PanelEvent::Changed);
+        cx.notify();
+    }
+
+    /// Set the width of `column` (`None` is the name), `None` for automatic.
+    fn set_column_width(
+        &mut self,
+        column: Option<Column>,
+        width: Option<f32>,
+        cx: &mut Context<Self>,
+    ) {
+        self.columns.widths.set(column, width);
+        cx.emit(PanelEvent::Changed);
+        cx.notify();
+    }
+
+    /// A column edge was dragged to `x`. The first drag fixes the name's
+    /// width as it is: from then on the list keeps its width, so the edge
+    /// follows the mouse, and scrolls sideways when it is wider than the panel.
+    fn resize_column(&mut self, x: Pixels, window: &Window, cx: &mut Context<Self>) {
+        let Some(resize) = self.column_resize else {
+            return;
+        };
+        let rem = window.rem_size();
+        if self.columns.widths.name.is_none() {
+            let name = self.name_head_width.get();
+            self.columns.widths.set(None, Some(name / rem));
+        }
+        let width = (resize.start_width + (x - resize.start_x)) / rem;
+        self.set_column_width(resize.column, Some(width), cx);
     }
 
     // ----- loading -------------------------------------------------------
@@ -1878,9 +1946,10 @@ impl FilePanel {
         })
     }
 
-    /// Right-click menu of the column header: which columns to show.
+    /// Right-click menu of the column header: which columns to show, and
+    /// back to the default widths once some were dragged.
     fn columns_menu(menu: PopupMenu, focus: FocusHandle, columns: Columns) -> PopupMenu {
-        Column::ALL.iter().filter(|c| c.available()).fold(
+        let menu = Column::ALL.iter().filter(|c| c.available()).fold(
             menu.action_context(focus),
             |menu, &column| {
                 menu.menu_with_check(
@@ -1889,14 +1958,21 @@ impl FilePanel {
                     Box::new(ToggleColumn { column }),
                 )
             },
-        )
+        );
+        if columns.widths.is_auto() {
+            menu
+        } else {
+            menu.separator()
+                .menu(t!("Reset column widths"), Box::new(ResetColumnWidths))
+        }
     }
 
     // ----- rendering -----------------------------------------------------
 
     /// A column header: click sorts by that column (when it can), a second
     /// click flips the direction. The active column is highlighted and shows
-    /// an arrow. `None` is the name column, which fills the rest.
+    /// an arrow. `None` is the name column, which fills the rest until it is
+    /// given a width. The edge on the right is dragged to change the width.
     fn render_column_head(
         &self,
         column: Option<Column>,
@@ -1904,19 +1980,16 @@ impl FilePanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sort = self.state.sort;
-        let (label, key, width, right) = match column {
-            None => (t!("Name"), Some(SortKey::Name), None, false),
-            Some(col) => (
-                col.label(),
-                col.sort_key(),
-                Some(col.width_rems()),
-                col.right_aligned(),
-            ),
+        let (label, key, right) = match column {
+            None => (t!("Name"), Some(SortKey::Name), false),
+            Some(col) => (col.label(), col.sort_key(), col.right_aligned()),
         };
         let active = key.is_some() && key == Some(sort.key);
         let id = column.map(|c| c as usize + 1).unwrap_or(0);
         let mut cell = h_flex()
             .id(("column-head", id))
+            .flex_1()
+            .min_w_0()
             .h_full()
             .items_center()
             .gap_0p5()
@@ -1925,10 +1998,6 @@ impl FilePanel {
                     .hover(|s| s.text_color(c.foreground))
                     .on_click(cx.listener(move |this, _, _, cx| this.sort_by(key, cx)))
             });
-        cell = match width {
-            Some(w) => cell.w(rems(w)).flex_none(),
-            None => cell.flex_1().min_w(rems(NAME_MIN_REMS)),
-        };
         if right {
             cell = cell.justify_end();
         }
@@ -1943,13 +2012,86 @@ impl FilePanel {
             .size_3()
             .flex_none()
         });
+        let label = div().min_w_0().truncate().child(label);
         // Right-aligned columns put the arrow before the label so the label
         // stays flush with the numbers below it.
-        if right {
-            cell.children(arrow).child(label).into_any_element()
+        let cell = if right {
+            cell.children(arrow).child(label)
         } else {
-            cell.child(label).children(arrow).into_any_element()
-        }
+            cell.child(label).children(arrow)
+        };
+
+        let head = div().relative().h_full().flex().flex_row();
+        let head = match column {
+            Some(col) => head.w(rems(self.columns.width(col))).flex_none(),
+            // The name's head has the gaps of the row's mark bar, depth,
+            // chevron and icon, so that its width is the name cell's.
+            None => {
+                let measured = self.name_head_width.clone();
+                name_width(&self.columns.widths, head.gap_2())
+                    .child(div().flex_none().w(px(3.)))
+                    .child(div().flex_none())
+                    .child(div().flex_none().w(rems(1.)))
+                    .child(div().flex_none().size_4())
+                    .child(
+                        canvas(
+                            move |bounds, _, _| measured.set(bounds.size.width),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    )
+            }
+        };
+        head.child(cell)
+            .child(self.render_column_edge(column, c, cx))
+            .into_any_element()
+    }
+
+    /// The handle on a column's right edge, over the gap to the next one:
+    /// dragging changes the width, a double click sets it back to automatic.
+    fn render_column_edge(
+        &self,
+        column: Option<Column>,
+        c: &Colors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let id = column.map(|c| c as usize + 1).unwrap_or(0);
+        div()
+            .id(("column-edge", id))
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(rems(-0.5))
+            .w(rems(0.5))
+            .cursor_col_resize()
+            .hover(|s| s.bg(c.border))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, ev: &MouseDownEvent, window, _cx| {
+                    let rem = window.rem_size();
+                    let start_width = match (column, this.columns.widths.name) {
+                        (Some(col), _) => rem * this.columns.width(col),
+                        (None, Some(name)) => rem * name,
+                        (None, None) => this.name_head_width.get(),
+                    };
+                    this.column_resize = Some(ColumnResize {
+                        column,
+                        start_x: ev.position.x,
+                        start_width,
+                    });
+                }),
+            )
+            .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                if ev.click_count() == 2 {
+                    this.set_column_width(column, None, cx);
+                }
+            }))
+            .on_drag(ColumnResizeDrag { panel: self.index }, |_, _, _, cx| {
+                cx.new(|_| EmptyPreview)
+            })
     }
 
     /// Colours of an entry's row or cell: the cursor gets a strong tint and a
@@ -2295,21 +2437,18 @@ impl FilePanel {
             .border_1()
             .border_color(look.outline)
             .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
-            .child(div().flex_none().w(px(3.)).h_full().bg(bar))
-            .child(div().flex_none().w(rems(entry.depth as f32)))
-            .child(chevron)
-            .child(div().size_4().flex_none().child(icon))
             .child(
-                div()
-                    .flex_1()
-                    .min_w(rems(NAME_MIN_REMS))
-                    .truncate()
-                    .child(name),
+                name_width(&self.columns.widths, h_flex().h_full().gap_2())
+                    .child(div().flex_none().w(px(3.)).h_full().bg(bar))
+                    .child(div().flex_none().w(rems(entry.depth as f32)))
+                    .child(chevron)
+                    .child(div().size_4().flex_none().child(icon))
+                    .child(div().flex_1().min_w_0().truncate().child(name)),
             )
             .children(self.columns.shown().map(|column| {
                 let (text, color) = column_value(column, entry, &look, c);
                 div()
-                    .w(rems(column.width_rems()))
+                    .w(rems(self.columns.width(column)))
                     .flex_none()
                     .truncate()
                     .when(column.right_aligned(), |d| d.text_right())
@@ -2559,9 +2698,35 @@ impl Render for FilePanel {
             }),
         )
         .track_scroll(&self.scroll)
+        // The full view is as wide as its columns and scrolls sideways.
+        .when(self.view == ViewMode::Full, |list| {
+            list.with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+        })
         .flex_1()
         .min_h_0()
         .w_full();
+
+        // The sideways scroll the header follows. The list clamps it only
+        // when it is laid out, after the header (to the last frame's limit
+        // here): a check behind the list renders again when the header was off.
+        let header_offset_x = {
+            let handle = &self.scroll.0.borrow().base_handle;
+            handle.offset().x.max(-handle.max_offset().x)
+        };
+        let header_sync = (self.view == ViewMode::Full).then(|| {
+            let scroll = self.scroll.clone();
+            let panel = cx.entity_id();
+            canvas(
+                move |_, window, _| {
+                    if scroll.0.borrow().base_handle.offset().x != header_offset_x {
+                        window.on_next_frame(move |_, cx| cx.notify(panel));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_0()
+        });
 
         // The column header belongs to the full view only.
         let column_header = if self.view == ViewMode::Full {
@@ -2569,23 +2734,45 @@ impl Render for FilePanel {
                 .chain(self.columns.shown().map(Some))
                 .map(|column| self.render_column_head(column, &colors, cx))
                 .collect();
+            // The heads follow the rows: the same padding and border, and the
+            // list's sideways scroll, which also widens the rows.
+            let width = self.list_geometry().0.size.width;
+            let heads = h_flex()
+                .h_full()
+                .pl_1()
+                .pr_2()
+                .gap_2()
+                .border_x_1()
+                .border_color(transparent_black())
+                .children(heads);
+            let heads = if header_offset_x < px(0.) && width > px(0.) {
+                heads
+                    .flex_none()
+                    .ml(header_offset_x)
+                    .w(width - header_offset_x)
+            } else {
+                heads.w_full()
+            };
             Some(
                 h_flex()
                     .id(("column-header", self.index))
                     .h(rems(1.375))
                     .overflow_hidden()
                     .flex_none()
-                    .px_2()
-                    .gap_2()
                     .bg(list_head)
                     .border_b_1()
                     .border_color(border)
                     .text_xs()
                     .whitespace_nowrap()
                     .text_color(muted_foreground)
-                    .child(div().w(rems(1.)).flex_none())
-                    .child(div().size_4().flex_none())
-                    .children(heads)
+                    .child(heads)
+                    .on_drag_move(cx.listener(
+                        |this, ev: &DragMoveEvent<ColumnResizeDrag>, window, cx| {
+                            if ev.drag(cx).panel == this.index {
+                                this.resize_column(ev.event.position.x, window, cx);
+                            }
+                        },
+                    ))
                     .context_menu({
                         let focus = self.focus_handle.clone();
                         let columns = self.columns;
@@ -2643,6 +2830,7 @@ impl Render for FilePanel {
             .on_action(cx.listener(Self::on_set_preview))
             .on_action(cx.listener(Self::on_cycle_preview))
             .on_action(cx.listener(Self::on_toggle_column))
+            .on_action(cx.listener(Self::on_reset_column_widths))
             .size_full()
             .min_w_0()
             .min_h_0()
@@ -2766,7 +2954,15 @@ impl Render for FilePanel {
                                 .flex()
                                 .flex_col()
                                 .child(list)
-                                .child(Scrollbar::vertical(&self.scroll).viewport_from_layout())
+                                .child(
+                                    if self.view == ViewMode::Full {
+                                        Scrollbar::new(&self.scroll)
+                                    } else {
+                                        Scrollbar::vertical(&self.scroll)
+                                    }
+                                    .viewport_from_layout(),
+                                )
+                                .children(header_sync)
                                 .children(self.render_marquee(marquee_color))
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -2838,9 +3034,19 @@ impl Render for FilePanel {
     }
 }
 
-/// The name column keeps this width in a narrow panel (a preview beside
-/// the list); the columns on the right are cut off instead.
-const NAME_MIN_REMS: f32 = 8.;
+/// The name column, with its icon, keeps this width in a narrow panel (a
+/// preview beside the list); the list scrolls sideways instead.
+const NAME_MIN_REMS: f32 = 12.;
+
+/// The name cell's width, in a row and in the header: the dragged one, or
+/// the rest of the row. A zero basis, so that a long name never widens the
+/// list (it is measured for sideways scrolling).
+fn name_width<E: Styled>(widths: &ColumnWidths, cell: E) -> E {
+    match widths.name {
+        Some(width) => cell.w(rems(width)).flex_none(),
+        None => cell.flex_1().w_0().min_w(rems(NAME_MIN_REMS)),
+    }
+}
 
 /// The preview's share of the panel, within reason.
 fn clamp_preview_size(size: f32) -> f32 {

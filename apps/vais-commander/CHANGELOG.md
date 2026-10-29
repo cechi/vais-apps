@@ -4,6 +4,19 @@ What changed in each release of VAIS Commander, newest first.
 
 ## Unreleased
 
+### Added
+
+- The columns of the full view can be resized by dragging the edges between
+  their headers. After the first drag the list keeps its width and scrolls
+  sideways when it is wider than the panel; a double click on an edge, or
+  *Reset column widths* in the header's context menu, goes back to the
+  default widths.
+
+### Changed
+
+- A narrow full view (a preview beside it) scrolls sideways instead of
+  cutting off the columns on the right.
+
 ### Fixed
 
 - Agents started from the Agents panel get the VAIS MCP server again after

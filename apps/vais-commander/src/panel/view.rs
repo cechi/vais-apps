@@ -87,8 +87,8 @@ impl PreviewMode {
     }
 }
 
-/// Which columns the full view shows besides the name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Which columns the full view shows besides the name, and how wide.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Columns {
     pub size: bool,
@@ -97,7 +97,84 @@ pub struct Columns {
     pub created: bool,
     pub permissions: bool,
     pub owner: bool,
+    #[serde(skip_serializing_if = "ColumnWidths::is_auto")]
+    pub widths: ColumnWidths,
 }
+
+/// Widths the user dragged the columns to, in rems; `None` is the default.
+/// While the name has no width it fills the rest of the panel; once it has
+/// one, the list keeps its width and scrolls sideways when it is too wide.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ColumnWidths {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<f32>,
+}
+
+impl ColumnWidths {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The width of `column`; `None` is the name column.
+    pub fn get(&self, column: Option<Column>) -> Option<f32> {
+        *self.slot(column)
+    }
+
+    /// Set the width of `column` (`None` is the name column), within limits.
+    pub fn set(&mut self, column: Option<Column>, width: Option<f32>) {
+        let min = match column {
+            None => NAME_WIDTH_MIN_REMS,
+            Some(_) => COLUMN_WIDTH_MIN_REMS,
+        };
+        *self.slot_mut(column) = width
+            .filter(|w| w.is_finite())
+            .map(|w| w.clamp(min, WIDTH_MAX_REMS));
+    }
+
+    fn slot(&self, column: Option<Column>) -> &Option<f32> {
+        match column {
+            None => &self.name,
+            Some(Column::Size) => &self.size,
+            Some(Column::Kind) => &self.kind,
+            Some(Column::Modified) => &self.modified,
+            Some(Column::Created) => &self.created,
+            Some(Column::Permissions) => &self.permissions,
+            Some(Column::Owner) => &self.owner,
+        }
+    }
+
+    fn slot_mut(&mut self, column: Option<Column>) -> &mut Option<f32> {
+        match column {
+            None => &mut self.name,
+            Some(Column::Size) => &mut self.size,
+            Some(Column::Kind) => &mut self.kind,
+            Some(Column::Modified) => &mut self.modified,
+            Some(Column::Created) => &mut self.created,
+            Some(Column::Permissions) => &mut self.permissions,
+            Some(Column::Owner) => &mut self.owner,
+        }
+    }
+}
+
+/// The narrowest a dragged column gets, in rems.
+pub const COLUMN_WIDTH_MIN_REMS: f32 = 2.0;
+/// The narrowest a dragged name column gets, with its icon, in rems.
+pub const NAME_WIDTH_MIN_REMS: f32 = 6.0;
+/// The widest any column gets, in rems.
+pub const WIDTH_MAX_REMS: f32 = 200.0;
 
 impl Default for Columns {
     fn default() -> Self {
@@ -108,6 +185,7 @@ impl Default for Columns {
             created: false,
             permissions: false,
             owner: false,
+            widths: ColumnWidths::default(),
         }
     }
 }
@@ -134,6 +212,13 @@ impl Columns {
             Column::Owner => &mut self.owner,
         };
         *flag = !*flag;
+    }
+
+    /// The width of `column`: the dragged one, or its default.
+    pub fn width(&self, column: Column) -> f32 {
+        self.widths
+            .get(Some(column))
+            .unwrap_or_else(|| column.width_rems())
     }
 
     /// The columns shown, in display order.
@@ -175,6 +260,7 @@ impl Column {
         }
     }
 
+    /// The default width.
     pub fn width_rems(self) -> f32 {
         match self {
             Column::Size => 5.0,
@@ -211,7 +297,7 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
-    use super::{Column, Columns, PreviewMode, ViewMode};
+    use super::{Column, ColumnWidths, Columns, PreviewMode, ViewMode};
 
     #[test]
     fn preview_cycles_off_bottom_right() {
@@ -234,5 +320,36 @@ mod tests {
         let shown: Vec<_> = c.shown().collect();
         assert_eq!(shown, [Column::Kind, Column::Modified, Column::Created]);
         assert!(ViewMode::Brief.is_grid() && !ViewMode::Full.is_grid());
+    }
+
+    #[test]
+    fn widths_are_clamped_and_reset() {
+        let mut c = Columns::default();
+        assert_eq!(c.width(Column::Size), Column::Size.width_rems());
+        c.widths.set(Some(Column::Size), Some(0.5));
+        c.widths.set(None, Some(f32::NAN));
+        assert_eq!(c.width(Column::Size), super::COLUMN_WIDTH_MIN_REMS);
+        assert_eq!(c.widths.get(None), None);
+        c.widths.set(None, Some(30.0));
+        assert_eq!(c.widths.get(None), Some(30.0));
+        assert!(!c.widths.is_auto());
+        c.widths.set(Some(Column::Size), None);
+        c.widths.set(None, None);
+        assert!(c.widths.is_auto());
+    }
+
+    #[test]
+    fn widths_are_saved_only_when_dragged() {
+        let mut c = Columns::default();
+        assert!(!toml::to_string(&c).unwrap().contains("widths"));
+        c.widths.set(Some(Column::Kind), Some(7.0));
+        let text = toml::to_string(&c).unwrap();
+        assert!(text.contains("kind = 7.0"), "{text}");
+        let back: Columns = toml::from_str(&text).unwrap();
+        assert_eq!(back, c);
+        // A config from before the widths.
+        let old: Columns = toml::from_str("size = false").unwrap();
+        assert!(old.widths.is_auto() && !old.size);
+        assert_eq!(old.widths, ColumnWidths::default());
     }
 }

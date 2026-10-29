@@ -132,6 +132,8 @@ actions!(
         WindowsFolderMenu,
         ExpandEntry,
         CollapseEntry,
+        /// The full view's columns back to their default widths.
+        ResetColumnWidths,
         OpenFilter,
         CloseFilter,
         ToggleFilterRecursive,

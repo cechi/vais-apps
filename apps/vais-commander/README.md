@@ -228,6 +228,13 @@ Each panel has its own view, saved with the tab:
 - **Full** (`Ctrl+F2`): one entry per row with columns. Right-click the column header to
   choose the columns: Size, Type, Modified, Created, Permissions and Owner (the last two
   on Unix). Clicking a sortable header sorts by it. Directories expand inline here.
+  Drag the edge between two column headers to change a column's width. At first the name
+  fills the rest of the panel; the first drag fixes its width as it is, so from then on
+  the edges follow the mouse and the list keeps its width, scrolling sideways when it is
+  wider than the panel (Shift+wheel or the scrollbar). A double click on an edge sets that
+  column back to its default width (the name back to filling the panel), and *Reset column
+  widths* in the header's context menu sets them all back. The widths are saved with the
+  panel.
 - **Brief** (`Ctrl+F1`): names only, as many columns as fit. `←` / `→` move the cursor
   sideways, `↑` / `↓` by a line; marking, drag & drop and the rubber band work as usual.
 - **Thumbnails** (`Ctrl+F3`): a grid with image previews (png, jpg, gif, webp, bmp,
@@ -241,7 +248,7 @@ whole (from a connection or an archive as their thumbnail), text files show thei
 512 KiB read-only with syntax highlighting (click back into the list after selecting text
 there), and directories and other files get a card with type, size (the entry count for a
 directory), dates, permissions and owner. The side and share are saved with the panel. In
-a narrow list the name keeps its width and the columns on the right are cut off.
+a narrow list the name keeps its width and the list scrolls sideways.
 
 ## Editor
 
