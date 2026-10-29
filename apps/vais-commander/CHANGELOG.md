@@ -9,6 +9,8 @@ What changed in each release of VAIS Commander, newest first.
 - Agents started from the Agents panel get the VAIS MCP server again after
   the program file was replaced while the app ran (an update or a rebuild);
   they were launched without it.
+- Windows: clicking the drive letter in the path bar goes to the root of the
+  drive; it went to the drive's current directory instead.
 
 ## 0.4.2 - 2026-10-27
 

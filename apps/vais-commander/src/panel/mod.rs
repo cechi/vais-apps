@@ -2393,6 +2393,14 @@ fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
             for component in local.components() {
                 acc.push(component.as_os_str());
                 let label = match component {
+                    // After a Windows drive prefix: the drive crumb leads to
+                    // its root, as `C:` alone is the drive's current directory.
+                    Component::RootDir if !crumbs.is_empty() => {
+                        if let Some(last) = crumbs.last_mut() {
+                            last.1 = Location::Local(acc.clone());
+                        }
+                        continue;
+                    }
                     Component::RootDir => "/".to_string(),
                     other => other.as_os_str().to_string_lossy().into_owned(),
                 };
@@ -2863,5 +2871,27 @@ fn sort_label(sort: Sort, key: SortKey) -> &'static str {
         (SortKey::Created, None) => t!("Sort by created"),
         (SortKey::Created, Some(SortDir::Asc)) => t!("Sort by created (ascending)"),
         (SortKey::Created, Some(SortDir::Desc)) => t!("Sort by created (descending)"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Location, PathBuf, crumbs_for};
+
+    #[test]
+    fn crumbs_of_a_unix_path_start_at_the_root() {
+        let crumbs = crumbs_for(&Location::Local(PathBuf::from("/home/user")));
+        let labels: Vec<&str> = crumbs.iter().map(|(label, _)| label.as_str()).collect();
+        assert_eq!(labels, ["/", "home", "user"]);
+        assert_eq!(crumbs[0].1, Location::Local(PathBuf::from("/")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_drive_crumb_leads_to_the_drive_root() {
+        let crumbs = crumbs_for(&Location::Local(PathBuf::from(r"C:\Users\user")));
+        let labels: Vec<&str> = crumbs.iter().map(|(label, _)| label.as_str()).collect();
+        assert_eq!(labels, ["C:", "Users", "user"]);
+        assert_eq!(crumbs[0].1, Location::Local(PathBuf::from(r"C:\")));
     }
 }
