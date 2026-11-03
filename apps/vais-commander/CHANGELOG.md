@@ -10,6 +10,10 @@ What changed in each release of VAIS Commander, newest first.
   browse, view, copy out and *Extract…*. Any volume of a multi-volume
   archive opens the whole of it; encrypted ones are refused with a message.
 
+### Changed
+
+- Entries in the panels light up under the mouse pointer.
+
 ## 0.4.4 - 2026-11-03
 
 ### Added

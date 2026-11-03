@@ -2348,7 +2348,12 @@ impl FilePanel {
             vec![entry.location.clone()]
         };
         let drop_bg = c.primary.alpha(0.35);
-        el.on_mouse_down(
+        let hover_bg = c.list_hover;
+        // The cursor and marked entries keep their own colour under the mouse.
+        el.when(!look.is_cursor && !look.is_marked, |d| {
+            d.hover(move |s| s.bg(hover_bg))
+        })
+        .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                 this.focus_handle.focus(window, cx);
