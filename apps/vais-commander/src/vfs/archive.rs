@@ -1,9 +1,10 @@
-//! Archives (zip, tar, compressed tar and 7z) browsed as directories: a
+//! Archives (zip, tar, compressed tar, 7z and rar) browsed as directories: a
 //! read-only [`Backend`] over one archive file. A zip is indexed from its
 //! central directory and entries are extracted into the cache when first
 //! read; a tar has no index, so it is unpacked into the cache in the one pass
 //! that lists it, and so is a 7z (usually solid: one entry cannot be read
-//! without decoding everything before it).
+//! without decoding everything before it) and a rar (read front to back
+//! only).
 //!
 //! Opened archives are kept in a process-wide table keyed by the archive's
 //! location and invalidated when its size or modification time changes.
@@ -34,6 +35,7 @@ pub enum Kind {
     Zip,
     Tar(Compression),
     SevenZ,
+    Rar,
 }
 
 /// File name endings of the formats we read (lowercase).
@@ -58,6 +60,8 @@ const SUFFIXES: &[(&str, Kind)] = &[
     (".tzst", Kind::Tar(Compression::Zstd)),
     (".tar", Kind::Tar(Compression::None)),
     (".7z", Kind::SevenZ),
+    (".rar", Kind::Rar),
+    (".cbr", Kind::Rar),
 ];
 
 /// The matching ending of `name` (its length in bytes) and the format.
@@ -239,6 +243,7 @@ impl ArchiveBackend {
             Kind::Zip => this.index_zip(&file)?,
             Kind::Tar(compression) => this.unpack_tar(&file, compression)?,
             Kind::SevenZ => this.unpack_7z(&file)?,
+            Kind::Rar => this.unpack_rar(&file)?,
         }
         this.sort_children();
         Ok(this)
@@ -473,6 +478,71 @@ impl ArchiveBackend {
         Ok(())
     }
 
+    fn unpack_rar(&mut self, file: &Path) -> io::Result<()> {
+        use unrar::error::Code;
+        let describe = |err: unrar::error::UnrarError| match err.code {
+            Code::MissingPassword | Code::BadPassword => {
+                io::Error::other(t!("encrypted RAR archives are not supported"))
+            }
+            _ => io::Error::other(err.to_string()),
+        };
+        // Any volume of a multi-volume archive opens it from its first one.
+        let mut archive = unrar::Archive::new(file)
+            .as_first_part()
+            .open_for_processing()
+            .map_err(describe)?;
+        while let Some(header) = archive.read_header().map_err(describe)? {
+            let entry = header.entry();
+            if entry.is_encrypted() {
+                return Err(io::Error::other(t!(
+                    "encrypted RAR archives are not supported"
+                )));
+            }
+            // Archives made on Windows store `\` separators.
+            let name = entry.filename.to_string_lossy().replace('\\', "/");
+            let Some(parts) = normalise(Path::new(&name)) else {
+                archive = header.skip().map_err(describe)?;
+                continue;
+            };
+            let is_dir = entry.is_directory();
+            let size = entry.unpacked_size;
+            let modified = dos_time(entry.file_time);
+            let target = self.cache_dir.join(parts.join("/"));
+            archive = if is_dir {
+                std::fs::create_dir_all(&target)?;
+                header.skip()
+            } else {
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                header.extract_to(&target)
+            }
+            .map_err(describe)?;
+            // UnRAR restores a Unix symlink as one.
+            let kind = if is_dir {
+                EntryKind::Dir
+            } else if std::fs::symlink_metadata(&target).is_ok_and(|m| m.is_symlink()) {
+                EntryKind::Symlink { to_dir: false }
+            } else {
+                EntryKind::File
+            };
+            let node = Node {
+                kind,
+                size: if is_dir { 0 } else { size },
+                modified,
+                mode: Some(match kind {
+                    EntryKind::Dir => 0o040755,
+                    EntryKind::Symlink { .. } => 0o120777,
+                    _ => 0o100644,
+                }),
+                index: None,
+                children: Vec::new(),
+            };
+            self.insert(&parts, node);
+        }
+        Ok(())
+    }
+
     fn node<'a>(&'a self, loc: &'a Location) -> io::Result<(&'a str, &'a Node)> {
         let inner = inner_path(&self.outer, loc).ok_or_else(not_found)?;
         self.nodes
@@ -506,6 +576,25 @@ impl ArchiveBackend {
         std::fs::rename(&partial, &target)?;
         Ok(target)
     }
+}
+
+/// A DOS date and time (local time, two-second steps), as RAR stores them.
+fn dos_time(packed: u32) -> Option<SystemTime> {
+    use chrono::TimeZone;
+    let date = chrono::NaiveDate::from_ymd_opt(
+        1980 + (packed >> 25) as i32,
+        (packed >> 21) & 0xf,
+        (packed >> 16) & 0x1f,
+    )?;
+    let time = chrono::NaiveTime::from_hms_opt(
+        (packed >> 11) & 0x1f,
+        (packed >> 5) & 0x3f,
+        (packed & 0x1f) * 2,
+    )?;
+    let local = chrono::Local
+        .from_local_datetime(&date.and_time(time))
+        .earliest()?;
+    Some(UNIX_EPOCH + Duration::from_secs(local.timestamp().max(0) as u64))
 }
 
 /// One 7z entry into the cache: the data as a file, or (a Unix symlink) the
@@ -679,6 +768,77 @@ mod tests {
         std::fs::remove_dir_all(cache).unwrap();
     }
 
+    /// A rar fixture unpacked into a fresh temp directory.
+    fn rar_backend(fixture: &str) -> (ArchiveBackend, PathBuf, std::io::Result<()>) {
+        let cache =
+            std::env::temp_dir().join(format!("vais-rar-test-{}-{fixture}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&cache);
+        std::fs::create_dir_all(&cache).unwrap();
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/vfs/testdata")
+            .join(fixture);
+        let mut backend = ArchiveBackend {
+            outer: Location::Local(file.clone()),
+            cache_dir: cache.clone(),
+            nodes: HashMap::from([(String::new(), Node::dir())]),
+            zip: None,
+        };
+        let result = backend.unpack_rar(&file);
+        backend.sort_children();
+        (backend, cache, result)
+    }
+
+    #[test]
+    fn rar_is_unpacked() {
+        let (backend, cache, result) = rar_backend("sample.rar");
+        result.unwrap();
+        assert_eq!(backend.nodes[""].children, ["VERSION"]);
+        let version = &backend.nodes["VERSION"];
+        assert_eq!(version.kind, EntryKind::File);
+        assert_eq!(version.size, 11);
+        assert!(version.modified.is_some());
+        assert_eq!(
+            std::fs::read_to_string(cache.join("VERSION")).unwrap(),
+            "unrar-0.4.0"
+        );
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn rar_keeps_its_tree() {
+        let (backend, cache, result) = rar_backend("tree.rar");
+        result.unwrap();
+        assert_eq!(backend.nodes[""].children, ["photos"]);
+        assert_eq!(backend.nodes["photos"].children, ["readme.txt", "sub"]);
+        assert_eq!(backend.nodes["photos/sub"].kind, EntryKind::Dir);
+        assert_eq!(backend.nodes["photos/sub/notes.txt"].size, 6);
+        assert_eq!(
+            std::fs::read_to_string(cache.join("photos/sub/notes.txt")).unwrap(),
+            "inner\n"
+        );
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn encrypted_rar_is_reported() {
+        let (_, cache, result) = rar_backend("locked.rar");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("encrypted"), "{err}");
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn dos_times_unpack() {
+        // 2015-08-07 17:21:30
+        let packed = (35 << 25) | (8 << 21) | (7 << 16) | (17 << 11) | (21 << 5) | 15;
+        let local: chrono::DateTime<chrono::Local> = super::dos_time(packed).unwrap().into();
+        assert_eq!(
+            local.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2015-08-07 17:21:30"
+        );
+        assert_eq!(super::dos_time(0), None);
+    }
+
     #[test]
     fn stems_drop_the_whole_format_ending() {
         assert_eq!(stem("site.tar.gz"), Some("site"));
@@ -691,6 +851,8 @@ mod tests {
         assert_eq!(kind_of("a.TAR.XZ"), Some(Kind::Tar(Compression::Xz)));
         assert_eq!(kind_of("Photos.7Z"), Some(Kind::SevenZ));
         assert_eq!(stem("photos.7z"), Some("photos"));
+        assert_eq!(kind_of("Comics.CBR"), Some(Kind::Rar));
+        assert_eq!(stem("backup.rar"), Some("backup"));
     }
 
     #[test]

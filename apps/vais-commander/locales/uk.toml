@@ -424,6 +424,7 @@
 "duplicate" = "дублікат"
 "empty name" = "порожня назва"
 "encrypted 7z archives are not supported" = "зашифровані архіви 7z не підтримуються"
+"encrypted RAR archives are not supported" = "зашифровані архіви RAR не підтримуються"
 "failed: {error}" = "помилка: {error}"
 "handshake: {error}" = "рукостискання: {error}"
 "host is required" = "потрібно вказати вузол"

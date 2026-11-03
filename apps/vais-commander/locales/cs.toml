@@ -425,6 +425,7 @@
 "duplicate" = "duplicitní"
 "empty name" = "prázdný název"
 "encrypted 7z archives are not supported" = "šifrované archivy 7z nejsou podporované"
+"encrypted RAR archives are not supported" = "šifrované archivy RAR nejsou podporované"
 "failed: {error}" = "selhalo: {error}"
 "handshake: {error}" = "handshake: {error}"
 "host is required" = "hostitel je povinný"

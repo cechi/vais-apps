@@ -424,6 +424,7 @@
 "duplicate" = "重複"
 "empty name" = "名前が空です"
 "encrypted 7z archives are not supported" = "暗号化された 7z アーカイブはサポートされていません"
+"encrypted RAR archives are not supported" = "暗号化された RAR アーカイブはサポートされていません"
 "failed: {error}" = "失敗しました：{error}"
 "handshake: {error}" = "ハンドシェイク：{error}"
 "host is required" = "ホストが必要です"

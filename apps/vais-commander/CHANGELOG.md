@@ -2,6 +2,14 @@
 
 What changed in each release of VAIS Commander, newest first.
 
+## Unreleased
+
+### Added
+
+- RAR archives (also `.cbr`) open like a directory, as zip and 7z do:
+  browse, view, copy out and *Extract…*. Any volume of a multi-volume
+  archive opens the whole of it; encrypted ones are refused with a message.
+
 ## 0.4.4 - 2026-11-03
 
 ### Added

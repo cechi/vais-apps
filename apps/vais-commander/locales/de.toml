@@ -424,6 +424,7 @@
 "duplicate" = "doppelt"
 "empty name" = "leerer Name"
 "encrypted 7z archives are not supported" = "verschlüsselte 7z-Archive werden nicht unterstützt"
+"encrypted RAR archives are not supported" = "verschlüsselte RAR-Archive werden nicht unterstützt"
 "failed: {error}" = "fehlgeschlagen: {error}"
 "handshake: {error}" = "Handshake: {error}"
 "host is required" = "Host ist erforderlich"

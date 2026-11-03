@@ -424,6 +424,7 @@
 "duplicate" = "重复"
 "empty name" = "名称为空"
 "encrypted 7z archives are not supported" = "不支持加密的 7z 压缩包"
+"encrypted RAR archives are not supported" = "不支持加密的 RAR 压缩包"
 "failed: {error}" = "失败：{error}"
 "handshake: {error}" = "握手失败：{error}"
 "host is required" = "必须填写主机"

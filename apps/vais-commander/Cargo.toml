@@ -45,6 +45,8 @@ zstd = "0.14"
 liblzma = { version = "0.4", features = ["static"] }
 # 7z archives (pure Rust); encrypted ones are reported, not opened.
 sevenz-rust2 = { version = "0.24", default-features = false, features = ["bzip2", "deflate", "ppmd", "zstd"] }
+# RAR archives through RARLAB's UnRAR (C++, built from the bundled source).
+unrar = "0.5"
 alacritty_terminal = { version = "0.26", default-features = false }
 serde_json = "1"
 
