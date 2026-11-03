@@ -74,6 +74,64 @@ pub fn crumbs(path: &Path) -> Option<Vec<(String, PathBuf)>> {
     Some(crumbs)
 }
 
+/// What to log in to for a network path: its share, or for the server
+/// itself (its share list) the server's `IPC$`.
+pub fn login_target(path: &Path) -> Option<String> {
+    let (server, segments) = split(path)?;
+    Some(match segments.first() {
+        Some(share) => format!(r"\\{server}\{share}"),
+        None => format!(r"\\{server}\IPC$"),
+    })
+}
+
+/// Whether reading a network path failed for want of other credentials
+/// (access denied, a wrong password, no session).
+pub fn is_login_error(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(5 | 86 | 1244 | 1326))
+}
+
+/// The user cancelled Windows' credential dialog (`ERROR_CANCELLED`).
+#[cfg(windows)]
+pub fn is_cancelled(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(1223)
+}
+
+/// Connect to `target` with credentials the user enters in Windows' own
+/// dialog, which can also remember them in the Credential Manager, as
+/// Explorer's does. The dialog runs a modal loop, so this must not be called
+/// while the app is borrowed (inside an update).
+#[cfg(windows)]
+pub fn log_in(hwnd: isize, target: &str) -> std::io::Result<()> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::NetworkManagement::WNet::{
+        CONNECT_INTERACTIVE, CONNECT_PROMPT, NETRESOURCEW, RESOURCETYPE_ANY, WNetAddConnection3W,
+    };
+    use windows::core::{PCWSTR, PWSTR};
+
+    let mut remote: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    let resource = NETRESOURCEW {
+        dwType: RESOURCETYPE_ANY,
+        lpRemoteName: PWSTR(remote.as_mut_ptr()),
+        ..Default::default()
+    };
+    // SAFETY: the resource and its NUL-terminated name outlive the call; no
+    // user name or password, so the dialog asks for them.
+    let status = unsafe {
+        WNetAddConnection3W(
+            HWND(hwnd as *mut _),
+            &resource,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            CONNECT_INTERACTIVE | CONNECT_PROMPT,
+        )
+    };
+    if status.is_ok() {
+        Ok(())
+    } else {
+        Err(std::io::Error::from_raw_os_error(status.0 as i32))
+    }
+}
+
 /// The disk shares of `server`; the administrative ones (`C$`, `ADMIN$`)
 /// and other names ending in `$` only with hidden files shown.
 #[cfg(windows)]
@@ -182,6 +240,10 @@ mod tests {
             server_of(Path::new(r"\\nas\data\a")).as_deref(),
             Some("nas")
         );
+        let target = |p: &str| login_target(Path::new(p));
+        assert_eq!(target(r"\\nas\data\a").as_deref(), Some(r"\\nas\data"));
+        assert_eq!(target(r"\\nas").as_deref(), Some(r"\\nas\IPC$"));
+        assert_eq!(target(r"C:\x"), None);
     }
 
     #[test]

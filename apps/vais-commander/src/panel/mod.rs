@@ -160,6 +160,13 @@ pub struct FilePanel {
     searching: bool,
     generation: u64,
     load_task: Option<Task<()>>,
+    /// The network share Windows' credential dialog was shown for since the
+    /// user last navigated: a reload that is refused again shows the error
+    /// instead of asking once more.
+    login_asked: Option<String>,
+    /// The window's native handle, the owner of that dialog.
+    #[cfg(windows)]
+    hwnd: Option<isize>,
     /// Directory watch: the local directories this panel currently shows.
     watch: crate::watch::Handle,
     watched: Vec<PathBuf>,
@@ -291,6 +298,9 @@ impl FilePanel {
             searching: false,
             generation: 0,
             load_task: None,
+            login_asked: None,
+            #[cfg(windows)]
+            hwnd: None,
             watch: crate::watch::handle(cx),
             watched: Vec::new(),
             pending_press: None,
@@ -609,7 +619,14 @@ impl FilePanel {
         let read_path = path.clone();
         let expanded = self.state.expanded.clone();
         let task = cx.background_spawn(async move {
-            read_tree(&read_path, opts, &expanded).map_err(|e| e.to_string())
+            read_tree(&read_path, opts, &expanded).map_err(|err| {
+                // A network share that wants other credentials: what to log in to.
+                let login = read_path
+                    .as_local()
+                    .and_then(crate::network::login_target)
+                    .filter(|_| cfg!(windows) && crate::network::is_login_error(&err));
+                (err.to_string(), login)
+            })
         });
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -624,8 +641,14 @@ impl FilePanel {
                         panel.scroll_to_cursor();
                         cx.emit(PanelEvent::Changed);
                     }
-                    Err(err) => {
+                    Err((err, login)) => {
                         panel.state.error = Some(format!("{}: {err}", path.display()));
+                        if let Some(target) = login
+                            && panel.login_asked.as_ref() != Some(&target)
+                        {
+                            panel.login_asked = Some(target.clone());
+                            panel.log_in(target, path, select, cx);
+                        }
                     }
                 }
                 panel.sync_watch();
@@ -635,6 +658,45 @@ impl FilePanel {
         }));
         cx.notify();
     }
+
+    /// Ask for credentials to the network share `target` in Windows' own
+    /// dialog and load `path` again once connected.
+    #[cfg(windows)]
+    fn log_in(
+        &mut self,
+        target: String,
+        path: Location,
+        select: Option<Location>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(hwnd) = self.hwnd else {
+            return;
+        };
+        let generation = self.generation;
+        // The dialog's modal loop runs outside this update, where GPUI's
+        // window procedure can borrow the app as usual.
+        cx.spawn(async move |this, cx| {
+            let result = crate::network::log_in(hwnd, &target);
+            this.update(cx, |panel, cx| {
+                // Elsewhere by now: nothing to reload.
+                if panel.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(()) => panel.load(path, select, cx),
+                    Err(err) if crate::network::is_cancelled(&err) => {}
+                    Err(err) => {
+                        panel.state.error = Some(format!("{target}: {err}"));
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+    #[cfg(not(windows))]
+    fn log_in(&mut self, _: String, _: Location, _: Option<Location>, _: &mut Context<Self>) {}
 
     /// Watch the directory shown (and the expanded subdirectories) so the
     /// listing follows changes made elsewhere. Remote locations are not
@@ -706,6 +768,7 @@ impl FilePanel {
     }
 
     fn navigate(&mut self, path: Location, select: Option<Location>, cx: &mut Context<Self>) {
+        self.login_asked = None;
         if path != self.state.path {
             let current = self.state.path.clone();
             self.state.push_history(current);
@@ -2596,6 +2659,10 @@ pub fn expand_path(raw: &str) -> Location {
 
 impl Render for FilePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(windows)]
+        {
+            self.hwnd = crate::shell_menu::hwnd(window);
+        }
         let theme = cx.theme();
         let colors = Colors {
             primary: theme.primary,

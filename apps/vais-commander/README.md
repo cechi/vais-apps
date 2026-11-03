@@ -78,7 +78,10 @@ Linux is the developed and tested platform. macOS and Windows are supported in c
   listed only with hidden files shown. The sidebar's **Network** group lists mapped
   network drives (with the share each one shows) and the servers you visited, newest
   first; right-click a server to remove it from the list. Shares are reached with your
-  Windows login, as in Explorer.
+  Windows login; when a server refuses it, Windows' own credential dialog asks for a user
+  name and password (it can remember them in the Credential Manager, as Explorer's does)
+  and the directory loads once connected. Cancelling leaves the error in the status bar;
+  going to the path again asks again.
 - Windows context menu: **Windows context menu** at the end of the entry and panel context
   menus (or `Shift+F10`) opens Explorer's own menu for the marked entries (or the cursor
   entry), or for the directory from empty space or `..`; shell extensions, Send to, Open

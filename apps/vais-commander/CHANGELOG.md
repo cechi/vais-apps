@@ -10,6 +10,8 @@ What changed in each release of VAIS Commander, newest first.
   the server's shares, `..` from a share goes up to its server, and the
   sidebar has a Network group with the servers visited and the mapped
   network drives (moved there from Volumes).
+- Windows: a network share that refuses your Windows login asks for a user
+  name and password in Windows' credential dialog, which can remember them.
 
 ## 0.4.3 - 2026-10-29
 
