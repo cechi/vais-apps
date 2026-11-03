@@ -56,7 +56,8 @@ pub struct Config {
     pub ui_scale: f32,
     /// Whether the places sidebar is shown.
     pub sidebar_open: bool,
-    /// Sidebar groups folded away (by title: Favorites, Volumes, Connections, Recent).
+    /// Sidebar groups folded away (by title: Favorites, Volumes, Network,
+    /// Connections, Recent).
     pub sidebar_collapsed: Vec<String>,
     /// Whether the command line under the panels is shown.
     pub command_line: bool,
@@ -95,6 +96,9 @@ pub struct Config {
     pub favorite_layouts: Vec<FavoriteLayout>,
     /// Saved remote connections.
     pub connections: Vec<ConnectionConfig>,
+    /// Servers visited through `\\server` paths (Windows), newest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub network_servers: Vec<String>,
     /// Version 1 layout (single grid); read for migration, never written.
     #[serde(skip_serializing)]
     pub layout: Option<LayoutConfig>,
@@ -133,6 +137,7 @@ impl Default for Config {
             favorites: Vec::new(),
             favorite_layouts: Vec::new(),
             connections: Vec::new(),
+            network_servers: Vec::new(),
             layout: None,
             panels: Vec::new(),
             from_file: false,

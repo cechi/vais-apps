@@ -2527,6 +2527,14 @@ fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
         Location::Local(local) if platform::is_roots_path(local) => {
             crumbs.push((platform::display_name(local), path.clone()));
         }
+        // `\\server\share\…`: the server and the share are crumbs of their own.
+        Location::Local(local) if cfg!(windows) && crate::network::server_of(local).is_some() => {
+            crumbs = crate::network::crumbs(local)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(label, path)| (label, Location::Local(path)))
+                .collect();
+        }
         Location::Local(local) => {
             let mut acc = PathBuf::new();
             for component in local.components() {

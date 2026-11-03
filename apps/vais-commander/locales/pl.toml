@@ -401,6 +401,8 @@
 "Videos" = "Wideo"
 "View" = "Podgląd"
 "Volumes" = "Woluminy"
+"Network" = "Sieć"
+"Remove from list" = "Usuń z listy"
 "Windows context menu" = "Menu kontekstowe Windows"
 "Yellow" = "Żółty"
 "[N] name · [E] extension · [C] counter · $1 regex groups" = "[N] nazwa · [E] rozszerzenie · [C] licznik · $1 grupy regex"

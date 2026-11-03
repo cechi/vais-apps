@@ -50,6 +50,13 @@ fn kind_of(meta: &fs::Metadata, path: &Path) -> (EntryKind, u64) {
 impl Backend for LocalBackend {
     fn read_dir(&self, dir: &Location, show_hidden: bool) -> io::Result<Vec<Entry>> {
         let path = path_of(dir)?;
+        // `\\server` is no directory; its listing is the server's shares.
+        #[cfg(windows)]
+        if crate::network::is_server(path)
+            && let Some(server) = crate::network::server_of(path)
+        {
+            return crate::network::read_server(&server, show_hidden);
+        }
         let mut entries = Vec::new();
         for item in fs::read_dir(path)? {
             let Ok(item) = item else { continue };

@@ -2,6 +2,15 @@
 
 What changed in each release of VAIS Commander, newest first.
 
+## Unreleased
+
+### Added
+
+- Windows: network shares. `\\server` (or `//server`) in the path bar lists
+  the server's shares, `..` from a share goes up to its server, and the
+  sidebar has a Network group with the servers visited and the mapped
+  network drives (moved there from Volumes).
+
 ## 0.4.3 - 2026-10-29
 
 ### Added

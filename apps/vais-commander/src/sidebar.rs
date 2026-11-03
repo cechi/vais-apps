@@ -1,5 +1,5 @@
 //! The left sidebar: system places (home, user folders, root, mounted
-//! volumes). Clicking a place navigates the active panel there. More kinds of
+//! volumes, network drives and servers on Windows). Clicking a place navigates the active panel there. More kinds of
 //! sidebar content can be added later.
 
 use gpui_kit::component::ActiveTheme as _;
@@ -34,6 +34,8 @@ pub enum SidebarEvent {
         from: usize,
         to: usize,
     },
+    /// Drop a visited server from the Network group.
+    ForgetServer(String),
     /// Open the connection manager.
     ManageConnections,
     /// A group was folded or unfolded (worth saving).
@@ -99,6 +101,10 @@ pub struct Sidebar {
     /// Saved layouts, after the bookmarked directories.
     layouts: Vec<Place>,
     volumes: Vec<Place>,
+    /// Mapped network drives (Windows), first in the Network group.
+    network_drives: Vec<Place>,
+    /// Servers visited through `\\server` paths (Windows), after them.
+    servers: Vec<Place>,
     recent: Vec<Place>,
     connections: Vec<Place>,
     /// Directory of the active panel, highlighted when it is a listed place.
@@ -122,6 +128,8 @@ impl Sidebar {
             favorites: Vec::new(),
             layouts: Vec::new(),
             volumes: Vec::new(),
+            network_drives: Vec::new(),
+            servers: Vec::new(),
             recent: Vec::new(),
             connections: Vec::new(),
             current: None,
@@ -178,6 +186,35 @@ impl Sidebar {
                 color: None,
             })
             .collect();
+        self.network_drives = platform::network_drives()
+            .into_iter()
+            .map(|(root, share)| Place {
+                name: root.to_string_lossy().into_owned(),
+                path: Location::Local(root),
+                icon: IconName::Network,
+                detail: share,
+                layout: None,
+                removable: false,
+                color: None,
+            })
+            .collect();
+    }
+
+    /// The servers visited through `\\server` paths, newest first.
+    pub fn set_servers(&mut self, servers: &[String], cx: &mut Context<Self>) {
+        self.servers = servers
+            .iter()
+            .map(|server| Place {
+                name: format!(r"\\{server}"),
+                path: Location::Local(crate::network::server_path(server)),
+                icon: IconName::Network,
+                detail: None,
+                layout: None,
+                removable: false,
+                color: None,
+            })
+            .collect();
+        cx.notify();
     }
 
     /// The bookmarked directories, in the order they were added.
@@ -421,7 +458,30 @@ impl Sidebar {
                             )
                         });
                     if !place.removable {
-                        return row.into_any_element();
+                        // A visited server: the menu drops it from the list.
+                        let server = match &place.path {
+                            Location::Local(path) if title == "Network" => {
+                                crate::network::server_of(path)
+                                    .filter(|_| crate::network::is_server(path))
+                            }
+                            _ => None,
+                        };
+                        let Some(server) = server else {
+                            return row.into_any_element();
+                        };
+                        let sidebar = cx.entity();
+                        return row
+                            .context_menu(move |menu, _, _| {
+                                let (sidebar, server) = (sidebar.clone(), server.clone());
+                                menu.item(PopupMenuItem::new(t!("Remove from list")).on_click(
+                                    move |_, _, cx| {
+                                        sidebar.update(cx, |_, cx| {
+                                            cx.emit(SidebarEvent::ForgetServer(server.clone()))
+                                        });
+                                    },
+                                ))
+                            })
+                            .into_any_element();
                     }
                     // Its position in its own list: drag it onto another
                     // favorite of the same kind, or use the menu, to move it.
@@ -577,6 +637,12 @@ impl Render for Sidebar {
             .cloned()
             .collect();
         let volumes = self.volumes.clone();
+        let network: Vec<Place> = self
+            .network_drives
+            .iter()
+            .chain(self.servers.iter())
+            .cloned()
+            .collect();
         let recent = self.recent.clone();
         let connections = self.connections.clone();
 
@@ -651,8 +717,18 @@ impl Render for Sidebar {
                                     cx,
                                 ))
                             })
+                            .when(!network.is_empty(), |d| {
+                                d.child(self.render_section(
+                                    "Network",
+                                    t!("Network"),
+                                    &network,
+                                    places.len() + volumes.len(),
+                                    &c,
+                                    cx,
+                                ))
+                            })
                             .when(self.show_connections, |d| {
-                                let offset = places.len() + volumes.len();
+                                let offset = places.len() + volumes.len() + network.len();
                                 d.child(self.render_section(
                                     "Connections",
                                     t!("Connections"),
@@ -685,7 +761,10 @@ impl Render for Sidebar {
                                 },
                             )
                             .when(!recent.is_empty(), |d| {
-                                let offset = places.len() + volumes.len() + connections.len();
+                                let offset = places.len()
+                                    + volumes.len()
+                                    + network.len()
+                                    + connections.len();
                                 d.child(self.render_section(
                                     "Recent",
                                     t!("Recent"),

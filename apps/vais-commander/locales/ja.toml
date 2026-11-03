@@ -401,6 +401,8 @@
 "Videos" = "ビデオ"
 "View" = "表示"
 "Volumes" = "ボリューム"
+"Network" = "ネットワーク"
+"Remove from list" = "一覧から削除"
 "Windows context menu" = "Windows のコンテキストメニュー"
 "Yellow" = "黄"
 "[N] name · [E] extension · [C] counter · $1 regex groups" = "[N] 名前 · [E] 拡張子 · [C] カウンター · $1 正規表現のグループ"

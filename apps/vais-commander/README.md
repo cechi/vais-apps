@@ -71,6 +71,14 @@ Linux is the developed and tested platform. macOS and Windows are supported in c
   `Cmd+Up` / `Cmd+Down` go up / open.
 - Hidden files: dot-prefix on Unix, the hidden attribute (or dot-prefix) on Windows.
 - Windows drive roots: `..` above `C:\` opens a "Computer" listing of mounted drives.
+- Windows network shares: type `\\server` (a name or an IP address, `//server` works too)
+  in the path bar to list the server's shares; `\\server\share\…` opens a share like any
+  directory. The server and the share are crumbs of their own, and `..` goes from a share
+  up to its server, then to "Computer". The administrative shares (`C$`, `ADMIN$`) are
+  listed only with hidden files shown. The sidebar's **Network** group lists mapped
+  network drives (with the share each one shows) and the servers you visited, newest
+  first; right-click a server to remove it from the list. Shares are reached with your
+  Windows login, as in Explorer.
 - Windows context menu: **Windows context menu** at the end of the entry and panel context
   menus (or `Shift+F10`) opens Explorer's own menu for the marked entries (or the cursor
   entry), or for the directory from empty space or `..`; shell extensions, Send to, Open
@@ -358,7 +366,9 @@ panel, and files that exist already are asked about like with any copy.
 
 `Ctrl+B` or the toggle at the left end of the status bar opens a sidebar with system places:
 home and the standard user folders (XDG user dirs, else `~/Desktop` & co.), the root and
-mounted volumes (`/mnt`, `/media`, `/run/media`, `/home`, macOS `/Volumes`, Windows drives).
+mounted volumes (`/mnt`, `/media`, `/run/media`, `/home`, macOS `/Volumes`, Windows drives),
+and on Windows a **Network** group with mapped network drives and visited servers (see
+Platforms).
 The Favorites group also holds your own entries of two kinds: directories (the star next
 to a panel's path, or `Ctrl+D`, toggles the current one) and whole layouts (right-click a
 tab, "Add layout to favorites…", give it a name: the tab's grid and panel paths are saved
@@ -446,6 +456,7 @@ src/changelog_view.rs the What's new tab (CHANGELOG.md, built in)
 src/editor_view.rs  the file editor tab (view / edit)
 src/icons/         file icons from the desktop: freedesktop theme lookup (mod.rs), Windows shell icons (shell.rs)
 src/shell_menu.rs  Windows: Explorer's context menu (IContextMenu) for the selection or a directory
+src/network.rs     Windows network paths: `\\server` and its shares, their parents and crumbs
 src/config.rs      TOML config
 src/i18n.rs        translations: t!/tn! macros, language choice, catalogs in locales/
 src/theme.rs       theme directory watching and applying a theme by name

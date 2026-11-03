@@ -18,6 +18,7 @@ mod icons;
 mod keymap;
 mod layout;
 mod mcp;
+mod network;
 mod ops;
 mod ops_panel;
 mod palette;

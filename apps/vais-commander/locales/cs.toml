@@ -402,6 +402,8 @@
 "Videos" = "Videa"
 "View" = "Zobrazit"
 "Volumes" = "Svazky"
+"Network" = "Síť"
+"Remove from list" = "Odebrat ze seznamu"
 "Windows context menu" = "Kontextové menu Windows"
 "Yellow" = "Žlutá"
 "[N] name · [E] extension · [C] counter · $1 regex groups" = "[N] název · [E] přípona · [C] čítač · $1 skupiny regexu"

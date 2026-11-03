@@ -122,6 +122,12 @@ impl Location {
         {
             return Location::remote(conn, format!("/{path}"));
         }
+        // A network path, typed with either slash: `\\nas\data`, `//nas/data`.
+        if cfg!(windows)
+            && let Some(path) = crate::network::normalize(text)
+        {
+            return Location::Local(path);
+        }
         Location::Local(PathBuf::from(text))
     }
 
@@ -439,6 +445,20 @@ mod tests {
         );
         assert_eq!(Location::parse("nas:/"), Location::remote("nas", "/"));
         assert_eq!(Location::parse("nas:/srv/www").display(), "nas:/srv/www");
+    }
+
+    /// Typed network paths and the paths `std` builds for the entries of a
+    /// share are the same locations.
+    #[cfg(windows)]
+    #[test]
+    fn network_paths_meet_the_listed_ones() {
+        let share = Location::parse("//nas/data");
+        assert_eq!(share, Location::local(r"\\nas\data\"));
+        let dir = Location::local(PathBuf::from(r"\\nas\data\").join("a"));
+        assert_eq!(dir, Location::parse(r"\\nas\data\a"));
+        assert_eq!(dir.parent(), Some(share.clone()));
+        assert_eq!(share.parent(), Some(Location::local(r"\\nas")));
+        assert!(Location::local(r"\\nas").parent().unwrap().is_roots());
     }
 
     #[test]

@@ -176,6 +176,8 @@ pub struct Workspace {
     /// Recent group); `last_visited` is what was noted last.
     recent: Vec<Location>,
     last_visited: Option<Location>,
+    /// Servers visited through `\\server` paths (the Network group).
+    network_servers: Vec<String>,
     /// Bookmarked directories (Ctrl+D).
     favorites: Vec<Favorite>,
     /// Whole tabs saved from a tab's context menu.
@@ -294,6 +296,7 @@ impl Workspace {
             s.set_recent(&config.recent, cx);
             s.set_favorites(&config.favorites, cx);
             s.set_layouts(&config.favorite_layouts, cx);
+            s.set_servers(&config.network_servers, cx);
         });
         subscriptions.push(cx.subscribe_in(
             &sidebar,
@@ -310,6 +313,7 @@ impl Workspace {
                 }
                 SidebarEvent::RenameFavorite(id) => this.rename_favorite(id.clone(), window, cx),
                 SidebarEvent::ColorFavorite(id) => this.pick_favorite_color(id.clone(), window, cx),
+                SidebarEvent::ForgetServer(server) => this.forget_server(server, cx),
                 SidebarEvent::ManageConnections => this.open_connections(window, cx),
                 SidebarEvent::Changed => this.schedule_save(cx),
             },
@@ -393,6 +397,7 @@ impl Workspace {
             connections,
             recent: config.recent.clone(),
             last_visited: None,
+            network_servers: config.network_servers.clone(),
             favorites: config.favorites.clone(),
             favorite_layouts: config.favorite_layouts.clone(),
             font_family: config.font_family.clone(),
@@ -1846,11 +1851,30 @@ impl Workspace {
             return;
         }
         self.last_visited = Some(path.clone());
+        let server = path.as_local().and_then(crate::network::server_of);
         self.recent.retain(|p| *p != path);
         self.recent.insert(0, path);
         self.recent.truncate(crate::sidebar::RECENT_LIMIT);
         let recent = self.recent.clone();
         self.sidebar.update(cx, |s, cx| s.set_recent(&recent, cx));
+        if cfg!(windows)
+            && let Some(server) = server
+        {
+            self.network_servers
+                .retain(|s| !s.eq_ignore_ascii_case(&server));
+            self.network_servers.insert(0, server);
+            self.network_servers.truncate(crate::sidebar::RECENT_LIMIT);
+            let servers = self.network_servers.clone();
+            self.sidebar.update(cx, |s, cx| s.set_servers(&servers, cx));
+        }
+        self.schedule_save(cx);
+    }
+
+    /// Drop a server from the sidebar's Network group.
+    fn forget_server(&mut self, server: &str, cx: &mut Context<Self>) {
+        self.network_servers.retain(|s| s != server);
+        let servers = self.network_servers.clone();
+        self.sidebar.update(cx, |s, cx| s.set_servers(&servers, cx));
         self.schedule_save(cx);
     }
 
@@ -1896,6 +1920,7 @@ impl Workspace {
                 .count(),
             tabs: self.tabs.iter().filter_map(|t| t.config(cx)).collect(),
             recent: self.recent.clone(),
+            network_servers: self.network_servers.clone(),
             favorites: self.favorites.clone(),
             favorite_layouts: self.favorite_layouts.clone(),
             font_family: self.font_family.clone(),

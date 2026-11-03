@@ -401,6 +401,8 @@
 "Videos" = "视频"
 "View" = "查看"
 "Volumes" = "卷"
+"Network" = "网络"
+"Remove from list" = "从列表中移除"
 "Windows context menu" = "Windows 上下文菜单"
 "Yellow" = "黄色"
 "[N] name · [E] extension · [C] counter · $1 regex groups" = "[N] 名称 · [E] 扩展名 · [C] 计数器 · $1 正则表达式分组"

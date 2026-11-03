@@ -63,11 +63,13 @@ ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
 [target.'cfg(windows)'.dependencies]
 # File icons and the Explorer context menu from the shell (see
-# src/icons/shell.rs, src/shell_menu.rs); all three crates are already in the
-# dependency graph through gpui.
+# src/icons/shell.rs, src/shell_menu.rs) and network shares (src/network.rs);
+# all three crates are already in the dependency graph through gpui.
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_NetManagement",
+    "Win32_NetworkManagement_WNet",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_UI_Input_KeyboardAndMouse",

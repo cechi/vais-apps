@@ -401,6 +401,8 @@
 "Videos" = "Відео"
 "View" = "Перегляд"
 "Volumes" = "Томи"
+"Network" = "Мережа"
+"Remove from list" = "Вилучити зі списку"
 "Windows context menu" = "Контекстне меню Windows"
 "Yellow" = "Жовтий"
 "[N] name · [E] extension · [C] counter · $1 regex groups" = "[N] назва · [E] розширення · [C] лічильник · $1 групи regex"

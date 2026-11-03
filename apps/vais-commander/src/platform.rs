@@ -26,9 +26,14 @@ pub fn roots() -> Vec<PathBuf> {
 
 #[cfg(windows)]
 pub fn roots() -> Vec<PathBuf> {
-    let drives: Vec<PathBuf> = (b'A'..=b'Z')
-        .map(|letter| PathBuf::from(format!("{}:\\", letter as char)))
-        .filter(|p| p.exists())
+    use windows::Win32::Storage::FileSystem::GetLogicalDrives;
+    // The drive mask, not a look at each drive: a mapped network drive whose
+    // server is gone would hold the caller up for many seconds.
+    // SAFETY: no arguments, no pointers.
+    let mask = unsafe { GetLogicalDrives() };
+    let drives: Vec<PathBuf> = (0..26u8)
+        .filter(|bit| mask & (1 << bit) != 0)
+        .map(|bit| PathBuf::from(format!("{}:\\", (b'A' + bit) as char)))
         .collect();
     if drives.is_empty() {
         vec![PathBuf::from("C:\\")]
@@ -60,6 +65,12 @@ pub fn is_roots_path(path: &Path) -> bool {
 pub fn parent_of(path: &Path) -> Option<PathBuf> {
     if is_roots_path(path) {
         return None;
+    }
+    // A share's root is below its server, the server below the roots.
+    if cfg!(windows)
+        && let Some(parent) = crate::network::parent(path)
+    {
+        return Some(parent);
     }
     match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => Some(parent.to_path_buf()),
@@ -124,12 +135,14 @@ pub fn user_places() -> Vec<(String, PathBuf, gpui_kit::component::IconName)> {
 }
 
 /// Mounted volumes worth listing: the roots plus real file systems mounted
-/// under the usual media/mount locations.
+/// under the usual media/mount locations. Network drives on Windows are in
+/// [`network_drives`] instead.
 pub fn volumes() -> Vec<(String, PathBuf)> {
     // Only Linux and macOS add to the list below.
     #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(unused_mut))]
     let mut volumes: Vec<(String, PathBuf)> = roots()
         .into_iter()
+        .filter(|r| !is_network_drive(r))
         .map(|r| (r.to_string_lossy().into_owned(), r))
         .collect();
     #[cfg(target_os = "linux")]
@@ -202,6 +215,59 @@ pub fn volumes() -> Vec<(String, PathBuf)> {
         }
     }
     volumes
+}
+
+#[cfg(not(windows))]
+fn is_network_drive(_root: &Path) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn is_network_drive(root: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::core::PCWSTR;
+    const DRIVE_REMOTE: u32 = 4;
+    let wide: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: a NUL-terminated wide string.
+    unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) == DRIVE_REMOTE }
+}
+
+/// Drive letters mapped to network shares, each with the share it shows
+/// (`\\nas\data`) when Windows knows it.
+#[cfg(not(windows))]
+pub fn network_drives() -> Vec<(PathBuf, Option<String>)> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+pub fn network_drives() -> Vec<(PathBuf, Option<String>)> {
+    use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+    use windows::core::{PCWSTR, PWSTR};
+    roots()
+        .into_iter()
+        .filter(|root| is_network_drive(root))
+        .map(|root| {
+            // `Z:` without the backslash names the connection.
+            let local: Vec<u16> = root
+                .to_string_lossy()
+                .trim_end_matches('\\')
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            let mut remote = [0u16; 1024];
+            let mut len = remote.len() as u32;
+            // SAFETY: a NUL-terminated name and a buffer of `len` characters.
+            let status = unsafe {
+                WNetGetConnectionW(PCWSTR(local.as_ptr()), PWSTR(remote.as_mut_ptr()), &mut len)
+            };
+            let share = status.is_ok().then(|| {
+                let end = remote.iter().position(|&c| c == 0).unwrap_or(remote.len());
+                String::from_utf16_lossy(&remote[..end])
+            });
+            (root, share)
+        })
+        .collect()
 }
 
 /// Open the user's terminal emulator in `dir`.
