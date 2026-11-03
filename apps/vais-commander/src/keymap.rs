@@ -9,12 +9,16 @@ use crate::panel::view::{Column, PreviewMode, ViewMode};
 pub const WORKSPACE_CONTEXT: &str = "Workspace";
 pub const GRID_CONTEXT: &str = "Grid";
 pub const PANEL_CONTEXT: &str = "FilePanel";
+/// A file panel in the terminal view: the shell gets the panel's and the
+/// grid's keys, only moving the focus and switching the view stay.
+pub const TERMINAL_PANEL_CONTEXT: &str = "TerminalPanel";
+/// The grid's bindings (F-keys, Tab, Ctrl+C…) except inside a terminal.
+pub const GRID_NOT_TERMINAL: &str = "Grid && !Terminal";
 pub const PANEL_FILTER_CONTEXT: &str = "PanelFilter";
 pub const COMMAND_LINE_CONTEXT: &str = "CommandLine";
-/// The embedded terminal in the Agents panel. Workspace bindings a terminal
+/// The embedded terminal (the Agents panel, a panel's terminal view). Workspace bindings a terminal
 /// program would want for itself (Ctrl+T, F10, …) are bound with
 /// [`WORKSPACE_NOT_TERMINAL`] so they never fire while it has the focus.
-#[allow(dead_code)] // the terminal view (next step) sets it
 pub const TERMINAL_CONTEXT: &str = "Terminal";
 pub const WORKSPACE_NOT_TERMINAL: &str = "Workspace && !Terminal";
 pub const PALETTE_CONTEXT: &str = "Palette";
@@ -206,8 +210,9 @@ pub fn bindings() -> Vec<KeyBinding> {
     let w = Some(WORKSPACE_CONTEXT);
     // Workspace bindings the terminal must be able to swallow.
     let wt = Some(WORKSPACE_NOT_TERMINAL);
-    let g = Some(GRID_CONTEXT);
+    let g = Some(GRID_NOT_TERMINAL);
     let p = Some(PANEL_CONTEXT);
+    let tp = Some(TERMINAL_PANEL_CONTEXT);
     let mac = cfg!(target_os = "macos");
     let focus_mod = if mac { "secondary-alt" } else { "ctrl" };
     let hidden_key = if mac {
@@ -326,6 +331,13 @@ pub fn bindings() -> Vec<KeyBinding> {
             },
             p,
         ),
+        KeyBinding::new(
+            "ctrl-f4",
+            SetView {
+                mode: ViewMode::Terminal,
+            },
+            p,
+        ),
         // Not `secondary`: Cmd+Shift+Q logs out on macOS.
         KeyBinding::new("ctrl-shift-q", CyclePreview, p),
         // Sorting: Ctrl+Shift+F3 name, F4 type, F5 time, F6 size.
@@ -359,6 +371,11 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-enter", ApplyRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("escape", CancelRename, Some(RENAME_CONTEXT)),
         KeyBinding::new("left", CollapseEntry, p),
+        // gpui-base's Root moves the focus with Tab and copies with Ctrl+C;
+        // in a terminal these keys are the program's.
+        KeyBinding::new("tab", NoAction, Some(TERMINAL_CONTEXT)),
+        KeyBinding::new("shift-tab", NoAction, Some(TERMINAL_CONTEXT)),
+        KeyBinding::new("ctrl-c", NoAction, Some(TERMINAL_CONTEXT)),
     ];
     if cfg!(windows) {
         // As in Explorer, Shift+F10 is the full shell menu.
@@ -386,6 +403,22 @@ pub fn bindings() -> Vec<KeyBinding> {
             wt,
         ));
     }
+    // A panel's terminal view: the views by the same keys, and the focus to
+    // a neighbour by Ctrl+Shift+arrows (the shell's Ctrl+arrows jump words).
+    for (key, mode) in [
+        ("ctrl-f1", ViewMode::Brief),
+        ("ctrl-f2", ViewMode::Full),
+        ("ctrl-f3", ViewMode::Thumbnails),
+    ] {
+        v.push(KeyBinding::new(key, SetView { mode }, tp));
+    }
+    let terminal_focus = if mac { focus_mod } else { "ctrl-shift" };
+    v.extend([
+        KeyBinding::new(&format!("{terminal_focus}-up"), FocusUp, tp),
+        KeyBinding::new(&format!("{terminal_focus}-down"), FocusDown, tp),
+        KeyBinding::new(&format!("{terminal_focus}-left"), FocusLeft, tp),
+        KeyBinding::new(&format!("{terminal_focus}-right"), FocusRight, tp),
+    ]);
     v
 }
 
@@ -600,6 +633,62 @@ mod palette_tests {
         ] {
             assert!(matches(global), "{global} must still work");
         }
+    }
+
+    /// A panel's terminal view leaves Tab, the F-keys, Ctrl+C and the
+    /// cursor keys to the shell; Ctrl+Shift+arrows and the view keys stay.
+    #[test]
+    fn terminal_view_keeps_the_shell_keys() {
+        let stack: Vec<KeyContext> = [
+            "Root",
+            super::WORKSPACE_CONTEXT,
+            super::GRID_CONTEXT,
+            super::TERMINAL_PANEL_CONTEXT,
+            super::TERMINAL_CONTEXT,
+        ]
+        .iter()
+        .map(|c| KeyContext::parse(c).unwrap())
+        .collect();
+        // The bindings of `keys` that apply there, deepest first, as
+        // dispatch orders them.
+        let bound = |keys: &str| {
+            let mut found: Vec<(usize, String)> = super::bindings()
+                .into_iter()
+                .filter(|b| b.keystrokes().len() == 1 && b.keystrokes()[0].unparse() == keys)
+                .filter_map(|b| {
+                    let depth = b.predicate().map_or(Some(0), |p| p.depth_of(&stack))?;
+                    Some((depth, b.action().name().to_string()))
+                })
+                .collect();
+            found.sort_by(|a, b| b.0.cmp(&a.0));
+            found.into_iter().map(|(_, name)| name).collect::<Vec<_>>()
+        };
+        // Nothing, or a null binding that also switches off gpui-base's
+        // Root bindings (Tab moves the focus, Ctrl+C copies).
+        for shell_key in [
+            "tab",
+            "shift-tab",
+            "f5",
+            "f8",
+            "ctrl-c",
+            "ctrl-v",
+            "up",
+            "enter",
+            "ctrl-left",
+        ] {
+            let actions = bound(shell_key);
+            assert!(
+                actions.first().is_none_or(|a| a.ends_with("NoAction")),
+                "{shell_key}: {actions:?}"
+            );
+        }
+        for root_key in ["tab", "shift-tab", "ctrl-c"] {
+            assert!(bound(root_key)[0].ends_with("NoAction"), "{root_key}");
+        }
+        if !cfg!(target_os = "macos") {
+            assert!(bound("ctrl-shift-left")[0].ends_with("::FocusLeft"));
+        }
+        assert!(bound("ctrl-f2")[0].ends_with("::SetView"));
     }
 
     #[test]

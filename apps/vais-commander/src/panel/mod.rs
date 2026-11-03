@@ -38,6 +38,7 @@ use crate::fs::{
 use crate::keymap::*;
 use crate::platform;
 use crate::settings::FileIcons;
+use crate::terminal::{Launch, TerminalEvent, TerminalView};
 use crate::ui::{h_flex, v_flex};
 use preview::PreviewPane;
 use state::{Filter, PanelState};
@@ -202,6 +203,11 @@ pub struct FilePanel {
     per_row: usize,
     /// Scroll to the cursor at the next render (after a view change).
     pending_scroll: bool,
+    /// The shell of the terminal view: started when the view is first
+    /// shown, kept while the panel lives (the listing views leave it running).
+    terminal: Option<(Entity<TerminalView>, Subscription)>,
+    /// The listing view to go back to when the shell exits.
+    file_view: ViewMode,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -252,6 +258,16 @@ impl FilePanel {
         subscriptions.push(cx.on_focus_in(&focus_handle, window, |_this, _window, cx| {
             cx.emit(PanelEvent::Focused);
             cx.notify();
+        }));
+        // Focus given to the panel (Tab, a click on its title, the grid)
+        // goes on to the shell in the terminal view.
+        subscriptions.push(cx.on_focus(&focus_handle, window, |this, window, cx| {
+            if this.view == ViewMode::Terminal
+                && let Some((terminal, _)) = &this.terminal
+            {
+                let handle = terminal.read(cx).focus_handle().clone();
+                window.defer(cx, move |window, cx| handle.focus(window, cx));
+            }
         }));
         subscriptions.push(cx.subscribe_in(
             &filter_input,
@@ -320,6 +336,11 @@ impl FilePanel {
             preview_pane: None,
             per_row: 1,
             pending_scroll: false,
+            terminal: None,
+            file_view: match cfg.view {
+                ViewMode::Terminal => ViewMode::Full,
+                view => view,
+            },
             _subscriptions: subscriptions,
         };
         this.load(cfg.path, None, cx);
@@ -398,6 +419,9 @@ impl FilePanel {
         }
         let leaving_full = self.view == ViewMode::Full;
         self.view = mode;
+        if mode != ViewMode::Terminal {
+            self.file_view = mode;
+        }
         // Only the full view scrolls sideways.
         let handle = self.scroll.0.borrow().base_handle.clone();
         let offset = handle.offset();
@@ -413,8 +437,71 @@ impl FilePanel {
         cx.notify();
     }
 
-    fn on_set_view(&mut self, action: &SetView, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_set_view(&mut self, action: &SetView, window: &mut Window, cx: &mut Context<Self>) {
         self.set_view(action.mode, cx);
+        // Into the shell (a running one, or the next render starts it and
+        // takes the focus there), or back from it to the listing.
+        let handle = match &self.terminal {
+            Some((terminal, _)) if self.view == ViewMode::Terminal => {
+                terminal.read(cx).focus_handle().clone()
+            }
+            _ => self.focus_handle.clone(),
+        };
+        handle.focus(window, cx);
+    }
+
+    /// Start the shell of the terminal view when it is shown and there is
+    /// none: the user's shell in the panel's directory (home for a remote
+    /// one or an archive).
+    fn ensure_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.view != ViewMode::Terminal || self.terminal.is_some() {
+            return;
+        }
+        let cwd = self
+            .state
+            .path
+            .as_local()
+            .filter(|path| !platform::is_roots_path(path))
+            .map(Path::to_path_buf)
+            .unwrap_or_else(crate::config::home_dir);
+        let launch = Launch {
+            program: crate::agents::detect::default_shell()
+                .to_string_lossy()
+                .into_owned(),
+            // A login shell on macOS, as Terminal.app starts it.
+            args: if cfg!(target_os = "macos") {
+                vec!["-l".into()]
+            } else {
+                Vec::new()
+            },
+            cwd: Some(cwd),
+            env: Vec::new(),
+        };
+        let terminal = cx.new(|cx| TerminalView::new(launch, cx));
+        let subscription = cx.subscribe_in(
+            &terminal,
+            window,
+            |this, terminal, event, window, cx| match event {
+                TerminalEvent::TitleChanged => cx.notify(),
+                // `exit` in the shell goes back to the listing; a failure
+                // stays on screen with its Restart button.
+                TerminalEvent::Exited => {
+                    if terminal.read(cx).exited_cleanly() {
+                        let focused = terminal.read(cx).focus_handle().is_focused(window);
+                        this.terminal = None;
+                        this.set_view(this.file_view, cx);
+                        if focused {
+                            this.focus_handle.focus(window, cx);
+                        }
+                    }
+                }
+            },
+        );
+        if self.focus_handle.is_focused(window) {
+            let handle = terminal.read(cx).focus_handle().clone();
+            window.defer(cx, move |window, cx| handle.focus(window, cx));
+        }
+        self.terminal = Some((terminal, subscription));
     }
 
     fn on_set_preview(&mut self, action: &SetPreview, _: &mut Window, cx: &mut Context<Self>) {
@@ -1251,7 +1338,7 @@ impl FilePanel {
 
     fn row_height_rems(&self) -> f32 {
         match self.view {
-            ViewMode::Full | ViewMode::Brief => ROW_HEIGHT_REMS,
+            ViewMode::Full | ViewMode::Brief | ViewMode::Terminal => ROW_HEIGHT_REMS,
             ViewMode::Thumbnails => THUMB_ROW_REMS,
         }
     }
@@ -1263,7 +1350,7 @@ impl FilePanel {
     /// Width of one cell in a grid view; `None` means a full-width row.
     fn cell_width_rems(&self) -> Option<f32> {
         match self.view {
-            ViewMode::Full => None,
+            ViewMode::Full | ViewMode::Terminal => None,
             ViewMode::Brief => Some(BRIEF_CELL_REMS),
             ViewMode::Thumbnails => Some(THUMB_CELL_REMS),
         }
@@ -2663,6 +2750,15 @@ impl Render for FilePanel {
         {
             self.hwnd = crate::shell_menu::hwnd(window);
         }
+        self.ensure_terminal(window, cx);
+        // The terminal view: the shell instead of the listing, its title in
+        // the title bar, and the panel's keys left to the shell.
+        let terminal = self
+            .terminal
+            .as_ref()
+            .filter(|_| self.view == ViewMode::Terminal)
+            .map(|(terminal, _)| terminal.clone());
+        let in_terminal = terminal.is_some();
         let theme = cx.theme();
         let colors = Colors {
             primary: theme.primary,
@@ -2697,7 +2793,27 @@ impl Render for FilePanel {
         }
         let count = self.line_count();
 
-        let header: AnyElement = if self.editing_path {
+        let header: AnyElement = if let Some(terminal) = &terminal {
+            let title = terminal.read(cx).title();
+            let title = if title.is_empty() {
+                self.state.path.display()
+            } else {
+                title.to_string()
+            };
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1p5()
+                .text_sm()
+                .child(
+                    Icon::new(IconName::SquareTerminal)
+                        .size_4()
+                        .flex_none()
+                        .text_color(colors.muted_foreground),
+                )
+                .child(div().flex_1().min_w_0().truncate().child(title))
+                .into_any_element()
+        } else if self.editing_path {
             Input::new(&self.path_input)
                 .small()
                 .focus_bordered(false)
@@ -2759,8 +2875,8 @@ impl Render for FilePanel {
             colors.muted_foreground
         };
         let muted_foreground = colors.muted_foreground;
-        let show_status_bar =
-            crate::settings::get(cx).panel_status_bar || self.state.error.is_some();
+        let show_status_bar = !in_terminal
+            && (crate::settings::get(cx).panel_status_bar || self.state.error.is_some());
 
         let row_colors = colors.clone();
         let list = uniform_list(
@@ -2860,9 +2976,15 @@ impl Render for FilePanel {
 
         v_flex()
             .id(("panel", self.index))
-            .key_context(PANEL_CONTEXT)
+            .key_context(if in_terminal {
+                TERMINAL_PANEL_CONTEXT
+            } else {
+                PANEL_CONTEXT
+            })
             .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(Self::on_key_down))
+            .when(!in_terminal, |panel| {
+                panel.on_key_down(cx.listener(Self::on_key_down))
+            })
             .on_action(cx.listener(Self::on_cursor_up))
             .on_action(cx.listener(Self::on_cursor_down))
             .on_action(cx.listener(Self::on_cursor_page_up))
@@ -2936,33 +3058,35 @@ impl Render for FilePanel {
                             .bg(title_bar)
                             .border_b_1()
                             .border_color(border)
-                            .child(
-                                h_flex()
-                                    .flex_none()
-                                    .gap_0p5()
-                                    .child(
-                                        Button::new(("nav-back", self.index))
-                                            .ghost()
-                                            .xsmall()
-                                            .icon(IconName::ArrowLeft)
-                                            .disabled(self.state.history.is_empty())
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| this.go_back(cx)),
-                                            ),
-                                    )
-                                    .child(
-                                        Button::new(("nav-forward", self.index))
-                                            .ghost()
-                                            .xsmall()
-                                            .icon(IconName::ArrowRight)
-                                            .disabled(self.state.forward.is_empty())
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| this.go_forward(cx)),
-                                            ),
-                                    ),
-                            )
+                            .when(!in_terminal, |bar| {
+                                bar.child(
+                                    h_flex()
+                                        .flex_none()
+                                        .gap_0p5()
+                                        .child(
+                                            Button::new(("nav-back", self.index))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::ArrowLeft)
+                                                .disabled(self.state.history.is_empty())
+                                                .on_click(
+                                                    cx.listener(|this, _, _, cx| this.go_back(cx)),
+                                                ),
+                                        )
+                                        .child(
+                                            Button::new(("nav-forward", self.index))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::ArrowRight)
+                                                .disabled(self.state.forward.is_empty())
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.go_forward(cx)
+                                                })),
+                                        ),
+                                )
+                            })
                             .child(header)
-                            .when(!self.state.path.is_roots(), |d| {
+                            .when(!in_terminal && !self.state.path.is_roots(), |d| {
                                 let path = self.state.path.clone();
                                 let is_favorite =
                                     crate::settings::get(cx).favorites.contains(&path);
@@ -2977,20 +3101,22 @@ impl Render for FilePanel {
                                         })),
                                 )
                             })
-                            .child(
-                                Button::new(("search", self.index))
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(IconName::Search)
-                                    .selected(self.state.filter.is_some())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if this.state.filter.is_some() {
-                                            this.close_filter(window, cx);
-                                        } else {
-                                            this.open_filter(window, cx);
-                                        }
-                                    })),
-                            )
+                            .when(!in_terminal, |bar| {
+                                bar.child(
+                                    Button::new(("search", self.index))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Search)
+                                        .selected(self.state.filter.is_some())
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            if this.state.filter.is_some() {
+                                                this.close_filter(window, cx);
+                                            } else {
+                                                this.open_filter(window, cx);
+                                            }
+                                        })),
+                                )
+                            })
                             .child(
                                 Button::new(("view", self.index))
                                     .ghost()
@@ -3016,9 +3142,15 @@ impl Render for FilePanel {
                                     }),
                             ),
                     )
-                    .children(filter_bar)
-                    .child(
-                        self.with_preview(
+                    .children(filter_bar.filter(|_| !in_terminal))
+                    .child(match terminal {
+                        Some(terminal) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .child(terminal)
+                            .into_any_element(),
+                        None => self.with_preview(
                             column_header,
                             div()
                                 .id(("panel-body", self.index))
@@ -3088,7 +3220,7 @@ impl Render for FilePanel {
                             window,
                             cx,
                         ),
-                    )
+                    })
                     // Errors are only reported here, so they show even with the
                     // status bars turned off.
                     .when(show_status_bar, |panel| {

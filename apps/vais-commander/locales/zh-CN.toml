@@ -377,6 +377,7 @@
 "Tabs opened from the layout take this name as their title" = "从此布局打开的标签页将以此名称作为标题"
 "Teal" = "青色"
 "Terminal" = "终端"
+"Terminal view" = "终端视图"
 "The command line needs a local directory" = "命令行需要本地文件夹"
 "Theme…" = "主题…"
 "Three or six hex digits, with or without the #" = "三位或六位十六进制数字，可带或不带 #"

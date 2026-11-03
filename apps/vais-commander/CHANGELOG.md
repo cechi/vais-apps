@@ -12,6 +12,16 @@ What changed in each release of VAIS Commander, newest first.
   network drives (moved there from Volumes).
 - Windows: a network share that refuses your Windows login asks for a user
   name and password in Windows' credential dialog, which can remember them.
+- A fourth panel view, Terminal (`Ctrl+F4`): a shell in the panel's
+  directory, so a grid of panels works as a terminal multiplexer.
+  `Ctrl+Shift+arrows` move the focus to a neighbouring panel, `Ctrl+F1`–`F3`
+  go back to a listing (the shell keeps running), `exit` closes it.
+
+### Fixed
+
+- Tab and Shift+Tab in the Agents panel's terminal reach the program instead
+  of moving the focus, and Ctrl+C always interrupts (it copied while some
+  text was selected elsewhere in the window).
 
 ## 0.4.3 - 2026-10-29
 

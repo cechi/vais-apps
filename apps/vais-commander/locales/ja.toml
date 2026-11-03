@@ -377,6 +377,7 @@
 "Tabs opened from the layout take this name as their title" = "このレイアウトから開いたタブには、この名前がタイトルとして付きます"
 "Teal" = "青緑"
 "Terminal" = "ターミナル"
+"Terminal view" = "ターミナル表示"
 "The command line needs a local directory" = "コマンドラインにはローカルフォルダーが必要です"
 "Theme…" = "テーマ…"
 "Three or six hex digits, with or without the #" = "3 桁または 6 桁の 16 進数（# の有無は問いません）"

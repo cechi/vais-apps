@@ -216,6 +216,11 @@ impl TerminalView {
         self.state == SessionState::Running
     }
 
+    /// The program ended on its own with success (`exit` in a shell).
+    pub fn exited_cleanly(&self) -> bool {
+        self.state == SessionState::Exited(Some(0))
+    }
+
     /// The title the program set, if any.
     pub fn title(&self) -> &str {
         &self.title

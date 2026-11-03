@@ -152,7 +152,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+Tab` / `Ctrl+Shift+Tab`, `Ctrl+PgDn` / `Ctrl+PgUp` | Next / previous tab |
 | `Ctrl+1 … Ctrl+9` | Activate tab |
 | `Tab` / `Shift+Tab` | Next / previous panel (reading order, wraps) |
-| `Ctrl+↑ ↓ ← →` | Move focus to the neighbouring panel |
+| `Ctrl+↑ ↓ ← →` | Move focus to the neighbouring panel (`Ctrl+Shift+↑ ↓ ← →` from a terminal view) |
 | `Alt+1 … Alt+9` | Layout 1x2, 2x1, 1x3, 3x1, 2x2, 2x3, 3x2, 3x3, 1x1 |
 | `↑ ↓ PgUp PgDn Home End` | Move cursor |
 | `Shift` + the above | Move cursor and mark the range |
@@ -175,7 +175,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+E` | Focus the command line |
 | `Ctrl+Shift+B` / `` Ctrl+` `` / `Ctrl+Shift+N` | Agents panel: toggle / focus it or go back to the files / new session |
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | Put the name / full path of the entry under the cursor on the command line |
-| `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` | View: brief (names in columns) / full (list with columns) / thumbnails; also the view button after the path and the panel's context menu. See Views |
+| `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` / `Ctrl+F4` | View: brief (names in columns) / full (list with columns) / thumbnails / terminal; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+Q` | Preview of the entry under the cursor: off → bottom → right (also in the view button's menu). See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting. With no files waiting, `Ctrl+V` saves an image from the system clipboard (a screenshot, a copied picture) into the directory, asking for the file name first |
@@ -251,8 +251,19 @@ Each panel has its own view, saved with the tab:
 - **Thumbnails** (`Ctrl+F3`): a grid with image previews (png, jpg, gif, webp, bmp,
   tiff, ico, qoi, svg) and large icons for everything else. Previews are generated in the
   background and cached under the user cache directory (`~/.cache/vais-commander/thumbs`).
+- **Terminal** (`Ctrl+F4`): a shell (`$SHELL`, `%COMSPEC%` on Windows) in the panel's
+  directory instead of the listing, so a grid of panels doubles as a terminal
+  multiplexer. The title bar shows the title the shell sets. The shell gets every key a
+  terminal program needs, Tab, the F-keys, `Ctrl+C` and the arrows included; only
+  `Ctrl+Shift+↑ ↓ ← →` (moving the focus to a neighbouring panel), `Ctrl+F1`–`F3` (back
+  to a listing) and the app-wide shortcuts (command palette, Agents panel, zoom) stay
+  with the app.
+  `Ctrl+Shift+C` / `Ctrl+Shift+V` copy and paste. Switching to a listing leaves the shell
+  running, and `Ctrl+F4` comes back to it; `exit` in the shell goes back to the listing,
+  a failed start or a non-zero exit stays on screen with a Restart button. A panel saved
+  in the terminal view starts a new shell at the next start.
 
-Any view can show a **preview** of the entry under the cursor at the bottom or the right of
+Any listing view can show a **preview** of the entry under the cursor at the bottom or the right of
 the panel, with a divider to resize it: the second section of the view button's menu (and
 of the panel's context menu), or `Ctrl+Shift+Q` to cycle off → bottom → right. Images show
 whole (from a connection or an archive as their thumbnail), text files show their first

@@ -17,16 +17,24 @@ pub enum ViewMode {
     Brief,
     /// A grid of image thumbnails (icons for everything else).
     Thumbnails,
+    /// A shell in the panel's directory instead of the listing.
+    Terminal,
 }
 
 impl ViewMode {
-    pub const ALL: [ViewMode; 3] = [ViewMode::Full, ViewMode::Brief, ViewMode::Thumbnails];
+    pub const ALL: [ViewMode; 4] = [
+        ViewMode::Full,
+        ViewMode::Brief,
+        ViewMode::Thumbnails,
+        ViewMode::Terminal,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             ViewMode::Full => t!("Full"),
             ViewMode::Brief => t!("Brief"),
             ViewMode::Thumbnails => t!("Thumbnails"),
+            ViewMode::Terminal => t!("Terminal"),
         }
     }
 
@@ -36,6 +44,7 @@ impl ViewMode {
             ViewMode::Full => t!("Full view"),
             ViewMode::Brief => t!("Brief view"),
             ViewMode::Thumbnails => t!("Thumbnails view"),
+            ViewMode::Terminal => t!("Terminal view"),
         }
     }
 
@@ -44,12 +53,13 @@ impl ViewMode {
             ViewMode::Full => IconName::Menu,
             ViewMode::Brief => IconName::GalleryVerticalEnd,
             ViewMode::Thumbnails => IconName::LayoutDashboard,
+            ViewMode::Terminal => IconName::SquareTerminal,
         }
     }
 
     /// Entries are laid out in a grid (several per row).
     pub fn is_grid(self) -> bool {
-        self != ViewMode::Full
+        matches!(self, ViewMode::Brief | ViewMode::Thumbnails)
     }
 }
 
