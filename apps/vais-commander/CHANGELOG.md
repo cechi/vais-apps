@@ -9,6 +9,10 @@ What changed in each release of VAIS Commander, newest first.
 - RAR archives (also `.cbr`) open like a directory, as zip and 7z do:
   browse, view, copy out and *Extract…*. Any volume of a multi-volume
   archive opens the whole of it; encrypted ones are refused with a message.
+- Copying or moving onto an existing name can rename instead: *Rename…* in
+  the Overwrite / Skip dialog asks for a name for each clashing entry, with
+  a free `name (1).ext` filled in. `Ctrl+C`, `Ctrl+V` in the same directory
+  makes a copy that way instead of saying it is already there.
 
 ### Changed
 

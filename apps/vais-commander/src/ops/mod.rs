@@ -4,6 +4,7 @@
 
 pub mod manager;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -100,6 +101,9 @@ pub struct Request {
     pub dest: Option<Location>,
     /// Replace existing files at the destination; otherwise they are skipped.
     pub overwrite: bool,
+    /// Sources that land under another name (a copy beside an existing
+    /// file); the rest keep their own.
+    pub names: HashMap<Location, String>,
 }
 
 impl Request {
@@ -138,16 +142,47 @@ pub fn describe(sources: &[Location]) -> String {
     }
 }
 
-/// Destination entries that already exist.
+/// The sources whose name already exists in `dest`.
 pub fn conflicts(sources: &[Location], dest: &Location) -> Vec<Location> {
     let Ok(backend) = backend_for(dest) else {
         return Vec::new();
     };
     sources
         .iter()
-        .filter_map(|src| src.file_name().map(|name| dest.join(&name)))
-        .filter(|dst| backend.exists(dst))
+        .filter(|src| {
+            src.file_name()
+                .is_some_and(|name| backend.exists(&dest.join(&name)))
+        })
+        .cloned()
         .collect()
+}
+
+/// `name` numbered as `report (1).pdf`, `report (2).pdf`… : the first
+/// number `taken` says is free. A number already there is replaced
+/// (`report (1).pdf` → `report (2).pdf`), an archive keeps its whole ending
+/// (`site (1).tar.gz`) and a directory has none.
+pub fn numbered_name(name: &str, is_dir: bool, taken: impl Fn(&str) -> bool) -> String {
+    let stem_len = if is_dir {
+        name.len()
+    } else if let Some(stem) = crate::vfs::archive::stem(name) {
+        stem.len()
+    } else {
+        match name.rfind('.') {
+            Some(dot) if dot > 0 => dot,
+            _ => name.len(),
+        }
+    };
+    let (stem, ending) = name.split_at(stem_len);
+    // `report (3)` → `report`
+    let stem = stem
+        .strip_suffix(')')
+        .and_then(|s| s.rsplit_once(" ("))
+        .filter(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(stem, |(base, _)| base);
+    (1..)
+        .map(|n| format!("{stem} ({n}){ending}"))
+        .find(|candidate| !taken(candidate))
+        .expect("a free number")
 }
 
 pub fn run(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
@@ -170,11 +205,17 @@ pub fn run(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Re
         .dest
         .as_ref()
         .and_then(|l| l.as_local().map(Path::to_path_buf));
+    let names = req
+        .names
+        .iter()
+        .filter_map(|(src, name)| Some((src.as_local()?.to_path_buf(), name.clone())))
+        .collect();
     let local = LocalRequest {
         kind: req.kind,
         sources,
         dest,
         overwrite: req.overwrite,
+        names,
     };
     run_local(&local, progress, cancel)
 }
@@ -185,6 +226,7 @@ struct LocalRequest {
     sources: Vec<PathBuf>,
     dest: Option<PathBuf>,
     overwrite: bool,
+    names: HashMap<PathBuf, String>,
 }
 
 fn run_local(req: &LocalRequest, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Report {
@@ -241,9 +283,12 @@ fn transfer(
         .dest
         .as_deref()
         .ok_or_else(|| io::Error::other(t!("no destination")))?;
-    let name = src
-        .file_name()
-        .ok_or_else(|| io::Error::other(t!("source has no file name")))?;
+    let name = match req.names.get(src) {
+        Some(name) => std::ffi::OsStr::new(name),
+        None => src
+            .file_name()
+            .ok_or_else(|| io::Error::other(t!("source has no file name")))?,
+    };
     let dst = dest.join(name);
     if dst == src {
         return Err(io::Error::other(t!("source and destination are the same")));
@@ -533,9 +578,12 @@ fn transfer_generic(
         .dest
         .as_ref()
         .ok_or_else(|| io::Error::other(t!("no destination")))?;
-    let name = src
-        .file_name()
-        .ok_or_else(|| io::Error::other(t!("source has no file name")))?;
+    let name = match req.names.get(src) {
+        Some(name) => name.clone(),
+        None => src
+            .file_name()
+            .ok_or_else(|| io::Error::other(t!("source has no file name")))?,
+    };
     let dst = dest.join(&name);
     if dst == *src {
         return Err(io::Error::other(t!("source and destination are the same")));
@@ -705,6 +753,7 @@ mod tests {
             sources: vec![Location::local(root.join("src"))],
             dest: Some(Location::local(dest.clone())),
             overwrite: false,
+            names: HashMap::new(),
         });
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert_eq!(report.done, 1);
@@ -736,6 +785,7 @@ mod tests {
             sources: vec![Location::local(root.join("src/f.txt"))],
             dest: Some(Location::local(dest.clone())),
             overwrite: false,
+            names: HashMap::new(),
         });
         assert_eq!(fs::read_to_string(dest.join("f.txt")).unwrap(), "old");
 
@@ -744,6 +794,7 @@ mod tests {
             sources: vec![Location::local(root.join("src/f.txt"))],
             dest: Some(Location::local(dest.clone())),
             overwrite: true,
+            names: HashMap::new(),
         });
         assert_eq!(fs::read_to_string(dest.join("f.txt")).unwrap(), "new");
     }
@@ -760,6 +811,7 @@ mod tests {
             sources: vec![Location::local(root.join("src/dir"))],
             dest: Some(Location::local(dest.clone())),
             overwrite: false,
+            names: HashMap::new(),
         });
         assert!(report.errors.is_empty(), "{:?}", report.errors);
         assert!(!root.join("src/dir").exists());
@@ -770,6 +822,7 @@ mod tests {
             sources: vec![Location::local(dest.join("dir"))],
             dest: None,
             overwrite: false,
+            names: HashMap::new(),
         });
         assert_eq!(report.done, 1);
         assert!(!dest.join("dir").exists());
@@ -787,6 +840,7 @@ mod tests {
             ],
             dest: Some(Location::local(root.clone())),
             overwrite: true,
+            names: HashMap::new(),
         });
         assert_eq!(report.done, 0);
         assert_eq!(report.errors.len(), 2);
@@ -811,12 +865,48 @@ mod tests {
                 ],
                 dest: Some(Location::local(dest.clone())),
                 overwrite: false,
+                names: HashMap::new(),
             },
             &progress,
             &cancel,
         );
         assert!(report.cancelled);
         assert!(!dest.join("a.txt").exists());
+    }
+
+    #[test]
+    fn copies_beside_under_a_new_name() {
+        let root = sandbox();
+        write(&root.join("f.txt"), "f");
+        let src = Location::local(root.join("f.txt"));
+        assert_eq!(
+            conflicts(&[src.clone()], &Location::local(&root)),
+            [src.clone()]
+        );
+        let (report, _) = run_ok(Request {
+            kind: OpKind::Copy,
+            sources: vec![src.clone()],
+            dest: Some(Location::local(root.clone())),
+            overwrite: false,
+            names: HashMap::from([(src, "f (1).txt".to_string())]),
+        });
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(fs::read_to_string(root.join("f (1).txt")).unwrap(), "f");
+        assert_eq!(fs::read_to_string(root.join("f.txt")).unwrap(), "f");
+    }
+
+    #[test]
+    fn numbers_names_past_the_taken_ones() {
+        let taken = ["report (1).pdf", "report (2).pdf", "site (1).tar.gz"];
+        let free = |name: &str, is_dir| numbered_name(name, is_dir, |n| taken.contains(&n));
+        assert_eq!(free("report.pdf", false), "report (3).pdf");
+        assert_eq!(free("report (1).pdf", false), "report (3).pdf");
+        assert_eq!(free("notes.md", false), "notes (1).md");
+        assert_eq!(free("site.tar.gz", false), "site (2).tar.gz");
+        assert_eq!(free("Makefile", false), "Makefile (1)");
+        assert_eq!(free(".bashrc", false), ".bashrc (1)");
+        assert_eq!(free("v1.0", true), "v1.0 (1)");
+        assert_eq!(free("draft (final).txt", false), "draft (final) (1).txt");
     }
 
     #[test]

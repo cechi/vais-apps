@@ -635,14 +635,24 @@ impl GridView {
         let request = Request {
             kind,
             sources,
-            dest: Some(dest),
+            dest: Some(dest.clone()),
             overwrite: false,
+            names: Default::default(),
         };
         if conflicts.is_empty() {
             let id = self.run_operation(request, cx);
             if let Some(cb) = &on_outcome {
                 cb(Outcome::Started(id), window, cx);
             }
+            return;
+        }
+        // Copies into their own directory (Ctrl+C, Ctrl+V): nothing to
+        // overwrite or skip, only a name for each copy.
+        if conflicts
+            .iter()
+            .all(|src| src.parent().as_ref() == Some(&dest))
+        {
+            self.ask_new_names(request, conflicts, None, on_outcome, window, cx);
             return;
         }
 
@@ -669,6 +679,7 @@ impl GridView {
         let overwrite = request.clone_with_overwrite(true);
         let view = cx.entity();
         let on_cancel_outcome = on_outcome.clone();
+        const RENAME_ROW: usize = 2;
         let title = if on_outcome.is_some() {
             t!("Agent: files already exist").to_string()
         } else {
@@ -678,6 +689,7 @@ impl GridView {
             let items = vec![
                 PaletteItem::new(t!("Overwrite")).danger(true),
                 PaletteItem::new(t!("Skip existing")),
+                PaletteItem::new(t!("Rename…")),
                 PaletteItem::new(t!("Cancel")),
             ];
             Palette::pick(items, cx)
@@ -687,6 +699,22 @@ impl GridView {
                     let request = match choice.item {
                         Some(0) => overwrite.clone(),
                         Some(1) => request.clone(),
+                        Some(RENAME_ROW) => {
+                            let (view, request, conflicts, on_outcome) = (
+                                view.clone(),
+                                request.clone(),
+                                conflicts.clone(),
+                                on_outcome.clone(),
+                            );
+                            window.defer(cx, move |window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.ask_new_names(
+                                        request, conflicts, None, on_outcome, window, cx,
+                                    );
+                                });
+                            });
+                            return;
+                        }
                         _ => {
                             if let Some(cb) = &on_outcome {
                                 cb(Outcome::Cancelled, window, cx);
@@ -698,6 +726,90 @@ impl GridView {
                     if let Some(cb) = &on_outcome {
                         cb(Outcome::Started(id), window, cx);
                     }
+                })
+                .on_cancel(move |window, cx| {
+                    window.close_dialog(cx);
+                    if let Some(cb) = &on_cancel_outcome {
+                        cb(Outcome::Cancelled, window, cx);
+                    }
+                })
+        });
+        palette::open(title, palette, window, cx);
+    }
+
+    /// Ask for the name each source in `pending` gets beside the entry that
+    /// already has its name, one at a time (a free `name (n).ext` filled in),
+    /// then run `request` with those names. `problem` says why the previous
+    /// answer was refused; Esc cancels the whole transfer.
+    fn ask_new_names(
+        &mut self,
+        request: Request,
+        pending: Vec<Location>,
+        problem: Option<String>,
+        on_outcome: Option<OnOutcome>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(dest), Some(src)) = (request.dest.clone(), pending.first().cloned()) else {
+            let id = self.run_operation(request, cx);
+            if let Some(cb) = &on_outcome {
+                cb(Outcome::Started(id), window, cx);
+            }
+            return;
+        };
+        let name = src.file_name().unwrap_or_default();
+        let is_dir = backend_for(&src)
+            .and_then(|b| b.stat(&src))
+            .is_ok_and(|m| m.is_dir());
+        let suggested = ops::numbered_name(&name, is_dir, |n| name_taken(&request, &dest, n));
+        let description = problem.unwrap_or_else(|| {
+            tn!(
+                "{n} already exists in {dir}: {names}",
+                "{n} already exist in {dir}: {names}",
+                1,
+                dir = dest.display(),
+                names = name
+            )
+        });
+        let title = transfer_title(request.kind, std::slice::from_ref(&src));
+        let view = cx.entity();
+        let on_cancel_outcome = on_outcome.clone();
+        let palette = cx.new(|cx| {
+            Palette::new(Vec::new(), &suggested, t!("New name"), window, cx)
+                .input_icon(Some(if is_dir {
+                    IconName::Folder
+                } else {
+                    IconName::File
+                }))
+                .description(description)
+                .select_range(0..stem_len(&suggested, is_dir))
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    let new_name = choice.value.trim().to_string();
+                    let (view, mut request, mut pending, on_outcome, dest) = (
+                        view.clone(),
+                        request.clone(),
+                        pending.clone(),
+                        on_outcome.clone(),
+                        dest.clone(),
+                    );
+                    window.defer(cx, move |window, cx| {
+                        let problem = if new_name.is_empty() || new_name.contains(['/', '\\']) {
+                            Some(t!("Not a valid file name").to_string())
+                        } else if name_taken(&request, &dest, &new_name) {
+                            Some(t!(
+                                "{name}: a file with that name already exists",
+                                name = new_name
+                            ))
+                        } else {
+                            let src = pending.remove(0);
+                            request.names.insert(src, new_name);
+                            None
+                        };
+                        view.update(cx, |this, cx| {
+                            this.ask_new_names(request, pending, problem, on_outcome, window, cx);
+                        });
+                    });
                 })
                 .on_cancel(move |window, cx| {
                     window.close_dialog(cx);
@@ -832,6 +944,7 @@ impl GridView {
             sources,
             dest: None,
             overwrite: false,
+            names: Default::default(),
         };
         let view = cx.entity();
         let on_cancel_outcome = on_outcome.clone();
@@ -1148,10 +1261,12 @@ impl GridView {
             return;
         }
         let dest = canonical(self.active_panel().read(cx).path().clone());
+        // A copy into its own directory asks for the copy's name; a move
+        // there has nothing to do.
         let sources: Vec<Location> = clip
             .paths
             .iter()
-            .filter(|p| p.parent().as_ref() != Some(&dest))
+            .filter(|p| !clip.cut || p.parent().as_ref() != Some(&dest))
             .cloned()
             .collect();
         if clip.cut {
@@ -1484,6 +1599,13 @@ fn canonical(loc: Location) -> Location {
 /// Length of the part of `name` to preselect when renaming: everything
 /// before the extension for files, the whole name for directories and
 /// dot-files.
+/// Whether `name` in `dest` is already used: by an entry there or by
+/// another source of `request` renamed to it.
+fn name_taken(request: &Request, dest: &Location, name: &str) -> bool {
+    request.names.values().any(|n| n == name)
+        || backend_for(dest).is_ok_and(|b| b.exists(&dest.join(name)))
+}
+
 fn stem_len(name: &str, is_dir: bool) -> usize {
     if is_dir {
         return name.len();

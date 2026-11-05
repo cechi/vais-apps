@@ -178,7 +178,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `Ctrl+F1` / `Ctrl+F2` / `Ctrl+F3` / `Ctrl+F4` | View: brief (names in columns) / full (list with columns) / thumbnails / terminal; also the view button after the path and the panel's context menu. See Views |
 | `Ctrl+Shift+Q` | Preview of the entry under the cursor: off → bottom → right (also in the view button's menu). See Views |
 | `Ctrl+Shift+F3` / `F4` / `F5` / `F6` | Sort by name / type / modified / size; the same key again flips the direction. Clicking a column header does the same, the panel's context menu lists the keys too |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus). Cut entries are dimmed until pasted; the status bar shows what is waiting. With no files waiting, `Ctrl+V` saves an image from the system clipboard (a screenshot, a copied picture) into the directory, asking for the file name first |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut the marked (or cursor) entries, paste them into the active panel's directory (also in the context menus); pasting a copy into its own directory asks for the copy's name (`report (1).pdf`). Cut entries are dimmed until pasted; the status bar shows what is waiting. With no files waiting, `Ctrl+V` saves an image from the system clipboard (a screenshot, a copied picture) into the directory, asking for the file name first |
 | `Ctrl+Shift+C` | Copy the selected paths (or the directory) to the clipboard |
 | `F3` / `F4` | View / edit the file under the cursor in an editor tab (see Editor) |
 | `F9` | Open a terminal in the panel's directory (`$TERMINAL`, else the first of ghostty, alacritty, kitty, foot, …) |
@@ -216,8 +216,9 @@ right-click on empty panel space offers the panel actions (new folder, terminal,
 path, hidden files, reload, up, back).
 
 File operations act on the marked entries of the active panel (or the entry under the
-cursor), target the previously focused panel and ask before overwriting (overwrite or
-skip). Each operation runs on its own background thread and gets a row in the
+cursor), target the previously focused panel and ask before overwriting (overwrite,
+skip, or rename: each clashing entry gets its own name, `report (1).pdf` filled in).
+Each operation runs on its own background thread and gets a row in the
 **operations panel** at the bottom of the window (independent of tabs, opens
 automatically, resizable): progress bar, bytes and items, current file, a speed
 sparkline, elapsed time, status, and a cancel / remove button. The status bar shows the
@@ -349,7 +350,7 @@ what you would do by hand:
 | `list_dir`, `search` | Read a directory; find entries by name or by text inside files (connections and archives included) |
 | `navigate`, `set_layout`, `new_tab`, `activate_tab`, `close_tab` | Panels and tabs, like the keys |
 | `select` | Mark entries by names or a pattern, place the cursor |
-| `copy`, `move` | F5 / F6; existing files bring up the usual Overwrite / Skip / Cancel dialog, and the call waits for the operation |
+| `copy`, `move` | F5 / F6; existing files bring up the usual Overwrite / Skip / Rename / Cancel dialog, and the call waits for the operation |
 | `rename`, `mkdir` | Never overwrite |
 | `delete` | To the trash (or permanently); **you confirm it in a dialog** that names the agent, and `Esc` tells the agent it was cancelled |
 | `open_file`, `add_favorite`, `save_layout`, `set_tab_title`, `set_tab_color` | The rest of the UI |
