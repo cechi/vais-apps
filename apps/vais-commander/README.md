@@ -137,7 +137,8 @@ click) chooses a file or enters a directory, `Space` / `Insert` mark several fil
 caller allows it, `Ctrl+Enter` or the button accepts the marks, the entry under the cursor or,
 when choosing a folder, the current directory, `Ctrl+H` shows hidden files, `Esc` cancels.
 Saving shows a name field (prefilled, the extension kept) and asks before replacing a file. The
-caller's filters are a dropdown in the bottom bar; glob patterns match case-insensitively, MIME
+caller's filters are a dropdown in the bottom bar; glob patterns (`*`, `?`, `[...]` classes such
+as GTK's `*.[pP][dD][fF]`) match case-insensitively, MIME
 types through the desktop's MIME database. Limits: only local paths can be returned (no
 connections or archives), the window is not modal to the calling application (Wayland has no
 way to parent it), and the caller's extra choice boxes are answered with their defaults.

@@ -154,6 +154,17 @@ mod tests {
         assert!(!matches_any(&m, "notes.txt"));
         assert!(!matches_any(&m, "png"));
 
+        // GTK's add_suffix() and Qt make their patterns case-insensitive.
+        let gtk = FilterSet {
+            label: "PDF".into(),
+            globs: vec!["*.[pP][dD][fF]".into()],
+            mimes: Vec::new(),
+        };
+        let m = gtk.matchers(|_| Vec::new());
+        assert!(matches_any(&m, "faktura201.pdf"));
+        assert!(matches_any(&m, "SCAN.PDF"));
+        assert!(!matches_any(&m, "data.csv"));
+
         let exact = FilterSet {
             label: "Makefiles".into(),
             globs: vec!["Makefile".into()],
