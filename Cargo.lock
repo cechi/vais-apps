@@ -7417,7 +7417,7 @@ dependencies = [
 
 [[package]]
 name = "vais-commander"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "alacritty_terminal",
  "anyhow",

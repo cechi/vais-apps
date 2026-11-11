@@ -2,12 +2,12 @@
 
 What changed in each release of VAIS Commander, newest first.
 
-## Unreleased
+## 0.5.1 - 2026-11-11
 
 ### Fixed
 
-- The file chooser's format filters hid every file for GTK 4 and Qt apps:
-  their case-insensitive patterns (`*.[pP][dD][fF]`) now match.
+- The file chooser's format filters hid every file for GTK 4, Qt and
+  rfd apps: their case-insensitive patterns (`*.[pP][dD][fF]`) now match.
 
 ## 0.5.0 - 2026-11-09
 
