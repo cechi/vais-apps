@@ -14,6 +14,9 @@ pub enum SortKey {
     Type,
     Modified,
     Created,
+    /// When an item of the trash was deleted (its column's header; the
+    /// sort menus leave it out).
+    Deleted,
 }
 
 impl SortKey {
@@ -134,6 +137,10 @@ pub fn sort_entries(entries: &mut [Entry], sort: Sort) {
                     SortKey::Type => natural_cmp(extension(&a.name), extension(&b.name)),
                     SortKey::Modified => a.modified.cmp(&b.modified),
                     SortKey::Created => a.created.cmp(&b.created),
+                    SortKey::Deleted => {
+                        let deleted = |e: &Entry| e.trash.as_ref().and_then(|t| t.deleted);
+                        deleted(a).cmp(&deleted(b))
+                    }
                 };
                 match sort.dir {
                     SortDir::Asc => primary,
@@ -162,6 +169,7 @@ mod tests {
             uid: None,
             is_parent: false,
             depth: 0,
+            trash: None,
         }
     }
 

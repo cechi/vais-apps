@@ -142,15 +142,23 @@ pub fn describe(sources: &[Location]) -> String {
     }
 }
 
-/// The sources whose name already exists in `dest`.
-pub fn conflicts(sources: &[Location], dest: &Location) -> Vec<Location> {
+/// The sources whose name (from `names`, else their own) already exists
+/// in `dest`.
+pub fn conflicts(
+    sources: &[Location],
+    dest: &Location,
+    names: &HashMap<Location, String>,
+) -> Vec<Location> {
     let Ok(backend) = backend_for(dest) else {
         return Vec::new();
     };
     sources
         .iter()
         .filter(|src| {
-            src.file_name()
+            names
+                .get(src)
+                .cloned()
+                .or_else(|| src.file_name())
                 .is_some_and(|name| backend.exists(&dest.join(&name)))
         })
         .cloned()
@@ -261,7 +269,10 @@ fn run_local(req: &LocalRequest, progress: &Mutex<Progress>, cancel: &AtomicBool
             }
         };
         match result {
-            Ok(()) => report.done += 1,
+            Ok(()) => {
+                report.done += 1;
+                forget_if_gone(src, req.kind);
+            }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => {
                 report.cancelled = true;
                 break;
@@ -501,6 +512,14 @@ fn move_tree(
     }
 }
 
+/// A trash item moved out or deleted takes its record in the trash along
+/// (one skipped as existing stays, record and all).
+fn forget_if_gone(src: &Path, kind: OpKind) {
+    if kind != OpKind::Copy && fs::symlink_metadata(src).is_err() {
+        crate::vfs::trash::forget(src);
+    }
+}
+
 fn delete_one(path: &Path, permanent: bool) -> io::Result<()> {
     if permanent {
         remove_any(path)
@@ -550,7 +569,12 @@ fn run_generic(req: &Request, progress: &Mutex<Progress>, cancel: &AtomicBool) -
         }
         let result = transfer_generic(src, req, progress, cancel);
         match result {
-            Ok(()) => report.done += 1,
+            Ok(()) => {
+                report.done += 1;
+                if let Some(path) = src.as_local() {
+                    forget_if_gone(path, req.kind);
+                }
+            }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => {
                 report.cancelled = true;
                 break;
@@ -774,7 +798,8 @@ mod tests {
         assert_eq!(
             conflicts(
                 &[Location::local(root.join("src/f.txt"))],
-                &Location::local(&dest)
+                &Location::local(&dest),
+                &HashMap::new()
             )
             .len(),
             1
@@ -880,7 +905,7 @@ mod tests {
         write(&root.join("f.txt"), "f");
         let src = Location::local(root.join("f.txt"));
         assert_eq!(
-            conflicts(&[src.clone()], &Location::local(&root)),
+            conflicts(&[src.clone()], &Location::local(&root), &HashMap::new()),
             [src.clone()]
         );
         let (report, _) = run_ok(Request {

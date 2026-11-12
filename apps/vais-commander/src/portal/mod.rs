@@ -53,7 +53,7 @@ pub fn run(config: Config) -> i32 {
         .expect("spawn the portal thread");
 
     application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(crate::ui::AppAssets)
         .run(move |cx| {
             // gpui would quit with the last window; the service lives on.
             cx.set_quit_mode(QuitMode::Explicit);

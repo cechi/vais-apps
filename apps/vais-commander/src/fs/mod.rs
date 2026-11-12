@@ -35,6 +35,8 @@ pub struct Entry {
     pub is_parent: bool,
     /// Nesting level when shown inside an expanded directory (0 = top level).
     pub depth: usize,
+    /// Where an item of the trash came from and when it was deleted.
+    pub trash: Option<std::sync::Arc<crate::vfs::trash::TrashInfo>>,
 }
 
 impl Entry {
@@ -83,6 +85,7 @@ pub fn read_roots() -> Vec<Entry> {
             uid: None,
             is_parent: false,
             depth: 0,
+            trash: None,
         })
         .collect()
 }
@@ -139,6 +142,7 @@ pub fn parent_entry(parent: Location) -> Entry {
         uid: None,
         is_parent: true,
         depth: 0,
+        trash: None,
     }
 }
 

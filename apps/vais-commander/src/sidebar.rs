@@ -2,6 +2,7 @@
 //! volumes, network drives and servers on Windows). Clicking a place navigates the active panel there. More kinds of
 //! sidebar content can be added later.
 
+use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -80,7 +81,7 @@ pub enum FavoriteId {
 pub struct Place {
     pub name: String,
     pub path: Location,
-    pub icon: IconName,
+    pub icon: Lucide,
     /// Muted text after the name (the parent of a recent directory).
     pub detail: Option<String>,
     /// A saved layout (index into the workspace's list) instead of a directory.
@@ -89,6 +90,26 @@ pub struct Place {
     pub removable: bool,
     /// A colour tag, drawn as a thick left border (saved layouts).
     pub color: Option<Hsla>,
+}
+
+/// The trash, last in Places whether or not the system places show: its
+/// own listing where the trash can be read (Linux, Windows), the `~/.Trash`
+/// directory on macOS.
+fn trash_place() -> Option<Place> {
+    let path = if crate::vfs::trash::SUPPORTED {
+        Location::Trash
+    } else {
+        Location::Local(crate::vfs::trash::macos_dir()?)
+    };
+    Some(Place {
+        name: t!("Trash##place").to_string(),
+        path,
+        icon: Lucide::Trash,
+        detail: None,
+        layout: None,
+        removable: false,
+        color: None,
+    })
 }
 
 /// How many recently visited directories the sidebar lists.
@@ -142,7 +163,8 @@ impl Sidebar {
         this
     }
 
-    /// Hide the Connections group (the portal picker returns local paths only).
+    /// Hide the Connections group and the trash (the portal picker returns
+    /// local paths only).
     pub fn set_show_connections(&mut self, show: bool) {
         self.show_connections = show;
     }
@@ -164,7 +186,7 @@ impl Sidebar {
                 .map(|(name, path, icon)| Place {
                     name,
                     path: Location::Local(path),
-                    icon,
+                    icon: icon.into(),
                     detail: None,
                     layout: None,
                     removable: false,
@@ -179,7 +201,7 @@ impl Sidebar {
             .map(|(name, path)| Place {
                 name,
                 path: Location::Local(path),
-                icon: IconName::HardDrive,
+                icon: IconName::HardDrive.into(),
                 detail: None,
                 layout: None,
                 removable: false,
@@ -191,7 +213,7 @@ impl Sidebar {
             .map(|(root, share)| Place {
                 name: root.to_string_lossy().into_owned(),
                 path: Location::Local(root),
-                icon: IconName::Network,
+                icon: IconName::Network.into(),
                 detail: share,
                 layout: None,
                 removable: false,
@@ -207,7 +229,7 @@ impl Sidebar {
             .map(|server| Place {
                 name: format!(r"\\{server}"),
                 path: Location::Local(crate::network::server_path(server)),
-                icon: IconName::Network,
+                icon: IconName::Network.into(),
                 detail: None,
                 layout: None,
                 removable: false,
@@ -240,7 +262,7 @@ impl Sidebar {
                 Place {
                     name: fav.display_name(),
                     path: path.clone(),
-                    icon: IconName::Star,
+                    icon: IconName::Star.into(),
                     detail: detail.filter(|p| !p.is_empty()),
                     layout: None,
                     removable: true,
@@ -263,7 +285,7 @@ impl Sidebar {
             .map(|(ix, saved)| Place {
                 name: saved.name.clone(),
                 path: Location::Local(std::path::PathBuf::new()),
-                icon: IconName::LayoutDashboard,
+                icon: IconName::LayoutDashboard.into(),
                 detail: Some(t!(
                     "{rows}x{cols} layout",
                     rows = saved.tab.layout.rows,
@@ -290,7 +312,7 @@ impl Sidebar {
                 Place {
                     name: path.display_name(),
                     path: path.clone(),
-                    icon: IconName::Folder,
+                    icon: IconName::Folder.into(),
                     detail: parent.filter(|p| !p.is_empty()),
                     layout: None,
                     removable: false,
@@ -320,7 +342,7 @@ impl Sidebar {
                     config.name.clone()
                 },
                 path: config.home(),
-                icon: IconName::Globe,
+                icon: IconName::Globe.into(),
                 detail: Some(match status {
                     Status::Disconnected => format!("{}@{}", config.user, config.host),
                     Status::Connecting => t!("connecting…").to_string(),
@@ -405,58 +427,56 @@ impl Sidebar {
                         place.layout.is_none() && self.current.as_ref() == Some(&place.path);
                     let path = place.path.clone();
                     let layout = place.layout;
-                    let row = h_flex()
-                        .id(("place", ix))
-                        .w_full()
-                        .h(rems(1.75))
-                        .px_3()
-                        // A colour tag: a thick stripe at the left edge.
-                        .when_some(place.color, |d, color| {
-                            d.border_l_4().border_color(color).pl_2()
-                        })
-                        .gap_2()
-                        .cursor_pointer()
-                        .text_sm()
-                        .when(selected, |d| d.bg(c.accent).text_color(c.accent_foreground))
-                        .hover(|s| s.bg(c.hover))
-                        .on_click(cx.listener(move |_this, _, _window, cx| {
-                            cx.emit(match layout {
-                                Some(ix) => SidebarEvent::OpenLayout(ix),
-                                None => SidebarEvent::Open(path.clone()),
-                            });
-                        }))
-                        .child(
-                            Icon::new(place.icon.clone())
-                                .size_4()
-                                .flex_none()
-                                .text_color(if selected {
+                    let row =
+                        h_flex()
+                            .id(("place", ix))
+                            .w_full()
+                            .h(rems(1.75))
+                            .px_3()
+                            // A colour tag: a thick stripe at the left edge.
+                            .when_some(place.color, |d, color| {
+                                d.border_l_4().border_color(color).pl_2()
+                            })
+                            .gap_2()
+                            .cursor_pointer()
+                            .text_sm()
+                            .when(selected, |d| d.bg(c.accent).text_color(c.accent_foreground))
+                            .hover(|s| s.bg(c.hover))
+                            .on_click(cx.listener(move |_this, _, _window, cx| {
+                                cx.emit(match layout {
+                                    Some(ix) => SidebarEvent::OpenLayout(ix),
+                                    None => SidebarEvent::Open(path.clone()),
+                                });
+                            }))
+                            .child(Icon::new(place.icon).size_4().flex_none().text_color(
+                                if selected {
                                     c.accent_foreground
                                 } else {
                                     c.muted_foreground
-                                }),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .max_w_full()
-                                .truncate()
-                                .child(place.name.clone()),
-                        )
-                        .when_some(place.detail.clone(), |row, detail| {
-                            row.child(
+                                },
+                            ))
+                            .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
+                                    .flex_none()
+                                    .max_w_full()
                                     .truncate()
-                                    .text_xs()
-                                    .text_color(if selected {
-                                        c.accent_foreground
-                                    } else {
-                                        c.muted_foreground
-                                    })
-                                    .child(detail),
+                                    .child(place.name.clone()),
                             )
-                        });
+                            .when_some(place.detail.clone(), |row, detail| {
+                                row.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(if selected {
+                                            c.accent_foreground
+                                        } else {
+                                            c.muted_foreground
+                                        })
+                                        .child(detail),
+                                )
+                            });
                     if !place.removable {
                         // A visited server: the menu drops it from the list.
                         let server = match &place.path {
@@ -634,6 +654,9 @@ impl Render for Sidebar {
             .iter()
             .chain(self.favorites.iter())
             .chain(self.layouts.iter())
+            // Always there, last; the portal picker (no connections) returns
+            // local paths only.
+            .chain(trash_place().filter(|_| self.show_connections).iter())
             .cloned()
             .collect();
         let volumes = self.volumes.clone();

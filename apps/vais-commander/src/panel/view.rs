@@ -131,6 +131,10 @@ pub struct ColumnWidths {
     pub permissions: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<f32>,
 }
 
 impl ColumnWidths {
@@ -163,6 +167,8 @@ impl ColumnWidths {
             Some(Column::Created) => &self.created,
             Some(Column::Permissions) => &self.permissions,
             Some(Column::Owner) => &self.owner,
+            Some(Column::Origin) => &self.origin,
+            Some(Column::Deleted) => &self.deleted,
         }
     }
 
@@ -175,6 +181,8 @@ impl ColumnWidths {
             Some(Column::Created) => &mut self.created,
             Some(Column::Permissions) => &mut self.permissions,
             Some(Column::Owner) => &mut self.owner,
+            Some(Column::Origin) => &mut self.origin,
+            Some(Column::Deleted) => &mut self.deleted,
         }
     }
 }
@@ -209,6 +217,8 @@ impl Columns {
             Column::Created => self.created,
             Column::Permissions => self.permissions,
             Column::Owner => self.owner,
+            // The trash's own columns are no choice: see `shown_in`.
+            Column::Origin | Column::Deleted => false,
         }
     }
 
@@ -220,6 +230,7 @@ impl Columns {
             Column::Created => &mut self.created,
             Column::Permissions => &mut self.permissions,
             Column::Owner => &mut self.owner,
+            Column::Origin | Column::Deleted => return,
         };
         *flag = !*flag;
     }
@@ -237,6 +248,15 @@ impl Columns {
             .into_iter()
             .filter(|c| c.available() && self.get(*c))
     }
+
+    /// The columns shown in a listing: the trash has its own set.
+    pub fn shown_in(&self, trash: bool) -> Vec<Column> {
+        if trash {
+            Column::TRASH.to_vec()
+        } else {
+            self.shown().collect()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +267,10 @@ pub enum Column {
     Created,
     Permissions,
     Owner,
+    /// Where an item of the trash was deleted from.
+    Origin,
+    /// When an item of the trash was deleted.
+    Deleted,
 }
 
 impl Column {
@@ -259,6 +283,9 @@ impl Column {
         Column::Owner,
     ];
 
+    /// The columns of the trash.
+    pub const TRASH: [Column; 3] = [Column::Size, Column::Origin, Column::Deleted];
+
     pub fn label(self) -> &'static str {
         match self {
             Column::Size => t!("Size"),
@@ -267,6 +294,8 @@ impl Column {
             Column::Created => t!("Created"),
             Column::Permissions => t!("Permissions"),
             Column::Owner => t!("Owner"),
+            Column::Origin => t!("Original location"),
+            Column::Deleted => t!("Deleted"),
         }
     }
 
@@ -278,6 +307,8 @@ impl Column {
             Column::Modified | Column::Created => 8.5,
             Column::Permissions => 6.5,
             Column::Owner => 6.0,
+            Column::Origin => 18.0,
+            Column::Deleted => 8.5,
         }
     }
 
@@ -292,7 +323,8 @@ impl Column {
             Column::Kind => Some(SortKey::Type),
             Column::Modified => Some(SortKey::Modified),
             Column::Created => Some(SortKey::Created),
-            Column::Permissions | Column::Owner => None,
+            Column::Deleted => Some(SortKey::Deleted),
+            Column::Permissions | Column::Owner | Column::Origin => None,
         }
     }
 

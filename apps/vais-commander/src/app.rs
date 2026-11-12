@@ -726,8 +726,10 @@ impl Workspace {
                             this.open_rename(paths.clone(), window, cx)
                         }
                         GridEvent::OpenFile { location, readonly } => {
-                            // Archives are read-only, whatever key asked.
-                            let readonly = *readonly || location.is_archive();
+                            // Archives and the trash are read-only, whatever key asked.
+                            let readonly = *readonly
+                                || location.is_archive()
+                                || location.as_local().is_some_and(crate::vfs::trash::contains);
                             this.open_file(location.clone(), readonly, window, cx)
                         }
                     },
@@ -1844,7 +1846,12 @@ impl Workspace {
     /// The focused panel shows `path`: move it to the front of the recent
     /// list (newest first, bounded) when it is a different directory.
     fn note_visit(&mut self, path: Option<Location>, cx: &mut Context<Self>) {
-        let Some(path) = path else {
+        // The trash has its own place in the sidebar, and what is inside it
+        // is no place to return to.
+        let in_trash = |p: &Location| {
+            *p == Location::Trash || p.as_local().is_some_and(crate::vfs::trash::contains)
+        };
+        let Some(path) = path.filter(|p| !in_trash(p)) else {
             return;
         };
         if self.last_visited.as_ref() == Some(&path) {

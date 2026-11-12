@@ -211,6 +211,7 @@ impl Backend for SftpBackend {
                 uid: stat.uid,
                 is_parent: false,
                 depth: 0,
+                trash: None,
             });
         }
         Ok(entries)

@@ -2,6 +2,16 @@
 
 What changed in each release of VAIS Commander, newest first.
 
+## Unreleased
+
+### Added
+
+- **Trash** in the sidebar's Favorites: what was deleted, under the original
+  names, with where it came from and when it was deleted (every trash on
+  Linux, the Recycle Bin on Windows). Restore puts items back, F8 deletes
+  them for good, *Empty trash…* clears it all; copying out keeps the
+  original names.
+
 ## 0.5.1 - 2026-11-11
 
 ### Fixed

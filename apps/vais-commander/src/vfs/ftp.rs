@@ -194,6 +194,7 @@ impl Backend for FtpBackend {
                 uid: file.uid(),
                 is_parent: false,
                 depth: 0,
+                trash: None,
             });
         }
         Ok(entries)

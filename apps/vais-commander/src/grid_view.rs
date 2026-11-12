@@ -2,6 +2,8 @@
 //! the file operations between the active and the target panel.
 
 use crate::vfs::{Location, backend_for};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gpui_kit::component::IconName;
@@ -31,6 +33,23 @@ struct DropMenu {
 
 fn read_only_archive() -> &'static str {
     t!("Archives are read-only")
+}
+
+/// Why nothing can be written to (or renamed at) `loc`, when it cannot:
+/// archives, the trash and what is inside it.
+fn read_only_reason(loc: &Location) -> Option<&'static str> {
+    if loc.is_archive() {
+        Some(read_only_archive())
+    } else if is_in_trash(loc) {
+        Some(t!("The trash is read-only: restore an item to change it"))
+    } else {
+        None
+    }
+}
+
+/// The trash itself, an item of it or something inside a deleted directory.
+fn is_in_trash(loc: &Location) -> bool {
+    *loc == Location::Trash || loc.as_local().is_some_and(crate::vfs::trash::contains)
 }
 
 /// The name of a single entry, `None` for several.
@@ -514,8 +533,8 @@ impl GridView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if dest.is_archive() {
-            self.notify(Notification::error(read_only_archive()), window, cx);
+        if let Some(reason) = read_only_reason(&dest) {
+            self.notify(Notification::error(reason), window, cx);
             return;
         }
         // Listing the root unpacks a tar or reads the zip index: not on the
@@ -605,8 +624,8 @@ impl GridView {
                     cb(Outcome::Rejected(message), window, cx);
                 }
             };
-        if dest.is_archive() {
-            reject(self, read_only_archive().to_string(), window, cx);
+        if let Some(reason) = read_only_reason(&dest) {
+            reject(self, reason.to_string(), window, cx);
             return;
         }
         if kind == OpKind::Move && sources.iter().any(Location::is_archive) {
@@ -631,13 +650,15 @@ impl GridView {
             return;
         }
         let dest = canonical(dest);
-        let conflicts = ops::conflicts(&sources, &dest);
+        // Items of the trash come out under their original names.
+        let names = self.trash_names(&sources, cx);
+        let conflicts = ops::conflicts(&sources, &dest, &names);
         let request = Request {
             kind,
             sources,
             dest: Some(dest.clone()),
             overwrite: false,
-            names: Default::default(),
+            names,
         };
         if conflicts.is_empty() {
             let id = self.run_operation(request, cx);
@@ -757,7 +778,12 @@ impl GridView {
             }
             return;
         };
-        let name = src.file_name().unwrap_or_default();
+        let name = request
+            .names
+            .get(&src)
+            .cloned()
+            .or_else(|| src.file_name())
+            .unwrap_or_default();
         let is_dir = backend_for(&src)
             .and_then(|b| b.stat(&src))
             .is_ok_and(|m| m.is_dir());
@@ -836,6 +862,11 @@ impl GridView {
             .filter(|p| p.parent().as_ref() != Some(&dest) && *p != dest && !dest.starts_with(p))
             .collect();
         if sources.is_empty() {
+            return;
+        }
+        // Dropped on the trash: deleted, as with F8.
+        if dest == Location::Trash {
+            self.confirm_delete(sources, false, None, None, window, cx);
             return;
         }
         match settings::get(cx).drop_action {
@@ -921,8 +952,8 @@ impl GridView {
             }
             return;
         }
-        // Remote storages have no trash.
-        let permanent = permanent || sources.iter().any(|s| !s.is_local());
+        // Remote storages have no trash, and what is in it can only go for good.
+        let permanent = permanent || sources.iter().any(|s| !s.is_local() || is_in_trash(s));
         let kind = OpKind::Delete { permanent };
         let names: Vec<String> = sources
             .iter()
@@ -982,6 +1013,117 @@ impl GridView {
         palette::open(title, palette, window, cx);
     }
 
+    /// The original names of the trash items among `sources`, as the panels
+    /// list them.
+    fn trash_names(&self, sources: &[Location], cx: &App) -> HashMap<Location, String> {
+        let mut names = HashMap::new();
+        for panel in &self.panels {
+            for entry in &panel.read(cx).state.entries {
+                if entry.trash.is_some() && sources.contains(&entry.location) {
+                    names.insert(entry.location.clone(), entry.name.clone());
+                }
+            }
+        }
+        names
+    }
+
+    /// Put the selected items of the trash back where they were deleted from.
+    pub fn restore_from_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sources) = self.selection(window, cx) else {
+            return;
+        };
+        let paths: Vec<PathBuf> = sources
+            .iter()
+            .filter_map(Location::as_local)
+            .filter(|p| crate::vfs::trash::is_item(p))
+            .map(Path::to_path_buf)
+            .collect();
+        if paths.is_empty() {
+            let message = t!("Only items of the trash can be restored");
+            self.notify(Notification::warning(message), window, cx);
+            return;
+        }
+        let count = paths.len();
+        let task = cx.background_spawn(async move { crate::vfs::trash::restore(&paths) });
+        cx.spawn_in(window, async move |this, cx| {
+            let errors = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.refresh_trash(cx);
+                let restored = count - errors.len();
+                if restored > 0 {
+                    let message = tn!("Restored {n} item", "Restored {n} items", restored);
+                    this.notify(Notification::success(message), window, cx);
+                }
+                if !errors.is_empty() {
+                    let message = format!(
+                        "{}\n{}",
+                        tn!(
+                            "{n} item was not restored:",
+                            "{n} items were not restored:",
+                            errors.len()
+                        ),
+                        errors.join("\n")
+                    );
+                    this.notify(Notification::error(message), window, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Ask, then delete everything in the trash for good.
+    pub fn confirm_empty_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.entity();
+        let palette = cx.new(|cx| {
+            let items = vec![
+                PaletteItem::new(t!("Empty trash")).danger(true),
+                PaletteItem::new(t!("Cancel")),
+            ];
+            Palette::pick(items, cx)
+                .description(t!("Everything in the trash is deleted permanently."))
+                .on_confirm(move |choice, window, cx| {
+                    window.close_dialog(cx);
+                    if choice.item == Some(0) {
+                        view.update(cx, |this, cx| this.empty_trash(window, cx));
+                    }
+                })
+                .on_cancel(|window, cx| window.close_dialog(cx))
+        });
+        palette::open(t!("Empty the trash?").to_string(), palette, window, cx);
+    }
+
+    fn empty_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let task = cx.background_spawn(async move { crate::vfs::trash::empty() });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                this.refresh_trash(cx);
+                match result {
+                    Ok(()) => {
+                        let message = t!("The trash is empty");
+                        this.notify(Notification::success(message), window, cx);
+                    }
+                    Err(err) => {
+                        let message = format!("{}: {err}", t!("Trash##place"));
+                        this.notify(Notification::error(message), window, cx);
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Reload the panels showing the trash.
+    fn refresh_trash(&mut self, cx: &mut Context<Self>) {
+        for panel in &self.panels {
+            if *panel.read(cx).path() == Location::Trash {
+                panel.update(cx, |p, cx| p.refresh(None, cx));
+            }
+        }
+    }
+
     pub fn start_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let base = self.active_panel().read(cx).path().clone();
         let hint = t!("in {dir}", dir = base.display());
@@ -1026,8 +1168,8 @@ impl GridView {
         name: &str,
         cx: &mut Context<Self>,
     ) -> Result<Location, String> {
-        if base.is_archive() {
-            return Err(read_only_archive().to_string());
+        if let Some(reason) = read_only_reason(base) {
+            return Err(reason.to_string());
         }
         let path = base.join(name);
         backend_for(base)
@@ -1076,8 +1218,8 @@ impl GridView {
 
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let marked = self.active_panel().read(cx).selected_paths();
-        if marked.iter().any(Location::is_archive) {
-            self.notify(Notification::error(read_only_archive()), window, cx);
+        if let Some(reason) = marked.iter().find_map(read_only_reason) {
+            self.notify(Notification::error(reason), window, cx);
             return;
         }
         if marked.len() > 1 {
@@ -1148,8 +1290,8 @@ impl GridView {
         new_name: &str,
         cx: &mut Context<Self>,
     ) -> Result<Location, String> {
-        if base.is_archive() {
-            return Err(read_only_archive().to_string());
+        if let Some(reason) = read_only_reason(base) {
+            return Err(reason.to_string());
         }
         let (from, to) = (base.join(old_name), base.join(new_name));
         backend_for(base)
@@ -1187,8 +1329,11 @@ impl GridView {
         for panel in &self.panels {
             let shown = {
                 let p = panel.read(cx);
-                dirs.iter()
-                    .any(|d| d == p.path() || p.state.expanded.contains(d))
+                dirs.iter().any(|d| {
+                    d == p.path()
+                        || p.state.expanded.contains(d)
+                        || d.as_local().is_some_and(|d| p.watches(d))
+                })
             };
             if shown {
                 panel.update(cx, |p, cx| p.refresh_from_disk(cx));
@@ -1299,8 +1444,8 @@ impl GridView {
             return false;
         };
         let dest = self.active_panel().read(cx).path().clone();
-        if dest.is_archive() {
-            self.notify(Notification::error(read_only_archive()), window, cx);
+        if let Some(reason) = read_only_reason(&dest) {
+            self.notify(Notification::error(reason), window, cx);
             return true;
         }
         if dest.is_roots() {
@@ -1475,8 +1620,8 @@ impl GridView {
         self.start_rename(window, cx);
     }
     fn on_mkdir(&mut self, _: &MakeDir, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_panel().read(cx).path().is_archive() {
-            self.notify(Notification::error(read_only_archive()), window, cx);
+        if let Some(reason) = read_only_reason(self.active_panel().read(cx).path()) {
+            self.notify(Notification::error(reason), window, cx);
             return;
         }
         self.start_mkdir(window, cx);
@@ -1491,6 +1636,12 @@ impl GridView {
         cx: &mut Context<Self>,
     ) {
         self.start_delete(true, window, cx);
+    }
+    fn on_restore(&mut self, _: &RestoreFromTrash, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_from_trash(window, cx);
+    }
+    fn on_empty_trash(&mut self, _: &EmptyTrash, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_empty_trash(window, cx);
     }
     fn on_focus_next(&mut self, _: &FocusNextPanel, window: &mut Window, cx: &mut Context<Self>) {
         let ix = self.layout.next(self.active);
@@ -1552,6 +1703,8 @@ impl Render for GridView {
             .on_action(cx.listener(Self::on_edit_file))
             .on_action(cx.listener(Self::on_mkdir))
             .on_action(cx.listener(Self::on_delete))
+            .on_action(cx.listener(Self::on_restore))
+            .on_action(cx.listener(Self::on_empty_trash))
             .on_action(cx.listener(Self::on_delete_permanently))
             .on_action(cx.listener(Self::on_mark_pattern))
             .on_action(cx.listener(Self::on_unmark_pattern))

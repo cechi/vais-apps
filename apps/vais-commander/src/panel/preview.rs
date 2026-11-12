@@ -217,7 +217,18 @@ impl PreviewPane {
         } else {
             Some(human_size(entry.size))
         };
+        let trash = entry.trash.as_deref();
         let rows = [
+            (
+                Column::Origin.label(),
+                trash
+                    .and_then(|t| t.original.parent())
+                    .map(|p| p.to_string_lossy().into_owned()),
+            ),
+            (
+                Column::Deleted.label(),
+                trash.and_then(|t| t.deleted).map(format_time),
+            ),
             (Column::Kind.label(), Some(kind).filter(|k| !k.is_empty())),
             (Column::Size.label(), size),
             (Column::Modified.label(), entry.modified.map(format_time)),

@@ -23,17 +23,17 @@ fn path_of(loc: &Location) -> io::Result<&Path> {
 
 /// Permission bits and owner of a Unix file; nothing elsewhere.
 #[cfg(unix)]
-fn unix_ids(meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
+pub(super) fn unix_ids(meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
     use std::os::unix::fs::MetadataExt;
     (Some(meta.mode()), Some(meta.uid()))
 }
 
 #[cfg(not(unix))]
-fn unix_ids(_meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
+pub(super) fn unix_ids(_meta: &fs::Metadata) -> (Option<u32>, Option<u32>) {
     (None, None)
 }
 
-fn kind_of(meta: &fs::Metadata, path: &Path) -> (EntryKind, u64) {
+pub(super) fn kind_of(meta: &fs::Metadata, path: &Path) -> (EntryKind, u64) {
     let file_type = meta.file_type();
     if file_type.is_symlink() {
         let to_dir = fs::metadata(path).map(|t| t.is_dir()).unwrap_or(false);
@@ -93,6 +93,7 @@ impl Backend for LocalBackend {
                 uid,
                 is_parent: false,
                 depth: 0,
+                trash: None,
             });
         }
         Ok(entries)

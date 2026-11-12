@@ -186,7 +186,7 @@ Keys below are for Linux/Windows; on macOS read `Ctrl` as `Cmd` (see Platforms).
 | `F5` / `F6` | Copy / move the marked (or cursor) entries. A chooser opens with the destination path on top and the other panels of the grid below it: `↑` / `↓` pick a panel (the path follows and the panel lights up in the grid), or type any path; `Enter` or a click confirms, `Esc` cancels |
 | `F2` / `Shift+F6` | Rename the entry under the cursor (the name without its extension is preselected). With several entries marked, a batch rename form opens in its own tab: masks (`[N]` name, `[E]` extension, `[C]` counter with start / step / digits), find & replace (plain or regex with `$1` groups, optional ignore case), case change, and a live preview that flags empty, duplicate or existing names. `Ctrl+Enter` renames, `Esc` closes |
 | `F7` | New folder |
-| `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently |
+| `F8` / `Delete` | Move to trash; `Shift+F8` / `Shift+Delete` deletes permanently (in the trash, both delete permanently; see [Trash](#trash)) |
 | `Esc` | Cancel the latest running operation (when there is nothing else to clear) |
 | `Ctrl+J` | Show / hide the operations panel |
 | `Ctrl+B` | Show / hide the places sidebar (also the toggle at the left of the status bar) |
@@ -408,6 +408,21 @@ Below them a **Recent** group lists the last 10 directories the focused panel sh
 the place matching the panel's directory is highlighted. Each group folds on a click of its header, and the folded ones are remembered across restarts. The list scrolls (with a scrollbar) when it is taller than the window. The sidebar is resizable, its state is saved, and the tab bar, panels and
 function key bar shift right while it is open; the status bar keeps the full width.
 
+### Trash
+
+**Trash**, last in Favorites (whether or not the system places show), lists what was
+deleted, under the original names, with an **Original location** and a **Deleted** column
+(click its header to sort by the date); the path bar reads `trash:///`. On Linux it is every
+freedesktop trash at once: the one in your home and the `.Trash-<uid>` folders on other
+mounts; on Windows the Recycle Bin. Enter browses a deleted directory (`..` comes back
+to the trash), F3 views a file, F5 / Ctrl+C copy out under the original name, F6 moves out
+(the trash forgets the item). Right-click an item for **Restore** (back where it was
+deleted from; one that would replace something there again stays, with a message) and
+**Empty trash…**; F8 / `Delete` in the trash delete permanently. Dropping entries on the
+trash panel moves them to the trash. The trash is read-only otherwise: new folders,
+renames, editing and copying into it are refused. macOS offers no way to read its trash,
+so there the place opens `~/.Trash` as a plain directory.
+
 ## Languages
 
 The interface follows the system language and can be set in Settings → Language
@@ -452,7 +467,7 @@ src/tabs.rs        Tab + TabContent enum (Grid today; settings etc. later)
 src/grid_view.rs   GridView: 9 panels, grid layout, focus between panels
 src/layout/        Layout {rows, cols} + grid rendering with nested resizable groups
 src/panel/         FilePanel entity (rendering, actions), PanelState (cursor, marks), view.rs (view modes, columns, preview side), preview.rs (the preview pane)
-src/vfs/           Location (local path, connection + path, or path in an archive) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar/7z/rar
+src/vfs/           Location (local path, connection + path, path in an archive, or the trash) and the Backend trait; local.rs is the disk, sftp.rs libssh2, ftp.rs suppaftp, archive.rs zip/tar/7z/rar, trash.rs the trash (list, restore, empty)
 src/connections.rs saved connections, the backend registry, the connection manager (connect on the background executor, keyring)
 src/connections_view.rs  the connection manager tab
 src/ssh_config.rs  reader for ~/.ssh/config (aliases, HostName, Port, User, IdentityFile, Include)
@@ -478,6 +493,6 @@ src/network.rs     Windows network paths: `\\server` and its shares, their paren
 src/config.rs      TOML config
 src/i18n.rs        translations: t!/tn! macros, language choice, catalogs in locales/
 src/theme.rs       theme directory watching and applying a theme by name
-src/sidebar.rs     places sidebar (user folders, volumes)
+src/sidebar.rs     places sidebar (user folders, trash, volumes)
 src/watch.rs       directory watching (notify): panels on local directories reload when they change
 ```

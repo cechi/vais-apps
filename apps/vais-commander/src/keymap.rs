@@ -90,6 +90,10 @@ actions!(
         MakeDir,
         DeleteFiles,
         DeleteFilesPermanently,
+        /// The trash: put the selected items back (its menus; no default key).
+        RestoreFromTrash,
+        /// The trash: delete everything in it (its menus; no default key).
+        EmptyTrash,
         // Grid
         FocusNextPanel,
         FocusPrevPanel,

@@ -78,51 +78,53 @@ fn main() {
         }
     }
 
-    application().with_assets(assets::Assets).run(move |cx| {
-        init_app(&config, cx);
+    application()
+        .with_assets(crate::ui::AppAssets)
+        .run(move |cx| {
+            init_app(&config, cx);
 
-        let window_bounds = config.window.map(|w| {
-            let bounds = Bounds {
-                origin: point(px(w.x), px(w.y)),
-                size: size(px(w.w), px(w.h)),
-            };
-            if w.maximized {
-                WindowBounds::Maximized(bounds)
-            } else {
-                WindowBounds::Windowed(bounds)
-            }
-        });
-        let options = WindowOptions {
-            window_bounds,
-            titlebar: Some(TitlebarOptions {
-                title: Some("VAIS Commander".into()),
+            let window_bounds = config.window.map(|w| {
+                let bounds = Bounds {
+                    origin: point(px(w.x), px(w.y)),
+                    size: size(px(w.w), px(w.h)),
+                };
+                if w.maximized {
+                    WindowBounds::Maximized(bounds)
+                } else {
+                    WindowBounds::Windowed(bounds)
+                }
+            });
+            let options = WindowOptions {
+                window_bounds,
+                titlebar: Some(TitlebarOptions {
+                    title: Some("VAIS Commander".into()),
+                    ..Default::default()
+                }),
+                app_id: Some("vais-commander".into()),
+                window_min_size: Some(size(px(640.), px(400.))),
                 ..Default::default()
-            }),
-            app_id: Some("vais-commander".into()),
-            window_min_size: Some(size(px(640.), px(400.))),
-            ..Default::default()
-        };
+            };
 
-        let theme = config.theme.clone();
-        let font_family = config.font_family.clone();
-        open_window(options, cx, move |window, cx| {
-            theme::load_bundled(cx);
-            theme::apply(&theme, Some(window), cx);
-            theme::apply_font(font_family.as_deref(), cx);
-            let workspace = cx.new(|cx| Workspace::new(config, window, cx));
-            workspace.update(cx, |ws, cx| ws.focus_active(window, cx));
-            workspace
-        })
-        .expect("failed to open window");
+            let theme = config.theme.clone();
+            let font_family = config.font_family.clone();
+            open_window(options, cx, move |window, cx| {
+                theme::load_bundled(cx);
+                theme::apply(&theme, Some(window), cx);
+                theme::apply_font(font_family.as_deref(), cx);
+                let workspace = cx.new(|cx| Workspace::new(config, window, cx));
+                workspace.update(cx, |ws, cx| ws.focus_active(window, cx));
+                workspace
+            })
+            .expect("failed to open window");
 
-        // Closing the last window ends the process (and triggers the quit save).
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
-    });
+            // Closing the last window ends the process (and triggers the quit save).
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+        });
 }
 
 /// The globals every window of the app needs (the main window and the portal

@@ -647,6 +647,7 @@ impl Backend for ArchiveBackend {
                 uid: None,
                 is_parent: false,
                 depth: 0,
+                trash: None,
             });
         }
         Ok(entries)

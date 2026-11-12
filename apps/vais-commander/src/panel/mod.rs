@@ -793,6 +793,10 @@ impl FilePanel {
         if let Some(dir) = self.state.path.as_local() {
             wanted.push(dir.to_path_buf());
         }
+        // The trash changes in its `files` directories (known once listed).
+        if self.state.path == Location::Trash {
+            wanted.extend(crate::vfs::trash::watch_dirs());
+        }
         wanted.extend(
             self.state
                 .expanded
@@ -810,6 +814,12 @@ impl FilePanel {
             }
         }
         self.watched = wanted;
+    }
+
+    /// Whether the panel watches `dir` (its directory, an expanded one or a
+    /// directory of the trash).
+    pub fn watches(&self, dir: &Path) -> bool {
+        self.watched.iter().any(|w| w == dir)
     }
 
     /// Reload because the directory changed on disk. Not while a recursive
@@ -834,6 +844,11 @@ impl FilePanel {
         cx: &mut Context<Self>,
     ) {
         self.navigate(path, select, cx);
+    }
+
+    /// The columns of the listing: the trash shows where things came from.
+    fn shown_columns(&self) -> Vec<Column> {
+        self.columns.shown_in(self.state.path == Location::Trash)
     }
 
     /// Make the panel a picker's: see [`PickMode`].
@@ -2039,6 +2054,32 @@ impl FilePanel {
         })
     }
 
+    /// Right-click menu for an item of the trash.
+    fn trash_entry_menu(menu: PopupMenu, focus: FocusHandle, is_dir: bool) -> PopupMenu {
+        menu.action_context(focus)
+            .menu(
+                if is_dir {
+                    t!("Open")
+                } else {
+                    t!("Open with default app")
+                },
+                Box::new(Open),
+            )
+            .separator()
+            .menu(t!("Restore"), Box::new(RestoreFromTrash))
+            .menu(t!("Copy to other panel…"), Box::new(CopyFiles))
+            .menu(t!("Move to other panel…"), Box::new(MoveFiles))
+            .menu(t!("Copy"), Box::new(CopyToClipboard))
+            .separator()
+            .menu(t!("Toggle mark"), Box::new(ToggleMark))
+            .menu(t!("Mark all"), Box::new(MarkAll))
+            .separator()
+            .menu(t!("Delete permanently"), Box::new(DeleteFilesPermanently))
+            .menu(t!("Empty trash…"), Box::new(EmptyTrash))
+            .separator()
+            .menu(t!("Copy path"), Box::new(CopyPath))
+    }
+
     /// Right-click menu for the empty part of the panel.
     fn panel_menu(
         menu: PopupMenu,
@@ -2414,7 +2455,14 @@ impl FilePanel {
             let (is_parent, is_dir) = (entry.is_parent, entry.is_dir());
             let is_archive = entry.kind == EntryKind::File
                 && crate::vfs::archive::kind_of(&entry.name).is_some();
-            move |menu, _, _| Self::entry_menu(menu, focus.clone(), is_parent, is_dir, is_archive)
+            let in_trash = entry.trash.is_some();
+            move |menu, _, _| {
+                if in_trash {
+                    Self::trash_entry_menu(menu, focus.clone(), is_dir)
+                } else {
+                    Self::entry_menu(menu, focus.clone(), is_parent, is_dir, is_archive)
+                }
+            }
         })
         .into_any_element()
     }
@@ -2600,7 +2648,7 @@ impl FilePanel {
                     .child(div().size_4().flex_none().child(icon))
                     .child(div().flex_1().min_w_0().truncate().child(name)),
             )
-            .children(self.columns.shown().map(|column| {
+            .children(self.shown_columns().into_iter().map(|column| {
                 let (text, color) = column_value(column, entry, &look, c);
                 div()
                     .w(rems(self.columns.width(column)))
@@ -2669,6 +2717,24 @@ fn column_value(column: Column, entry: &Entry, look: &EntryLook, c: &Colors) -> 
                 .unwrap_or_default(),
             muted,
         ),
+        Column::Origin => (
+            entry
+                .trash
+                .as_ref()
+                .and_then(|t| t.original.parent())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            muted,
+        ),
+        Column::Deleted => (
+            entry
+                .trash
+                .as_ref()
+                .and_then(|t| t.deleted)
+                .map(format_time)
+                .unwrap_or_default(),
+            muted,
+        ),
     }
 }
 
@@ -2689,6 +2755,28 @@ fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
                 .into_iter()
                 .map(|(label, path)| (label, Location::Local(path)))
                 .collect();
+        }
+        // Inside a deleted directory: the trash, then the way down from it.
+        Location::Local(local)
+            if let Some(item) = local.ancestors().find(|a| crate::vfs::trash::is_item(a)) =>
+        {
+            crumbs.push((t!("Trash##place").to_string(), Location::Trash));
+            let mut acc = item.to_path_buf();
+            crumbs.push((
+                item.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                Location::Local(acc.clone()),
+            ));
+            if let Ok(rest) = local.strip_prefix(item) {
+                for component in rest.components() {
+                    acc.push(component.as_os_str());
+                    crumbs.push((
+                        component.as_os_str().to_string_lossy().into_owned(),
+                        Location::Local(acc.clone()),
+                    ));
+                }
+            }
         }
         Location::Local(local) => {
             let mut acc = PathBuf::new();
@@ -2733,6 +2821,7 @@ fn crumbs_for(path: &Location) -> Vec<(String, Location)> {
                 crumbs.push((segment.to_string(), acc.clone()));
             }
         }
+        Location::Trash => crumbs.push((t!("Trash##place").to_string(), Location::Trash)),
     }
     crumbs
 }
@@ -2927,7 +3016,7 @@ impl Render for FilePanel {
         // The column header belongs to the full view only.
         let column_header = if self.view == ViewMode::Full {
             let heads: Vec<AnyElement> = std::iter::once(None)
-                .chain(self.columns.shown().map(Some))
+                .chain(self.shown_columns().into_iter().map(Some))
                 .map(|column| self.render_column_head(column, &colors, cx))
                 .collect();
             // The heads follow the rows: the same padding and border, and the
@@ -3218,7 +3307,15 @@ impl Render for FilePanel {
                                     let sort = self.state.sort;
                                     let view = self.view;
                                     let preview = self.preview;
+                                    let in_trash = self.state.path == Location::Trash;
                                     move |menu, _, _| {
+                                        let menu = if in_trash {
+                                            menu.action_context(focus.clone())
+                                                .menu(t!("Empty trash…"), Box::new(EmptyTrash))
+                                                .separator()
+                                        } else {
+                                            menu
+                                        };
                                         Self::panel_menu(menu, focus.clone(), sort, view, preview)
                                     }
                                 }),
@@ -3289,6 +3386,9 @@ fn sort_label(sort: Sort, key: SortKey) -> &'static str {
         (SortKey::Created, None) => t!("Sort by created"),
         (SortKey::Created, Some(SortDir::Asc)) => t!("Sort by created (ascending)"),
         (SortKey::Created, Some(SortDir::Desc)) => t!("Sort by created (descending)"),
+        (SortKey::Deleted, None) => t!("Sort by deletion date"),
+        (SortKey::Deleted, Some(SortDir::Asc)) => t!("Sort by deletion date (ascending)"),
+        (SortKey::Deleted, Some(SortDir::Desc)) => t!("Sort by deletion date (descending)"),
     }
 }
 

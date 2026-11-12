@@ -201,6 +201,7 @@ pub fn read_server(server: &str, show_hidden: bool) -> std::io::Result<Vec<crate
             uid: None,
             is_parent: false,
             depth: 0,
+            trash: None,
         });
     }
     free(buffer);

@@ -380,6 +380,7 @@ mod tests {
             uid: None,
             is_parent: true,
             depth: 0,
+            trash: None,
         }];
         for i in 0..n {
             entries.push(Entry {
@@ -393,6 +394,7 @@ mod tests {
                 uid: None,
                 is_parent: false,
                 depth: 0,
+                trash: None,
             });
         }
         let mut s = PanelState::new("/d".into(), false, Sort::default());
@@ -580,6 +582,7 @@ mod tests {
                 uid: None,
                 is_parent: false,
                 depth: 0,
+                trash: None,
             },
         );
         s.set_entries("/d".into(), entries, Some(&Location::local("/d/f2")));
@@ -606,6 +609,7 @@ mod tests {
             uid: None,
             is_parent: false,
             depth: 0,
+            trash: None,
         };
         let child = Entry {
             name: "c".into(),
@@ -618,6 +622,7 @@ mod tests {
             uid: None,
             is_parent: false,
             depth: 1,
+            trash: None,
         };
         let entries = vec![s.entries[0].clone(), dir, child, s.entries[1].clone()];
         s.set_entries("/d".into(), entries, None);

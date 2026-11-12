@@ -7,6 +7,7 @@ pub mod archive;
 pub mod ftp;
 pub mod local;
 pub mod sftp;
+pub mod trash;
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -44,6 +45,9 @@ pub enum Location {
         archive: Box<Location>,
         path: String,
     },
+    /// The trash: what was deleted, listed under the original names (see
+    /// [`trash`]). Written `trash:///`.
+    Trash,
 }
 
 /// Parent of a slash-separated absolute path: `/a/b` → `/a`, `/a` → `/`,
@@ -109,6 +113,9 @@ impl Location {
     }
 
     pub fn parse(text: &str) -> Self {
+        if text == trash::URI || text == "trash:/" {
+            return Location::Trash;
+        }
         if let Some((outer, inner)) = text.rsplit_once("!/")
             && !outer.is_empty()
         {
@@ -161,6 +168,7 @@ impl Location {
             Location::Local(_) => None,
             Location::Remote { conn, .. } => Some(conn),
             Location::Archive { archive, .. } => archive.conn(),
+            Location::Trash => None,
         }
     }
 
@@ -175,6 +183,7 @@ impl Location {
             Location::Archive { archive, path } => {
                 string_file_name(path).or_else(|| archive.file_name())
             }
+            Location::Trash => None,
         }
     }
 
@@ -185,13 +194,15 @@ impl Location {
             Location::Archive { archive, .. } => {
                 self.file_name().unwrap_or_else(|| archive.display_name())
             }
+            Location::Trash => t!("Trash##place").to_string(),
         }
     }
 
     /// The directory above: the archive root's parent is the directory
-    /// holding the archive file.
+    /// holding the archive file, a deleted directory's is the trash.
     pub fn parent(&self) -> Option<Location> {
         match self {
+            Location::Local(path) if trash::is_item(path) => Some(Location::Trash),
             Location::Local(path) => platform::parent_of(path).map(Location::Local),
             Location::Remote { conn, path } => Some(Location::Remote {
                 conn: conn.clone(),
@@ -204,6 +215,7 @@ impl Location {
                 }),
                 None => archive.parent(),
             },
+            Location::Trash => None,
         }
     }
 
@@ -218,6 +230,8 @@ impl Location {
                 archive: archive.clone(),
                 path: string_join(path, name),
             },
+            // Nothing can be made in the trash; its backend refuses it.
+            Location::Trash => Location::Trash,
         }
     }
 
@@ -239,6 +253,7 @@ impl Location {
             ) => a == b && string_starts_with(ap, bp),
             // Everything inside an archive is below the archive file.
             (Location::Archive { archive, .. }, other) => archive.starts_with(other),
+            (Location::Trash, Location::Trash) => true,
             _ => false,
         }
     }
@@ -270,6 +285,7 @@ impl Location {
             Location::Local(path) => path.to_string_lossy().into_owned(),
             Location::Remote { conn, path } => format!("{conn}:{path}"),
             Location::Archive { archive, path } => format!("{}!{path}", archive.display()),
+            Location::Trash => trash::URI.to_string(),
         }
     }
 }
@@ -383,6 +399,7 @@ pub fn local_copy(loc: &Location) -> io::Result<PathBuf> {
         Location::Local(path) => return Ok(path.clone()),
         Location::Remote { conn, path } => (conn.0.clone(), path.clone()),
         Location::Archive { .. } => ("archive".to_string(), loc.display()),
+        Location::Trash => return Err(trash::read_only()),
     };
     let dir = directories::ProjectDirs::from("", "", "vais-commander")
         .map(|d| d.cache_dir().join("remote").join(sub))
@@ -427,6 +444,7 @@ pub fn backend_for(loc: &Location) -> io::Result<Arc<dyn Backend>> {
         Location::Remote { conn, .. } => crate::connections::backend(conn)
             .ok_or_else(|| io::Error::other(t!("{conn}: not connected", conn = conn))),
         Location::Archive { archive, .. } => archive::open(archive),
+        Location::Trash => Ok(trash::shared()),
     }
 }
 
@@ -485,6 +503,21 @@ mod tests {
         assert_eq!(remote.display(), "nas:/x.tar.gz!/dir");
         assert!(!sub.is_local());
         assert!(sub.as_local().is_none());
+    }
+
+    #[test]
+    fn the_trash_is_a_place_of_its_own() {
+        assert_eq!(Location::parse("trash:///"), Location::Trash);
+        assert_eq!(Location::parse("trash:/"), Location::Trash);
+        assert_eq!(Location::Trash.display(), "trash:///");
+        assert_eq!(Location::Trash.parent(), None);
+        assert!(!Location::Trash.is_local());
+        assert_eq!(Location::Trash.conn(), None);
+        // A connection called "trash" still has its paths.
+        assert_eq!(
+            Location::parse("trash:/srv"),
+            Location::remote("trash", "/srv")
+        );
     }
 
     #[test]
