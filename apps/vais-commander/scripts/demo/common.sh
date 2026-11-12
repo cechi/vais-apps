@@ -1,8 +1,9 @@
 # The setup shared by record.sh and screenshot.sh: demo data, a nested niri
 # compositor and the app in it on the demo config, with guards so keys only
-# ever reach that window. Sourced, after an optional tweak_config() that
-# edits the copied config; leaves ROOT, WORK, POS (the window's position for
-# grim), the exported WAYLAND_DISPLAY, k() and stop() behind.
+# ever reach that window. Sourced; before it, a script may set DEMO_CONFIG
+# (another config than config.toml) and define extra_data() (more files in
+# $DATA). Leaves ROOT, DATA, WORK, POS (the window's position for grim), the
+# exported WAYLAND_DISPLAY, k() and stop() behind.
 set -eu
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WORKSPACE=$(cd "$ROOT/../.." && pwd)
@@ -23,13 +24,12 @@ for i in 1 2 3 4 5 6; do
         -swirl $((i*30)) "$DATA/photos/photo-$i.jpg"
 done
 (cd "$DATA" && zip -qr project.zip src docs README.md)
+if declare -F extra_data > /dev/null; then extra_data; fi
 
 # last_version = this build's, so the What's new tab stays closed.
 VERSION=$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/')
-sed "s/^version = 2$/version = 2\nlast_version = \"$VERSION\"/" "$ROOT/scripts/demo/config.toml" \
+sed "s/^version = 2$/version = 2\nlast_version = \"$VERSION\"/" "${DEMO_CONFIG:-$ROOT/scripts/demo/config.toml}" \
     > "$WORK/xdg/vais-commander/config.toml"
-# A script can adjust the copy before the app reads it.
-if declare -F tweak_config > /dev/null; then tweak_config "$WORK/xdg/vais-commander/config.toml"; fi
 
 # ----- nested compositor and the app ------------------------------------------
 niri -c "$ROOT/scripts/demo/niri.kdl" > "$WORK/niri.log" 2>&1 &
@@ -37,6 +37,9 @@ NP=$!
 sleep 2
 WD=$(grep -o 'wayland-[0-9]*' "$WORK/niri.log" | head -1)
 SOCK=$(grep -o '/run/user/[0-9]*/niri\.wayland-[0-9]*\.[0-9]*\.sock' "$WORK/niri.log" | head -1)
+# Run from inside a Claude Code session, its CLAUDE* variables would reach the
+# agents started in the app and change how they look and behave.
+for v in $(compgen -e | grep '^CLAUDE'); do unset "$v"; done
 WAYLAND_DISPLAY=$WD XDG_CONFIG_HOME=$WORK/xdg XDG_CACHE_HOME=$WORK/xdg-cache \
     "$WORKSPACE/target/release/vais-commander" > "$WORK/app.log" 2>&1 &
 AP=$!

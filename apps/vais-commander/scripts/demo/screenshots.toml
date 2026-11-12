@@ -1,0 +1,102 @@
+version = 2
+theme = "Cechi Dark"
+language = "en"
+ui_scale = 1.15
+sidebar_open = true
+command_line = true
+drop_action = "ask"
+file_icons = "system"
+font_family = "MesloLGS Nerd Font"
+active_tab = 0
+recent = ["/tmp/vais-demo/projects/aurora", "/tmp/vais-demo/Downloads", "/tmp/vais-demo/photos"]
+favorites = ["/tmp/vais-demo", "/tmp/vais-demo/projects/aurora"]
+favorite_layouts = []
+sidebar_collapsed = ["Volumes"]
+
+[window]
+x = 300.0
+y = 600.0
+w = 1280.0
+h = 800.0
+maximized = false
+
+# 1: the demo project and its photos as thumbnails.
+[[tabs]]
+type = "grid"
+color = "#30a46c"
+
+[tabs.layout]
+rows = 1
+cols = 2
+row_sizes = [1.0]
+col_sizes = [[0.5, 0.5]]
+
+[[tabs.panels]]
+path = "/tmp/vais-demo"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/photos"
+view = "thumbnails"
+
+# 2: a 2x2 grid; the last panel previews the photo under its cursor.
+[[tabs]]
+type = "grid"
+title = "Workspace"
+color = "#3e63dd"
+
+[tabs.layout]
+rows = 2
+cols = 2
+row_sizes = [0.5, 0.5]
+col_sizes = [[0.5, 0.5], [0.5, 0.5]]
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/projects/aurora/src"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/Downloads"
+sort = "size"
+sort_desc = true
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/music"
+view = "brief"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/photos"
+preview = "right"
+preview_size = 0.55
+
+# 3: 2x1, Downloads over the folder the copy goes to.
+[[tabs]]
+type = "grid"
+color = "#f76b15"
+
+[tabs.layout]
+rows = 2
+cols = 1
+row_sizes = [0.5, 0.5]
+col_sizes = [[1.0], [1.0]]
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/Downloads"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/out"
+
+# 4: the project, for the viewer and the agent.
+[[tabs]]
+type = "grid"
+color = "#8e4ec6"
+
+[tabs.layout]
+rows = 1
+cols = 2
+row_sizes = [1.0]
+col_sizes = [[0.5, 0.5]]
+
+[[tabs.panels]]
+path = "/tmp/vais-demo/projects/aurora"
+
+[[tabs.panels]]
+path = "/tmp/vais-demo"
