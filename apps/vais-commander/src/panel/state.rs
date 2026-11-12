@@ -303,11 +303,16 @@ impl PanelState {
     }
 
     /// Rebuild `entries`. The cursor goes to `select` when found; otherwise a
-    /// refresh of the same directory keeps its position (so deleting an entry
-    /// lands on the next one) and a new directory starts at the top. Marks
-    /// survive a refresh of the same directory, matched by path.
+    /// refresh of the same directory keeps it on its entry (entries added
+    /// above do not shift it), or at its position when the entry is gone (so
+    /// deleting an entry lands on the next one), and a new directory starts
+    /// at the top. Marks survive a refresh of the same directory, matched by
+    /// path.
     fn apply_view(&mut self, path: Location, select: Option<&Location>) {
         let same_dir = path == self.path;
+        let cursor_entry = same_dir
+            .then(|| self.entries.get(self.cursor).map(|e| e.location.clone()))
+            .flatten();
         // A set: thousands of marks meet thousands of entries.
         let marked_paths: HashSet<Location> = if same_dir {
             self.marked
@@ -332,7 +337,9 @@ impl PanelState {
             .filter(|(_, e)| !e.is_parent && marked_paths.contains(&e.location))
             .map(|(i, _)| i)
             .collect();
-        let by_path = select.and_then(|p| self.entries.iter().position(|e| e.location == *p));
+        let by_path = select
+            .or(cursor_entry.as_ref())
+            .and_then(|p| self.entries.iter().position(|e| e.location == *p));
         self.cursor = match by_path {
             Some(ix) => ix,
             None if same_dir => self.cursor.min(self.entries.len().saturating_sub(1)),
@@ -562,6 +569,29 @@ mod tests {
         let entries = s.entries.clone();
         s.set_entries("/other".into(), entries, Some(&Location::local("/d/f1")));
         assert_eq!(s.cursor, 0, "a different directory starts at the top");
+    }
+
+    #[test]
+    fn refresh_keeps_the_cursor_on_its_entry() {
+        let mut s = state(3);
+        s.move_cursor_to(2); // f1
+        let mut entries = s.entries.clone();
+        let mut added = entries[1].clone();
+        added.name = "a-new".into();
+        added.location = "/d/a-new".into();
+        entries.insert(1, added);
+        s.set_entries("/d".into(), entries, None);
+        assert_eq!(
+            s.entries[s.cursor].name, "f1",
+            "an entry added above does not shift it"
+        );
+        let mut entries = s.entries.clone();
+        entries.remove(s.cursor);
+        s.set_entries("/d".into(), entries, None);
+        assert_eq!(
+            s.entries[s.cursor].name, "f2",
+            "gone: the entry that followed"
+        );
     }
 
     #[test]

@@ -23,6 +23,9 @@ What changed in each release of VAIS Commander, newest first.
   longer run on the UI thread, and thousands of marked entries no longer
   slow every frame.
 - The context menu of a marked entry is no longer in bold.
+- A panel whose directory changes (files arriving during a copy) keeps its
+  scroll position and its cursor on the same entry; it jumped back to the
+  cursor on every refresh.
 
 ## 0.5.1 - 2026-11-11
 

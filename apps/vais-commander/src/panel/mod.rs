@@ -92,6 +92,14 @@ struct Marquee {
     base: std::collections::BTreeSet<usize>,
 }
 
+/// What the top of a scrolled panel shows, kept across a refresh.
+struct ViewAnchor {
+    location: Location,
+    /// How far the view starts into the entry's row.
+    into: Pixels,
+    row_height: Pixels,
+}
+
 /// Entries being dragged with the mouse: the cursor entry, or the marked
 /// entries of the panel dragged from. Those are read when dropped, not for
 /// each marked row drawn (thousands of marks made every frame slow).
@@ -415,7 +423,6 @@ impl FilePanel {
     /// Re-read the directory (and its expanded subdirectories), placing the
     /// cursor on `select` or keeping it on the current entry.
     pub fn refresh(&mut self, select: Option<Location>, cx: &mut Context<Self>) {
-        let select = select.or_else(|| self.state.current().map(|e| e.location.clone()));
         if self.search_active() {
             self.start_search(cx);
             return;
@@ -751,8 +758,16 @@ impl FilePanel {
                 panel.state.loading = false;
                 match result {
                     Ok(entries) => {
+                        // A refresh (files changing while a copy runs)
+                        // leaves the view where the user scrolled it.
+                        let refresh = select.is_none() && panel.state.path == path;
+                        let anchor = refresh.then(|| panel.view_anchor()).flatten();
                         panel.state.set_entries(path, entries, select.as_ref());
-                        panel.scroll_to_cursor();
+                        if let Some(anchor) = anchor {
+                            panel.keep_view_anchor(anchor);
+                        } else if !refresh {
+                            panel.scroll_to_cursor();
+                        }
                         cx.emit(PanelEvent::Changed);
                     }
                     Err((err, login)) => {
@@ -1717,6 +1732,43 @@ impl FilePanel {
     /// Entries one line up or down (one in the full view).
     fn line_step(&self) -> isize {
         self.per_row.max(1) as isize
+    }
+
+    /// The entry at the top of the scrolled view and how far into it the
+    /// view starts; `None` at the very top, which stays there.
+    fn view_anchor(&self) -> Option<ViewAnchor> {
+        let scroll = self.scroll.0.borrow();
+        let per_row = self.per_row.max(1);
+        let lines = self.state.entries.len().div_ceil(per_row);
+        let row_height = scroll.last_item_size?.contents.height / lines.max(1) as f32;
+        let top = -scroll.base_handle.offset().y;
+        if lines == 0 || row_height <= px(0.) || top <= px(0.) {
+            return None;
+        }
+        let line = (top / row_height).floor() as usize;
+        let entry = self.state.entries.get(line * per_row)?;
+        Some(ViewAnchor {
+            location: entry.location.clone(),
+            into: top - row_height * line as f32,
+            row_height,
+        })
+    }
+
+    /// Scroll so that the anchor's entry is where it was: entries added or
+    /// removed above it do not move what the user is looking at.
+    fn keep_view_anchor(&self, anchor: ViewAnchor) {
+        let Some(ix) = self
+            .state
+            .entries
+            .iter()
+            .position(|e| e.location == anchor.location)
+        else {
+            return;
+        };
+        let line = ix / self.per_row.max(1);
+        let handle = &self.scroll.0.borrow().base_handle;
+        let x = handle.offset().x;
+        handle.set_offset(point(x, -(anchor.row_height * line as f32 + anchor.into)));
     }
 
     fn scroll_to_cursor(&self) {
