@@ -2,10 +2,12 @@
 //! get them reloaded when something else changes them (a download finishing,
 //! a build writing files, another file manager).
 //!
-//! One `notify` watcher serves every panel; its callback runs on notify's own
-//! thread and only forwards the changed paths. A foreground task maps them to
-//! watched directories, waits for the burst to settle and emits one
-//! [`WatchEvent::Changed`] the workspace turns into panel refreshes.
+//! One `notify` watcher serves every panel. Its callback runs on notify's own
+//! thread: it maps the changed paths to watched directories and collects
+//! them, so a copy writing a big file (an event per chunk) costs the UI
+//! thread nothing. Only the first change of a burst wakes a foreground task,
+//! which waits for the burst to settle and emits one [`WatchEvent::Changed`]
+//! the workspace turns into panel refreshes.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -14,7 +16,6 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use futures::future::{Either, select};
 use gpui_kit::*;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 
@@ -31,10 +32,66 @@ pub enum WatchEvent {
     Changed(Vec<Location>),
 }
 
-struct Inner {
-    watcher: Mutex<Option<RecommendedWatcher>>,
+/// What notify's thread and the UI share.
+#[derive(Default)]
+struct Shared {
     /// Watched directories and how many panels want each.
     counts: Mutex<HashMap<PathBuf, usize>>,
+    /// Changes not yet handed to the panels.
+    pending: Mutex<Pending>,
+}
+
+#[derive(Default)]
+struct Pending {
+    dirs: HashSet<PathBuf>,
+    /// When the last change came in.
+    last: Option<Instant>,
+}
+
+impl Shared {
+    /// The watched directory a changed path belongs to: its parent for an
+    /// entry, the directory itself when that is what changed.
+    fn watched_dir(&self, path: &Path) -> Option<PathBuf> {
+        let counts = self.counts.lock().ok()?;
+        if let Some(parent) = path.parent()
+            && counts.contains_key(parent)
+        {
+            return Some(parent.to_path_buf());
+        }
+        counts.contains_key(path).then(|| path.to_path_buf())
+    }
+
+    /// Note the changed paths; true when they start a burst (nothing was
+    /// pending), which is when the foreground task has to be woken.
+    fn collect(&self, paths: &[PathBuf]) -> bool {
+        let dirs: Vec<PathBuf> = paths.iter().filter_map(|p| self.watched_dir(p)).collect();
+        if dirs.is_empty() {
+            return false;
+        }
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        let starts = pending.dirs.is_empty();
+        pending.dirs.extend(dirs);
+        pending.last = Some(Instant::now());
+        starts
+    }
+
+    fn last_change(&self) -> Option<Instant> {
+        self.pending.lock().ok().and_then(|p| p.last)
+    }
+
+    fn take(&self) -> Vec<PathBuf> {
+        self.pending
+            .lock()
+            .map(|mut p| p.dirs.drain().collect())
+            .unwrap_or_default()
+    }
+}
+
+struct Inner {
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    shared: Arc<Shared>,
 }
 
 /// A cheap handle panels keep: adds and removes directories from the watch.
@@ -42,18 +99,22 @@ struct Inner {
 pub struct Handle(Arc<Inner>);
 
 impl Handle {
-    fn new(tx: UnboundedSender<Vec<PathBuf>>) -> Self {
+    fn new(wake: UnboundedSender<()>) -> Self {
+        let shared = Arc::new(Shared::default());
         let watcher = RecommendedWatcher::new(
-            move |result: notify::Result<notify::Event>| match result {
-                Ok(event) => {
-                    if matches!(event.kind, EventKind::Access(_) | EventKind::Other) {
-                        return;
+            {
+                let shared = shared.clone();
+                move |result: notify::Result<notify::Event>| match result {
+                    Ok(event) => {
+                        if matches!(event.kind, EventKind::Access(_) | EventKind::Other) {
+                            return;
+                        }
+                        if shared.collect(&event.paths) {
+                            wake.unbounded_send(()).ok();
+                        }
                     }
-                    if !event.paths.is_empty() {
-                        tx.unbounded_send(event.paths).ok();
-                    }
+                    Err(err) => log::warn!("watch: {err}"),
                 }
-                Err(err) => log::warn!("watch: {err}"),
             },
             notify::Config::default(),
         );
@@ -66,19 +127,26 @@ impl Handle {
         };
         Self(Arc::new(Inner {
             watcher: Mutex::new(watcher),
-            counts: Mutex::new(HashMap::new()),
+            shared,
         }))
     }
 
     /// Start watching `dir` (non-recursively) for one more panel.
     pub fn watch(&self, dir: &Path) {
-        let Ok(mut counts) = self.0.counts.lock() else {
+        // The watcher lock orders watch and unwatch; the counts lock is not
+        // held while notify works, as notify's thread takes it for events.
+        let Ok(mut watcher) = self.0.watcher.lock() else {
             return;
         };
-        let count = counts.entry(dir.to_path_buf()).or_insert(0);
-        *count += 1;
-        if *count == 1
-            && let Ok(mut watcher) = self.0.watcher.lock()
+        let first = {
+            let Ok(mut counts) = self.0.shared.counts.lock() else {
+                return;
+            };
+            let count = counts.entry(dir.to_path_buf()).or_insert(0);
+            *count += 1;
+            *count == 1
+        };
+        if first
             && let Some(watcher) = watcher.as_mut()
             && let Err(err) = watcher.watch(dir, RecursiveMode::NonRecursive)
         {
@@ -88,33 +156,22 @@ impl Handle {
 
     /// One panel fewer shows `dir`; the watch goes once nobody does.
     pub fn unwatch(&self, dir: &Path) {
-        let Ok(mut counts) = self.0.counts.lock() else {
+        let Ok(mut watcher) = self.0.watcher.lock() else {
             return;
         };
-        let Some(count) = counts.get_mut(dir) else {
-            return;
+        let last = {
+            let Ok(mut counts) = self.0.shared.counts.lock() else {
+                return;
+            };
+            let Some(count) = counts.get_mut(dir) else {
+                return;
+            };
+            *count -= 1;
+            *count == 0 && counts.remove(dir).is_some()
         };
-        *count -= 1;
-        if *count == 0 {
-            counts.remove(dir);
-            if let Ok(mut watcher) = self.0.watcher.lock()
-                && let Some(watcher) = watcher.as_mut()
-            {
-                let _ = watcher.unwatch(dir);
-            }
+        if last && let Some(watcher) = watcher.as_mut() {
+            let _ = watcher.unwatch(dir);
         }
-    }
-
-    /// The watched directory a changed path belongs to: its parent for an
-    /// entry, the directory itself when that is what changed.
-    fn watched_dir(&self, path: &Path) -> Option<PathBuf> {
-        let counts = self.0.counts.lock().ok()?;
-        if let Some(parent) = path.parent()
-            && counts.contains_key(parent)
-        {
-            return Some(parent.to_path_buf());
-        }
-        counts.contains_key(path).then(|| path.to_path_buf())
     }
 }
 
@@ -128,12 +185,12 @@ struct Global_(Entity<DirWatcher>);
 impl Global for Global_ {}
 
 pub fn init(cx: &mut App) -> Entity<DirWatcher> {
-    let (tx, rx) = unbounded();
-    let handle = Handle::new(tx);
+    let (wake, woken) = unbounded();
+    let handle = Handle::new(wake);
     let watcher = cx.new(|cx| {
         cx.spawn({
-            let handle = handle.clone();
-            async move |this, cx| pump(this, handle, rx, cx).await
+            let shared = handle.0.shared.clone();
+            async move |this, cx| pump(this, shared, woken, cx).await
         })
         .detach();
         DirWatcher { handle }
@@ -151,38 +208,31 @@ pub fn handle(cx: &App) -> Handle {
     watcher(cx).read(cx).handle.clone()
 }
 
-/// Collect changed directories until the burst settles, then emit them.
+/// Wait for each burst of changes to settle, then emit its directories.
 async fn pump(
     this: WeakEntity<DirWatcher>,
-    handle: Handle,
-    mut rx: UnboundedReceiver<Vec<PathBuf>>,
+    shared: Arc<Shared>,
+    mut woken: UnboundedReceiver<()>,
     cx: &mut AsyncApp,
 ) {
-    let mut pending: HashSet<PathBuf> = HashSet::new();
     loop {
-        let Some(paths) = rx.next().await else {
+        if woken.next().await.is_none() {
             return;
-        };
-        let started = Instant::now();
-        collect(&handle, &mut pending, paths);
-        loop {
-            let remaining = MAX_WAIT.saturating_sub(started.elapsed()).min(SETTLE);
-            let timer = cx.background_executor().timer(remaining);
-            match select(std::pin::pin!(rx.next()), std::pin::pin!(timer)).await {
-                Either::Left((Some(paths), _)) => {
-                    collect(&handle, &mut pending, paths);
-                    if started.elapsed() >= MAX_WAIT {
-                        break;
-                    }
-                }
-                Either::Left((None, _)) => return,
-                Either::Right(_) => break,
-            }
         }
-        if pending.is_empty() {
+        let started = Instant::now();
+        loop {
+            let last = shared.last_change().unwrap_or(started);
+            let due = (last + SETTLE).min(started + MAX_WAIT);
+            let now = Instant::now();
+            if now >= due {
+                break;
+            }
+            cx.background_executor().timer(due - now).await;
+        }
+        let dirs: Vec<Location> = shared.take().into_iter().map(Location::Local).collect();
+        if dirs.is_empty() {
             continue;
         }
-        let dirs: Vec<Location> = pending.drain().map(Location::Local).collect();
         if this
             .update(cx, |_, cx| cx.emit(WatchEvent::Changed(dirs)))
             .is_err()
@@ -192,10 +242,23 @@ async fn pump(
     }
 }
 
-fn collect(handle: &Handle, pending: &mut HashSet<PathBuf>, paths: Vec<PathBuf>) {
-    for path in paths {
-        if let Some(dir) = handle.watched_dir(&path) {
-            pending.insert(dir);
-        }
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: GPUI's `test` attribute would shadow the plain one.
+    use super::Shared;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_burst_wakes_once() {
+        let shared = Shared::default();
+        let dir = PathBuf::from("/watched");
+        shared.counts.lock().unwrap().insert(dir.clone(), 1);
+        // Not watched: nothing to wake for.
+        assert!(!shared.collect(&[PathBuf::from("/elsewhere/a")]));
+        assert!(shared.collect(&[dir.join("a")]));
+        assert!(!shared.collect(&[dir.join("b"), dir.clone()]));
+        assert_eq!(shared.take(), vec![dir.clone()]);
+        // Handed over: the next change starts a new burst.
+        assert!(shared.collect(&[dir.join("c")]));
     }
 }

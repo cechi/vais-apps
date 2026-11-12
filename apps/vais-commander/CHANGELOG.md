@@ -16,6 +16,12 @@ What changed in each release of VAIS Commander, newest first.
 
 - The full view's sideways scrollbar no longer covers the last entry: the
   list scrolls far enough to show it above the scrollbar.
+- The window no longer freezes during and after operations on many files
+  (copying 20,000 marked files froze it for some 16 seconds) or slows down
+  while a panel shows a network share: the free space in the status bar,
+  the checks before a copy or move and the handling of file changes no
+  longer run on the UI thread, and thousands of marked entries no longer
+  slow every frame.
 
 ## 0.5.1 - 2026-11-11
 

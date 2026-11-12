@@ -2,7 +2,7 @@
 //! the file operations between the active and the target panel.
 
 use crate::vfs::{Location, backend_for};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -617,42 +617,74 @@ impl GridView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let reject =
-            |this: &mut Self, message: String, window: &mut Window, cx: &mut Context<Self>| {
-                this.notify(Notification::error(message.clone()), window, cx);
-                if let Some(cb) = &on_outcome {
-                    cb(Outcome::Rejected(message), window, cx);
-                }
-            };
+        fn reject(
+            this: &mut GridView,
+            message: String,
+            on_outcome: &Option<OnOutcome>,
+            window: &mut Window,
+            cx: &mut Context<GridView>,
+        ) {
+            this.notify(Notification::error(message.clone()), window, cx);
+            if let Some(cb) = on_outcome {
+                cb(Outcome::Rejected(message), window, cx);
+            }
+        }
         if let Some(reason) = read_only_reason(&dest) {
-            reject(self, reason.to_string(), window, cx);
+            reject(self, reason.to_string(), &on_outcome, window, cx);
             return;
         }
         if kind == OpKind::Move && sources.iter().any(Location::is_archive) {
             reject(
                 self,
                 t!("Cannot move out of an archive: copy instead").to_string(),
+                &on_outcome,
                 window,
                 cx,
             );
             return;
         }
-        let is_dir = backend_for(&dest)
-            .and_then(|b| b.stat(&dest))
-            .is_ok_and(|m| m.is_dir());
-        if !is_dir {
-            reject(
-                self,
-                t!("{path} is not a directory", path = dest.display()),
-                window,
-                cx,
-            );
-            return;
-        }
-        let dest = canonical(dest);
         // Items of the trash come out under their original names.
         let names = self.trash_names(&sources, cx);
-        let conflicts = ops::conflicts(&sources, &dest, &names);
+        // The checks ask the destination's disk about every source: off the
+        // UI thread, as a network share or a server answers slowly.
+        let check = cx.background_spawn(async move {
+            let is_dir = backend_for(&dest)
+                .and_then(|b| b.stat(&dest))
+                .is_ok_and(|m| m.is_dir());
+            if !is_dir {
+                return Err(t!("{path} is not a directory", path = dest.display()).to_string());
+            }
+            let dest = canonical(dest);
+            let conflicts = ops::conflicts(&sources, &dest, &names);
+            Ok((sources, dest, names, conflicts))
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let checked = check.await;
+            this.update_in(cx, |this, window, cx| match checked {
+                Ok((sources, dest, names, conflicts)) => this.offer_transfer(
+                    kind, sources, dest, names, conflicts, on_outcome, window, cx,
+                ),
+                Err(message) => reject(this, message, &on_outcome, window, cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Run a checked transfer, or ask first what to do with the `conflicts`
+    /// (sources whose names `dest` already has).
+    #[allow(clippy::too_many_arguments)]
+    fn offer_transfer(
+        &mut self,
+        kind: OpKind,
+        sources: Vec<Location>,
+        dest: Location,
+        names: HashMap<Location, String>,
+        conflicts: Vec<Location>,
+        on_outcome: Option<OnOutcome>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let request = Request {
             kind,
             sources,
@@ -1016,6 +1048,7 @@ impl GridView {
     /// The original names of the trash items among `sources`, as the panels
     /// list them.
     fn trash_names(&self, sources: &[Location], cx: &App) -> HashMap<Location, String> {
+        let sources: HashSet<&Location> = sources.iter().collect();
         let mut names = HashMap::new();
         for panel in &self.panels {
             for entry in &panel.read(cx).state.entries {

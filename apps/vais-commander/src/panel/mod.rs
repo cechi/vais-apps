@@ -92,10 +92,15 @@ struct Marquee {
     base: std::collections::BTreeSet<usize>,
 }
 
-/// Entries being dragged with the mouse.
-#[derive(Clone, Debug)]
+/// Entries being dragged with the mouse: the cursor entry, or the marked
+/// entries of the panel dragged from. Those are read when dropped, not for
+/// each marked row drawn (thousands of marks made every frame slow).
+#[derive(Clone)]
 pub struct DragEntries {
-    pub paths: Vec<Location>,
+    source: WeakEntity<FilePanel>,
+    /// The entry dragged when it is not marked.
+    single: Option<Location>,
+    label: String,
 }
 
 /// The little label that follows the mouse while dragging.
@@ -161,6 +166,10 @@ pub struct FilePanel {
     searching: bool,
     generation: u64,
     load_task: Option<Task<()>>,
+    /// Free space on the disk of a local directory, as last measured.
+    free_space: Option<(PathBuf, u64)>,
+    /// The measurement under way and its directory.
+    free_task: Option<(PathBuf, Task<()>)>,
     /// The network share Windows' credential dialog was shown for since the
     /// user last navigated: a reload that is refused again shows the error
     /// instead of asking once more.
@@ -314,6 +323,8 @@ impl FilePanel {
             searching: false,
             generation: 0,
             load_task: None,
+            free_space: None,
+            free_task: None,
             login_asked: None,
             #[cfg(windows)]
             hwnd: None,
@@ -376,6 +387,21 @@ impl FilePanel {
             .into_iter()
             .map(|e| e.location.clone())
             .collect()
+    }
+
+    /// What a drop of `drag` onto this panel moves or copies.
+    fn dragged_paths(&self, drag: &DragEntries, cx: &Context<Self>) -> Vec<Location> {
+        if let Some(single) = &drag.single {
+            return vec![single.clone()];
+        }
+        // Dropped onto the panel it came from: that one is being updated.
+        if drag.source.entity_id() == cx.entity_id() {
+            return self.selected_paths();
+        }
+        drag.source
+            .upgrade()
+            .map(|panel| panel.read(cx).selected_paths())
+            .unwrap_or_default()
     }
 
     /// Path of the entry under the cursor, unless it is `..`.
@@ -699,6 +725,7 @@ impl FilePanel {
             }
         }
         self.state.loading = true;
+        self.measure_free_space(&path, cx);
         let opts = ReadOptions {
             show_hidden: self.state.show_hidden,
             sort: self.state.sort,
@@ -744,6 +771,36 @@ impl FilePanel {
             .ok();
         }));
         cx.notify();
+    }
+
+    /// Measure the free space on `path`'s disk in the background, beside the
+    /// listing: `statvfs` on a network share waits for the server, which a
+    /// render must never do. One measurement per directory at a time, so a
+    /// slow server does not pile them up.
+    fn measure_free_space(&mut self, path: &Location, cx: &mut Context<Self>) {
+        let Some(dir) = path.as_local().map(Path::to_path_buf) else {
+            return;
+        };
+        if self.free_task.as_ref().is_some_and(|(d, _)| *d == dir) {
+            return;
+        }
+        let measure = cx.background_spawn({
+            let dir = dir.clone();
+            async move { platform::free_space(&dir) }
+        });
+        let task = cx.spawn({
+            let dir = dir.clone();
+            async move |this, cx| {
+                let free = measure.await;
+                this.update(cx, |panel, cx| {
+                    panel.free_task = None;
+                    panel.free_space = free.map(|bytes| (dir, bytes));
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
+        self.free_task = Some((dir, task));
     }
 
     /// Ask for credentials to the network share `target` in Windows' own
@@ -2383,11 +2440,26 @@ impl FilePanel {
         c: &Colors,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let drag_paths: Vec<Location> = if look.is_marked {
-            self.selected_paths()
-        } else {
-            vec![entry.location.clone()]
-        };
+        let drag = (look.is_marked || look.is_cursor).then(|| {
+            let marked = self.state.marked.len();
+            let single = (!look.is_marked).then(|| entry.location.clone());
+            let name = |loc: &Location| loc.file_name().unwrap_or_else(|| loc.display());
+            let label = match (&single, marked) {
+                (Some(single), _) => name(single),
+                (None, 1) => self
+                    .state
+                    .selected_entries()
+                    .first()
+                    .map(|e| name(&e.location))
+                    .unwrap_or_default(),
+                (None, n) => tn!("{n} item", "{n} items", n),
+            };
+            DragEntries {
+                source: cx.weak_entity(),
+                single,
+                label,
+            }
+        });
         let drop_bg = c.primary.alpha(0.35);
         let hover_bg = c.list_hover;
         // The cursor and marked entries keep their own colour under the mouse.
@@ -2428,13 +2500,9 @@ impl FilePanel {
         )
         // Dragging a marked entry drags all marked entries, the cursor entry
         // drags itself; others bubble to the body and start a rubber band.
-        .when(look.is_marked || look.is_cursor, |d| {
-            let drag = DragEntries { paths: drag_paths };
+        .when_some(drag, |d, drag| {
             d.on_drag(drag, |drag, _offset, _window, cx| {
-                let label = match drag.paths.as_slice() {
-                    [single] => single.file_name().unwrap_or_else(|| single.display()),
-                    many => tn!("{n} item", "{n} items", many.len()),
-                };
+                let label = drag.label.clone();
                 cx.new(|_| DragPreview { label })
             })
         })
@@ -2442,10 +2510,10 @@ impl FilePanel {
         .when(entry.is_dir(), |d| {
             let dest = entry.location.clone();
             d.drag_over::<DragEntries>(move |style, _, _, _| style.bg(drop_bg))
-                .on_drop(cx.listener(move |_this, drag: &DragEntries, _window, cx| {
+                .on_drop(cx.listener(move |this, drag: &DragEntries, _window, cx| {
                     cx.stop_propagation();
                     cx.emit(PanelEvent::Dropped {
-                        paths: drag.paths.clone(),
+                        paths: this.dragged_paths(drag, cx),
                         dest: dest.clone(),
                     });
                 }))
@@ -2943,7 +3011,11 @@ impl Render for FilePanel {
                 total = total
             )
         } else {
-            let free = self.state.path.as_local().and_then(platform::free_space);
+            let free = self
+                .free_space
+                .as_ref()
+                .filter(|(dir, _)| self.state.path.as_local() == Some(dir.as_path()))
+                .map(|(_, bytes)| *bytes);
             let marked = self.state.marked.len();
             let count = self.state.item_count();
             let size = human_size(self.state.marked_bytes());
@@ -3307,7 +3379,7 @@ impl Render for FilePanel {
                                 })
                                 .on_drop(cx.listener(|this, drag: &DragEntries, _window, cx| {
                                     cx.emit(PanelEvent::Dropped {
-                                        paths: drag.paths.clone(),
+                                        paths: this.dragged_paths(drag, cx),
                                         dest: this.state.path.clone(),
                                     });
                                 }))

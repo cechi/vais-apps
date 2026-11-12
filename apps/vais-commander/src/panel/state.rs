@@ -1,7 +1,7 @@
 //! Pure, testable state of one file panel: entries, cursor, marks, history.
 
 use crate::vfs::Location;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::fs::filter::Matcher;
 use crate::fs::{Entry, Sort};
@@ -308,14 +308,15 @@ impl PanelState {
     /// survive a refresh of the same directory, matched by path.
     fn apply_view(&mut self, path: Location, select: Option<&Location>) {
         let same_dir = path == self.path;
-        let marked_paths: Vec<Location> = if same_dir {
+        // A set: thousands of marks meet thousands of entries.
+        let marked_paths: HashSet<Location> = if same_dir {
             self.marked
                 .iter()
                 .filter_map(|&i| self.entries.get(i))
                 .map(|e| e.location.clone())
                 .collect()
         } else {
-            Vec::new()
+            HashSet::new()
         };
         if !same_dir {
             self.dir_sizes.clear();
