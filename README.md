@@ -17,15 +17,27 @@ developed and tested; CI builds and tests them on macOS and Windows as well.
 
 ## The apps
 
-<!-- One card per app. With a second app: two cards per row, td width="50%" and the
-     screenshots width="100%". -->
+### <img src="apps/vais-commander/assets/vais-commander.svg" width="28" height="28" alt=""> VAIS Commander
+
+A keyboard-driven file manager in the spirit of Total and Midnight Commander: a configurable grid
+of panels in tabs, SFTP and FTP, archives, thumbnails, a command palette and coding agents that
+work with the panels.
+
+[README](apps/vais-commander/README.md) · [Download](https://github.com/cechi/vais-apps/releases/latest) · [What's new](apps/vais-commander/CHANGELOG.md)
+
+<!-- scripts/demo/screenshots.sh in apps/vais-commander takes these again. -->
 <table>
 <tr>
-<td width="640" valign="top">
-<a href="apps/vais-commander/README.md"><img src="apps/vais-commander/docs/screenshot.png" alt="VAIS Commander: the places sidebar on the left, a demo project with two marked files in the left panel and its photos as thumbnails in the right panel" width="640"></a>
-<p><img src="apps/vais-commander/assets/vais-commander.svg" width="20" height="20" alt=""> <b>VAIS Commander</b>: a keyboard-driven file manager in the spirit of Total and Midnight Commander, with a configurable grid of panels, tabs, SFTP and FTP, archives, thumbnails and a command palette.</p>
-<p><a href="apps/vais-commander/README.md">README</a> · <a href="https://github.com/cechi/vais-apps/releases/latest">Download</a> · <a href="apps/vais-commander/CHANGELOG.md">What's new</a></p>
-</td>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/panels.png"><img src="apps/vais-commander/docs/screenshots/panels.png" alt="VAIS Commander with the places sidebar, a demo project with two marked files on the left and its photos as thumbnails on the right" width="100%"></a><p align="center"><sub><b>Panels.</b> Marks, sorting, columns and thumbnails; the places sidebar with favorites, volumes, trash and recent folders.</sub></p></td>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/layout-2x2.png"><img src="apps/vais-commander/docs/screenshots/layout-2x2.png" alt="A 2x2 grid of panels: source files, downloads sorted by size, music in the brief view and photos with a preview of the one under the cursor" width="100%"></a><p align="center"><sub><b>Layouts.</b> 1x2, 2x1, 2x2 up to 3x3 (Alt+1…9), each tab with its own grid; previews beside or under the list.</sub></p></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/operations.png"><img src="apps/vais-commander/docs/screenshots/operations.png" alt="Two panels stacked in a 2x1 layout and the operations panel at the bottom copying a 3.9 GiB DVD image" width="100%"></a><p align="center"><sub><b>Operations.</b> Copies, moves and deletes run in the background, with speed and progress in the operations panel (Ctrl+J).</sub></p></td>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/agents.png"><img src="apps/vais-commander/docs/screenshots/agents.png" alt="Claude Code in the Agents panel at the right, which opened the photos in the right panel and added up their sizes" width="100%"></a><p align="center"><sub><b>Agents.</b> Claude Code, OpenCode or a shell in the Agents panel (Ctrl+Shift+B); the agents drive the panels over MCP.</sub></p></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/viewer.png"><img src="apps/vais-commander/docs/screenshots/viewer.png" alt="The viewer on a Rust source file with syntax highlighting and line numbers" width="100%"></a><p align="center"><sub><b>Viewer and editor.</b> F3 and F4 open files in a tab, with syntax highlighting.</sub></p></td>
+<td width="50%" valign="top"><a href="apps/vais-commander/docs/screenshots/palette.png"><img src="apps/vais-commander/docs/screenshots/palette.png" alt="The command palette filtered to the layout commands, with their shortcuts" width="100%"></a><p align="center"><sub><b>Command palette.</b> Every command with its shortcut (Ctrl+Shift+P).</sub></p></td>
 </tr>
 </table>
 
