@@ -22,6 +22,7 @@ What changed in each release of VAIS Commander, newest first.
   the checks before a copy or move and the handling of file changes no
   longer run on the UI thread, and thousands of marked entries no longer
   slow every frame.
+- The context menu of a marked entry is no longer in bold.
 
 ## 0.5.1 - 2026-11-11
 

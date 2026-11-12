@@ -2430,7 +2430,9 @@ impl FilePanel {
 
     /// Mouse behaviour shared by rows and cells: click / Shift / Ctrl
     /// selection, right-click, dragging marked entries, dropping onto
-    /// directories, and the entry's context menu.
+    /// directories, and the entry's context menu. That menu inherits the
+    /// text style of `el`, so the bold of marked entries goes on their
+    /// texts, not on `el`.
     fn wire_entry(
         &self,
         el: Stateful<Div>,
@@ -2611,6 +2613,7 @@ impl FilePanel {
                             .text_xs()
                             .text_center()
                             .truncate()
+                            .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
                             .child(name),
                     )
             }
@@ -2623,7 +2626,14 @@ impl FilePanel {
                 .gap_1()
                 .text_sm()
                 .child(div().size_4().flex_none().child(icon))
-                .child(div().flex_1().min_w_0().truncate().child(name)),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
+                        .child(name),
+                ),
         };
         let cell = cell
             .bg(look.bg)
@@ -2631,8 +2641,7 @@ impl FilePanel {
             .whitespace_nowrap()
             .border_1()
             .border_color(look.outline)
-            .rounded_sm()
-            .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD));
+            .rounded_sm();
         self.wire_entry(cell, ix, entry, &look, c, cx)
     }
 
@@ -2707,9 +2716,9 @@ impl FilePanel {
             .whitespace_nowrap()
             .border_1()
             .border_color(look.outline)
-            .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
             .child(
                 name_width(&self.columns.widths, h_flex().h_full().gap_2())
+                    .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
                     .child(div().flex_none().w(px(3.)).h_full().bg(bar))
                     .child(div().flex_none().w(rems(entry.depth as f32)))
                     .child(chevron)
@@ -2723,6 +2732,7 @@ impl FilePanel {
                     .flex_none()
                     .truncate()
                     .when(column.right_aligned(), |d| d.text_right())
+                    .when(look.is_marked, |d| d.font_weight(FontWeight::BOLD))
                     .text_color(color)
                     .child(text)
             }));
