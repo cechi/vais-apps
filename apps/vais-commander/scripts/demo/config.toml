@@ -1,5 +1,6 @@
 version = 2
 theme = "Cechi Dark"
+language = "en"
 ui_scale = 1.15
 sidebar_open = true
 command_line = true

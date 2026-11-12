@@ -4,52 +4,12 @@
 # ImageMagick; run it after `cargo build --release`.
 # The nested compositor opens as a window of your session; do not touch the
 # keyboard while it runs (about 40 s).
-set -eu
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-WORKSPACE=$(cd "$ROOT/../.." && pwd)
-WORK=${DEMO_WORK:-$(mktemp -d)}
-DATA=/tmp/vais-demo
-mkdir -p "$WORK/frames" "$WORK/xdg/vais-commander" "$WORK/xdg-cache"
-
-# ----- demo data: a small project with photos and an archive -----------------
-rm -rf "$DATA"; mkdir -p "$DATA/docs" "$DATA/src/ui" "$DATA/photos" "$DATA/out"
-printf 'fn main() {\n    println!("hello from VAIS");\n}\n' > "$DATA/src/main.rs"
-printf 'pub fn render() {}\n' > "$DATA/src/ui/panel.rs"
-printf '# Project\n\nA small demo project.\n' > "$DATA/README.md"
-printf 'notes\n' > "$DATA/notes.txt"
-printf 'release checklist\n' > "$DATA/docs/release.md"
-printf 'design notes\n' > "$DATA/docs/design.md"
-for i in 1 2 3 4 5 6; do
-    magick -size 640x480 gradient:"hsl($((i*55)),80%,45%)-hsl($((i*55+40)),90%,70%)" \
-        -swirl $((i*30)) "$DATA/photos/photo-$i.jpg"
-done
-(cd "$DATA" && zip -qr project.zip src docs README.md)
-
-cp "$ROOT/scripts/demo/config.toml" "$WORK/xdg/vais-commander/config.toml"
-
-# ----- nested compositor and the app ------------------------------------------
-niri -c "$ROOT/scripts/demo/niri.kdl" > "$WORK/niri.log" 2>&1 &
-NP=$!
-sleep 2
-WD=$(grep -o 'wayland-[0-9]*' "$WORK/niri.log" | head -1)
-SOCK=$(grep -o '/run/user/[0-9]*/niri\.wayland-[0-9]*\.[0-9]*\.sock' "$WORK/niri.log" | head -1)
-WAYLAND_DISPLAY=$WD XDG_CONFIG_HOME=$WORK/xdg XDG_CACHE_HOME=$WORK/xdg-cache \
-    "$WORKSPACE/target/release/vais-commander" > "$WORK/app.log" 2>&1 &
-AP=$!
-sleep 5
-stop() { kill "$AP" 2>/dev/null || true; kill "$NP" 2>/dev/null || true; }
-# Guards: keys go only to our window, running on the demo config.
-NIRI_SOCKET=$SOCK niri msg --json focused-window | grep -q '"title":"VAIS Commander' || { echo "focus guard failed"; stop; exit 1; }
-grep -q "ignoring invalid config" "$WORK/app.log" && { echo "config guard failed"; stop; exit 1; }
-WIN=$(NIRI_SOCKET=$SOCK niri msg --json windows)
-echo "$WIN" | grep -q '"window_size":\[1280,800\]' || { echo "window guard failed: $WIN"; stop; exit 1; }
-POS=$(echo "$WIN" | python3 -c 'import json,sys; w=[w for w in json.load(sys.stdin) if w["title"].startswith("VAIS")][0]; x,y=w["layout"]["tile_pos_in_workspace_view"]; print(f"{int(x)},{int(y)}")')
-export WAYLAND_DISPLAY=$WD
+. "$(dirname "$0")/common.sh"
+mkdir -p "$WORK/frames"
 
 # ----- frames at ~8 fps while the scenario plays ------------------------------
 ( while true; do grim -g "$POS 1280x800" "$WORK/frames/f_$(date +%s%3N).png"; sleep 0.07; done ) &
 GP=$!
-k() { wtype -P "$1" -p "$1"; }
 sleep 1.5
 wtype -d 120 're'; sleep 1.6; k Escape; sleep 0.8                       # quick search
 k Down; sleep 0.25; k Down; sleep 0.25; k Down; sleep 0.4; k Return; sleep 0.9
