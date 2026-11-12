@@ -12,6 +12,11 @@ What changed in each release of VAIS Commander, newest first.
   them for good, *Empty trash…* clears it all; copying out keeps the
   original names.
 
+### Fixed
+
+- The full view's sideways scrollbar no longer covers the last entry: the
+  list scrolls far enough to show it above the scrollbar.
+
 ## 0.5.1 - 2026-11-11
 
 ### Fixed

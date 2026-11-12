@@ -2972,6 +2972,11 @@ impl Render for FilePanel {
         let show_status_bar = !in_terminal
             && (crate::settings::get(cx).panel_status_bar || self.state.error.is_some());
 
+        // The sideways scrollbar lies over the bottom of the list: room under
+        // the last row so it can scroll out from beneath it (as wide as the
+        // last frame's list was; a check behind the list catches a change).
+        let scrolls_sideways = self.view == ViewMode::Full
+            && self.scroll.0.borrow().base_handle.max_offset().x > Pixels::ZERO;
         let row_colors = colors.clone();
         let list = uniform_list(
             ("files", self.index),
@@ -2987,6 +2992,7 @@ impl Render for FilePanel {
         .when(self.view == ViewMode::Full, |list| {
             list.with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
         })
+        .when(scrolls_sideways, |list| list.pb(Scrollbar::width()))
         .flex_1()
         .min_h_0()
         .w_full();
@@ -3003,7 +3009,10 @@ impl Render for FilePanel {
             let panel = cx.entity_id();
             canvas(
                 move |_, window, _| {
-                    if scroll.0.borrow().base_handle.offset().x != header_offset_x {
+                    let handle = &scroll.0.borrow().base_handle;
+                    if handle.offset().x != header_offset_x
+                        || (handle.max_offset().x > Pixels::ZERO) != scrolls_sideways
+                    {
                         window.on_next_frame(move |_, cx| cx.notify(panel));
                     }
                 },
